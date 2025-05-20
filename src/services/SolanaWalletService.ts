@@ -11,8 +11,8 @@ class SolanaWalletService {
   private apiKey: string;
   
   constructor() {
-    this.rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.gateway.tatum.io/';
-    this.apiKey = process.env.NEXT_PUBLIC_TATUM_API_KEY || 't-682a1c08650ecaebde72d2aa-264faa21e495426f9a2eb26f';
+    this.rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3 ';
+    this.apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '6CqgIf5nqVF9rWeernULokib0PAr6yh3';
   }
   
   /**

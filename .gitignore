@@ -1,0 +1,94 @@
+# Dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+.pnpm-store/
+
+# Testing
+/coverage
+/.nyc_output
+/cypress/screenshots
+/cypress/videos
+
+# Next.js
+/.next/
+/out/
+.next/
+next-env.d.ts
+next.config.js.bak
+
+# Production
+/build
+/dist
+
+# Misc
+.DS_Store
+*.pem
+Thumbs.db
+.env
+.env.*
+!.env.example
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+logs
+*.log
+
+# Vercel
+.vercel
+.now
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE / Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+.DS_Store
+.history
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Local development
+.eslintcache
+.stylelintcache
+.cache/
+tsconfig.tsbuildinfo
+
+# Solana and wallet-related files
+wallet-seed.json
+*.keypair
+*.key
+wallet.json
+id.json
+solana-wallet.*
+
+# Artifacts
+/artifacts

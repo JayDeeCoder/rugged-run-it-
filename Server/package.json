@@ -1,0 +1,24 @@
+{
+    "name": "rugged-chat-server",
+    "version": "1.0.0",
+    "description": "WebSocket chat server for Rugged.fun",
+    "main": "chatServer.ts",
+    "scripts": {
+      "start": "ts-node chatServer.ts",
+      "build": "tsc"
+    },
+    "dependencies": {
+      "ws": "^8.13.0",
+      "http": "^0.0.1-security",
+      "uuid": "^9.0.0"
+    },
+    "devDependencies": {
+      "typescript": "^5.0.4",
+      "ts-node": "^10.9.1",
+      "@types/ws": "^8.5.5",
+      "@types/uuid": "^9.0.2"
+    },
+    "engines": {
+      "node": ">=16.0.0"
+    }
+  }

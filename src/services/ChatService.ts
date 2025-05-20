@@ -39,7 +39,8 @@ class ChatService {
   private isConnecting = false;
   
   // Use your actual WebSocket server URL
-  private serverUrl = process.env.NEXT_PUBLIC_WEBSOCKET_URL || 'wss://api.rugged.fun/chat';
+  // Line 28 (approximately)
+private serverUrl = process.env.NEXT_PUBLIC_WEBSOCKET_URL || 'wss://ruggedfun-production.up.railway.app';
   
   constructor() {
     // Initialize connection when service is created

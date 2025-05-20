@@ -5,20 +5,32 @@ import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
 import { ArrowDownToLine, Wallet, Check, Loader, X, Copy, ExternalLink } from 'lucide-react';
+import { TokenType } from '../../types/tokens';
 
 interface WithdrawModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  currentToken: TokenType; // Add this prop
+  balance: number; // Add this prop
 }
 
-const WithdrawModal: FC<WithdrawModalProps> = ({ isOpen, onClose, onSuccess }) => {
+const WithdrawModal: FC<WithdrawModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  onSuccess, 
+  currentToken, // Use the new prop
+  balance // Use the new prop 
+}) => {
   const [amount, setAmount] = useState<string>('');
   const [destinationAddress, setDestinationAddress] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<boolean>(false);
   const [addressError, setAddressError] = useState<string | null>(null);
+  
+  // Get token symbol based on currentToken
+  const tokenSymbol = currentToken;
   
   const { user } = usePrivy();
   const { currentUser } = useContext(UserContext);
@@ -72,9 +84,10 @@ const WithdrawModal: FC<WithdrawModalProps> = ({ isOpen, onClose, onSuccess }) =
   
   // Handle setting max amount
   const handleSetMaxAmount = () => {
-    if (currentUser?.balance) {
+    // Use balance prop instead of currentUser.balance
+    if (balance > 0) {
       // Set slightly less than max to account for network fees
-      const maxAmount = Math.max(0, currentUser.balance - 0.001);
+      const maxAmount = Math.max(0, balance - 0.001);
       setAmount(maxAmount.toFixed(6));
     }
   };
@@ -96,7 +109,8 @@ const WithdrawModal: FC<WithdrawModalProps> = ({ isOpen, onClose, onSuccess }) =
       
       const withdrawAmount = parseFloat(amount);
       
-      if (!currentUser?.balance || withdrawAmount > currentUser.balance) {
+      // Use balance prop instead of currentUser.balance
+      if (withdrawAmount > balance) {
         setError('Insufficient balance');
         return;
       }
@@ -132,11 +146,11 @@ const WithdrawModal: FC<WithdrawModalProps> = ({ isOpen, onClose, onSuccess }) =
         ref={modalRef} 
         className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
       >
-        {/* Header */}
+        {/* Header - now with dynamic token symbol */}
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white flex items-center">
             <ArrowDownToLine size={20} className="mr-2" />
-            Withdraw SOL
+            Withdraw {tokenSymbol}
           </h2>
           <button
             onClick={onClose}
@@ -156,7 +170,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({ isOpen, onClose, onSuccess }) =
               </div>
             </div>
             <h3 className="text-xl font-bold text-white mb-2">Withdrawal Successful</h3>
-            <p className="text-gray-400 mb-6">Your SOL has been sent to the specified address.</p>
+            <p className="text-gray-400 mb-6">Your {tokenSymbol} has been sent to the specified address.</p>
             <button
               onClick={onClose}
               className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md transition-colors w-full"
@@ -167,12 +181,12 @@ const WithdrawModal: FC<WithdrawModalProps> = ({ isOpen, onClose, onSuccess }) =
         ) : (
           /* Form State */
           <>
-            {/* Balance Display */}
+            {/* Balance Display - now with dynamic token symbol and using the balance prop */}
             <div className="bg-gray-800 p-4 rounded-md mb-6">
               <div className="flex justify-between items-center">
                 <span className="text-gray-400">Available Balance</span>
                 <span className="text-xl font-bold text-white">
-                  {currentUser?.balance?.toFixed(6) || '0.000000'} SOL
+                  {balance.toFixed(6)} {tokenSymbol}
                 </span>
               </div>
             </div>
@@ -234,7 +248,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({ isOpen, onClose, onSuccess }) =
               Double check the destination address. Withdrawals cannot be reversed!
             </div>
             
-            {/* Submit Button */}
+            {/* Submit Button - now with dynamic token symbol */}
             <button
               onClick={handleWithdraw}
               disabled={isLoading || !amount || !destinationAddress}
@@ -252,7 +266,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({ isOpen, onClose, onSuccess }) =
               ) : (
                 <>
                   <Wallet size={18} className="mr-2" />
-                  Withdraw SOL
+                  Withdraw {tokenSymbol}
                 </>
               )}
             </button>

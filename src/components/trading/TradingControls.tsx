@@ -666,6 +666,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         balance={currentToken === TokenType.SOL ? 
           (walletData.isConnected ? parseFloat(walletData.balance) : solBalance) : 
           ruggedBalance}
+          
       />
     </div>
   );

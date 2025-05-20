@@ -1,102 +1,98 @@
 // src/components/trading/DepositModal.tsx
-import { FC, useState, useRef } from 'react';
+import { FC, useState, useRef, useEffect } from 'react';
+import { usePrivy } from '@privy-io/react-auth';
+import { UserContext } from '../../context/UserContext';
+import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
-import { toast } from 'react-hot-toast';
-import { useWallet } from '@solana/wallet-adapter-react';
-import { useConnection } from '@solana/wallet-adapter-react';
-import { PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { useTokenContext, TokenType } from '../../context/TokenContext';
-import Button from '../common/Button';
+import { ArrowUpToLine, QrCode, Copy, X, Info, ExternalLink, RefreshCw, Check } from 'lucide-react';
+
+// Since we don't have QRCodeSVG imported yet, we'll need to add it
+// You'll need to install qrcode.react: npm install qrcode.react
+import { QRCodeSVG } from 'qrcode.react';
+
+// Define the TokenType enum if it doesn't exist yet
+export enum TokenType {
+  SOL = 'SOL',
+  RUGGED = 'RUGGED'
+}
 
 interface DepositModalProps {
   isOpen: boolean;
   onClose: () => void;
-  currentToken?: TokenType;
-  balance?: number;
+  currentToken: TokenType;
 }
 
 const DepositModal: FC<DepositModalProps> = ({ 
   isOpen, 
-  onClose, 
-  currentToken = TokenType.SOL,
-  balance = 0
+  onClose,
+  currentToken
 }) => {
-  const [amount, setAmount] = useState<string>('0.1');
-  const [token, setToken] = useState<TokenType>(currentToken);
+  const { user } = usePrivy();
+  const { currentUser } = useContext(UserContext);
+  const [isCopied, setIsCopied] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   
-  const { publicKey, connected, sendTransaction } = useWallet();
-  const { connection } = useConnection();
-  const { tokens, depositToken, isProcessingTransaction } = useTokenContext();
+  // Get embedded wallet address from user context
+  const walletAddress = currentUser?.walletAddress || '';
+  
+  // Use currentToken to display token-specific information
+  const tokenSymbol = currentToken;
   
   const modalRef = useRef<HTMLDivElement>(null);
   
+  // Reset states when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setIsCopied(false);
+    }
+  }, [isOpen]);
+  
+  // Handle clicks outside the modal
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
-    if (isOpen && !isProcessingTransaction) onClose();
+    if (isOpen) onClose();
   });
   
+  // Don't render if not open
   if (!isOpen) return null;
   
-  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    // Allow only numbers and up to 3 decimal places
-    if (/^(\d+)?(\.\d{0,3})?$/.test(value) || value === '') {
-      setAmount(value);
-    }
-  };
-  
-  const handleTokenChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setToken(e.target.value as TokenType);
-  };
-  
-  const getMaxAmount = () => {
-    if (!connected || !publicKey) return '0';
-    
-    const token = tokens.find(t => t.symbol === TokenType.SOL);
-    if (token) {
-      // Subtract a small amount for transaction fees
-      const maxAmount = Math.max(0, token.balance - 0.01);
-      return maxAmount.toFixed(3);
-    }
-    return '0';
-  };
-  
-  const handleMaxAmount = () => {
-    setAmount(getMaxAmount());
-  };
-  
-  const handleDeposit = async () => {
-    if (!connected || !publicKey) {
-      toast.error('Please connect your wallet first');
-      return;
-    }
-    
-    const amountValue = parseFloat(amount);
-    if (isNaN(amountValue) || amountValue <= 0) {
-      toast.error('Please enter a valid amount');
-      return;
-    }
-    
-    // For SOL, check if user has enough balance
-    if (token === TokenType.SOL) {
-      const token = tokens.find(t => t.symbol === TokenType.SOL);
-      if (!token || token.balance < amountValue) {
-        toast.error('Insufficient SOL balance');
-        return;
-      }
-    }
+  // Copy address to clipboard
+  const copyToClipboard = async () => {
+    if (!walletAddress) return;
     
     try {
-      const success = await depositToken(token, amountValue);
-      
-      if (success) {
-        toast.success(`${amountValue} ${token} deposited successfully!`);
-        onClose();
-      } else {
-        toast.error('Deposit failed. Please try again later.');
-      }
-    } catch (error) {
-      console.error('Deposit error:', error);
-      toast.error('Deposit failed. Please try again later.');
+      await navigator.clipboard.writeText(walletAddress);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy address', err);
+    }
+  };
+  
+  // Handle refreshing wallet balance
+  const refreshBalance = () => {
+    setIsLoading(true);
+    
+    // Simulate a balance refresh
+    setTimeout(() => {
+      setIsLoading(false);
+    }, 1500);
+  };
+  
+  // Format address for display
+  const formatAddress = (address: string): string => {
+    if (!address) return '';
+    if (address.length <= 12) return address;
+    
+    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+  };
+
+  // Get the appropriate balance based on token type
+  const getTokenBalance = () => {
+    if (currentToken === TokenType.SOL) {
+      return currentUser?.balance?.toFixed(6) || '0.000000';
+    } else {
+      // Assuming ruggedBalance is a property on currentUser
+      return currentUser?.ruggedBalance?.toFixed(2) || '0.00';
     }
   };
   
@@ -104,85 +100,103 @@ const DepositModal: FC<DepositModalProps> = ({
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
       <div 
         ref={modalRef} 
-        className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4"
+        className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
       >
-        <h2 className="text-xl font-bold text-white mb-4">Deposit</h2>
-        
-        <div className="mb-4">
-          <label className="block text-gray-300 mb-2">
-            Select Token
-          </label>
-          <select
-            value={token}
-            onChange={handleTokenChange}
-            className="w-full bg-gray-700 text-white rounded-md px-4 py-2 focus:outline-none focus:ring focus:ring-green-500"
+        {/* Header */}
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-xl font-bold text-white flex items-center">
+            <ArrowUpToLine size={20} className="mr-2" />
+            Deposit {tokenSymbol}
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-white transition-colors"
           >
-            <option value={TokenType.SOL}>{TokenType.SOL} (Solana)</option>
-            <option value={TokenType.RUGGED}>{TokenType.RUGGED} (Rugged Token)</option>
-          </select>
+            <X size={20} />
+          </button>
         </div>
         
-        <div className="mb-4">
-          <label className="block text-gray-300 mb-2">
-            Amount
-          </label>
-          <div className="flex">
-            <input
-              type="text"
-              value={amount}
-              onChange={handleAmountChange}
-              className="flex-1 bg-gray-700 text-white rounded-l-md px-4 py-2 focus:outline-none focus:ring focus:ring-green-500"
-              placeholder="0.1"
-            />
-            {token === TokenType.SOL && (
-              <button
-                onClick={handleMaxAmount}
-                className="bg-gray-600 text-white px-4 py-2"
+        {/* Current Balance */}
+        <div className="bg-gray-800 p-4 rounded-md mb-6">
+          <div className="flex justify-between items-center">
+            <span className="text-gray-400">Current Balance</span>
+            <div className="flex items-center">
+              <span className="text-xl font-bold text-white mr-2">
+                {getTokenBalance()} {tokenSymbol}
+              </span>
+              <button 
+                onClick={refreshBalance} 
+                className="text-gray-400 hover:text-white"
+                disabled={isLoading}
               >
-                Max
+                <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
               </button>
-            )}
-            <span className="bg-gray-600 text-white px-4 py-2 rounded-r-md">
-              {token}
-            </span>
+            </div>
           </div>
-          {token === TokenType.SOL && (
-            <p className="text-xs text-gray-400 mt-1">
-              Available: {getMaxAmount()} SOL
-            </p>
+        </div>
+        
+        {/* Wallet Address Display */}
+        <div className="mb-6">
+          <label className="block text-gray-300 mb-2 text-sm">
+            Your Wallet Address
+          </label>
+          <div className="flex items-center bg-gray-800 border border-gray-700 rounded-md overflow-hidden">
+            <div className="flex-1 px-4 py-3 text-white font-mono text-sm truncate">
+              {walletAddress || 'Loading wallet address...'}
+            </div>
+            <button
+              onClick={copyToClipboard}
+              className="bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white px-3 py-3 transition-colors"
+              title="Copy to clipboard"
+            >
+              {isCopied ? <Check size={18} /> : <Copy size={18} />}
+            </button>
+          </div>
+          {isCopied && (
+            <p className="text-green-500 text-xs mt-1">Copied to clipboard!</p>
           )}
         </div>
         
-        <div className="my-4 p-3 bg-gray-700 rounded-md text-sm text-gray-300">
-          <p>Depositing funds will allow you to use them for gameplay within this application.</p>
+        {/* QR Code */}
+        <div className="flex justify-center mb-6">
+          <div className="p-3 bg-white rounded-lg">
+            {walletAddress ? (
+              <QRCodeSVG value={walletAddress} size={180} />
+            ) : (
+              <div className="w-[180px] h-[180px] flex items-center justify-center bg-gray-200">
+                <span className="text-gray-500">Loading...</span>
+              </div>
+            )}
+          </div>
         </div>
         
-        <div className="flex justify-end space-x-3">
-          <Button
-            variant="secondary"
-            onClick={onClose}
-            disabled={isProcessingTransaction}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleDeposit}
-            disabled={isProcessingTransaction || !connected}
-          >
-            {isProcessingTransaction ? (
-              <>
-                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                </svg>
-                Processing...
-              </>
-            ) : (
-              'Deposit'
-            )}
-          </Button>
+        {/* Instructions */}
+        <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-4 rounded-md mb-6 text-sm">
+          <div className="flex items-start">
+            <Info size={18} className="mr-2 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="mb-2">To deposit {tokenSymbol} into your wallet:</p>
+              <ul className="list-disc list-inside ml-2 space-y-1">
+                <li>Send {tokenSymbol} to the wallet address above</li>
+                <li>Only send {tokenSymbol} tokens through the Solana network</li>
+                <li>Deposits typically confirm within 30 seconds</li>
+              </ul>
+            </div>
+          </div>
         </div>
+        
+        {/* View on Explorer Button */}
+        {walletAddress && (
+          
+            href={`https://explorer.solana.com/address/${walletAddress}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-md font-medium flex items-center justify-center transition-colors"
+          >
+            <ExternalLink size={18} className="mr-2" />
+            View on Solana Explorer
+          </a>
+        )}
       </div>
     </div>
   );

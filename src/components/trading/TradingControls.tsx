@@ -1,9 +1,19 @@
 import { FC, useState, useEffect, useContext, useCallback } from 'react';
-import { useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon } from 'lucide-react';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { useConnection } from '@solana/wallet-adapter-react';
 import useLocalStorage from '../../hooks/useLocalStorage';
+import Button from '../common/Button';
 import { UserContext } from '../../context/UserContext';
 import { TradeContext } from '../../context/TradeContext';
-import { useGameContext } from '../../context/GameContext';
+import { addPlayerBet } from '../../utils/gameDataGenerator';
+import { useTokenContext, TokenType } from '../../context/TokenContext';
+import { usePrivy } from '@privy-io/react-auth';
+import { useEmbeddedGameWallet } from '../../hooks/useEmbeddedGameWallet';
+import { toast } from 'react-hot-toast';
+
+// Import from barrel file instead of direct imports
+import { AirdropModal, DepositModal, WithdrawModal } from './index';
 
 interface TradingControlsProps {
   onBuy: (amount: number) => void;
@@ -30,21 +40,40 @@ const TradingControls: FC<TradingControlsProps> = ({
   isGameActive = true,
   isMobile = false
 }) => {
+  // Get token context
+  const { 
+    currentToken, 
+    setCurrentToken, 
+    solBalance, 
+    ruggedBalance 
+  } = useTokenContext();
+  
+  // Use embedded game wallet instead of regular wallet
+  const { authenticated } = usePrivy();
+  const { wallet: gameWallet, walletData } = useEmbeddedGameWallet();
+  
+  // Check if wallet is ready using the game wallet data
+  const isWalletReady = authenticated && gameWallet !== undefined;
+
   // Use localStorage to remember user's preferred amount
   const [savedAmount, setSavedAmount] = useLocalStorage<string>('default-bet-amount', '0.01');
   const [amount, setAmount] = useState<string>(savedAmount);
   const [sellAmount, setSellAmount] = useState<string>('');
   const [sellPercentage, setSellPercentage] = useState<number>(100); // Default to 100%
-  
-  // Auto-cashout settings
+  const [showEffect, setShowEffect] = useState<boolean>(false);
+  const [isSuccess, setIsSuccess] = useState<boolean>(true);
+  const [showAirdropModal, setShowAirdropModal] = useState<boolean>(false);
+  const [showDepositModal, setShowDepositModal] = useState<boolean>(false);
+  const [showWithdrawModal, setShowWithdrawModal] = useState<boolean>(false);
+  // Use localStorage for auto cashout settings to persist preferences
   const [autoCashoutEnabled, setAutoCashoutEnabled] = useLocalStorage<boolean>('auto-cashout-enabled', true);
   const [autoCashoutValue, setAutoCashoutValue] = useLocalStorage<string>('auto-cashout-value', '2.0');
   const [showAutoCashout, setShowAutoCashout] = useState<boolean>(false);
   
-  // Get context information
+  // Get legacy context information (can be phased out for embedded wallet)
   const { publicKey, connected } = useWallet();
   const { connection } = useConnection();
-  const { currentUser } = useContext(UserContext);
+  const { currentUser, isAuthenticated } = useContext(UserContext);
   const { placeOrder } = useContext(TradeContext);
 
   // Update local amount state when saved amount changes
@@ -52,12 +81,17 @@ const TradingControls: FC<TradingControlsProps> = ({
     setAmount(savedAmount);
   }, [savedAmount]);
 
-  // Handle automatic cashout
+  // Handle token switch
+  const handleTokenChange = (token: TokenType) => {
+    setCurrentToken(token);
+  };
+
+  // Handle automatic cashout with useCallback to prevent dependency issues
   const handleCashout = useCallback(() => {
     onSell(100);
   }, [onSell]);
 
-  // Auto cashout effect
+  // Auto cashout effect - using useEffect with the correct dependencies
   useEffect(() => {
     // Only trigger auto cashout when all conditions are met
     if (
@@ -75,8 +109,13 @@ const TradingControls: FC<TradingControlsProps> = ({
   // Handle amount change
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    // Allow only numbers and up to 6 decimal places
-    if (/^(\d+)?(\.\d{0,6})?$/.test(value) || value === '') {
+    
+    // Different regex pattern based on token type
+    const pattern = currentToken === TokenType.SOL 
+      ? /^(\d+)?(\.\d{0,6})?$/ // SOL can have decimals
+      : /^\d*$/; // RUGGED is integer only
+    
+    if (pattern.test(value) || value === '') {
       setAmount(value);
       if (value !== '') {
         setSavedAmount(value);
@@ -87,14 +126,19 @@ const TradingControls: FC<TradingControlsProps> = ({
   // Handle sell amount change
   const handleSellAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    // Allow only numbers and up to 6 decimal places
-    if (/^(\d+)?(\.\d{0,6})?$/.test(value) || value === '') {
+    
+    // Different regex pattern based on token type
+    const pattern = currentToken === TokenType.SOL 
+      ? /^(\d+)?(\.\d{0,6})?$/ // SOL can have decimals
+      : /^\d*$/; // RUGGED is integer only
+    
+    if (pattern.test(value) || value === '') {
       setSellAmount(value);
       
-      // Update the percentage based on the entered amount
+      // Update the percentage based on the entered amount (if game is active)
       if (value !== '' && hasActiveGame && holdings > 0) {
         const parsedValue = parseFloat(value);
-        const maxCashout = holdings;
+        const maxCashout = holdings; // Assuming holdings represents what can be cashed out
         if (!isNaN(parsedValue) && maxCashout > 0) {
           const calculatedPercentage = Math.min((parsedValue / maxCashout) * 100, 100);
           setSellPercentage(Math.round(calculatedPercentage));
@@ -103,8 +147,10 @@ const TradingControls: FC<TradingControlsProps> = ({
     }
   };
 
-  // Quick amount buttons - fewer for mobile
-  const quickAmounts = isMobile ? [0.01, 0.1] : [0.01, 0.05, 0.1, 0.5];
+  // Quick amount buttons - different for SOL vs RUGGED
+  const quickAmounts = currentToken === TokenType.SOL 
+    ? [0.01, 0.05, 0.1, 0.5] 
+    : [10, 50, 100, 500];
 
   // Set a quick amount
   const setQuickAmount = (amt: number) => {
@@ -122,10 +168,10 @@ const TradingControls: FC<TradingControlsProps> = ({
     }
   };
 
-  // Quick auto-cashout values - fewer for mobile
-  const quickAutoCashoutValues = isMobile ? [1.5, 3.0] : [1.5, 2.0, 3.0, 5.0];
+  // Quick autoCashout buttons
+  const quickAutoCashoutValues = [1.5, 2.0, 3.0, 5.0];
 
-  // Set a quick auto-cashout value
+  // Set a quick autoCashout value
   const setQuickAutoCashoutValue = (value: number) => {
     setAutoCashoutValue(value.toString());
   };
@@ -136,17 +182,31 @@ const TradingControls: FC<TradingControlsProps> = ({
     
     // Update sell amount based on percentage
     if (hasActiveGame && holdings > 0) {
-      const calculatedAmount = (holdings * percentage / 100).toFixed(6);
+      const calculatedAmount = (holdings * percentage / 100).toFixed(
+        currentToken === TokenType.SOL ? 6 : 0
+      );
       setSellAmount(calculatedAmount);
     }
   };
 
-  // Handle buy button click
+  // Handle buy button click - updated to use the embedded wallet
   const handleBuy = () => {
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum) || amountNum <= 0) {
+      console.log('Invalid amount');
       return;
     }
+    
+    // Check for embedded wallet first
+    if (!isWalletReady) {
+      toast.error('Please login to play');
+      return;
+    }
+    
+    // Show effect
+    setIsSuccess(true);
+    setShowEffect(true);
+    setTimeout(() => setShowEffect(false), 1000);
     
     // Call the buy function
     onBuy(amountNum);
@@ -155,6 +215,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   // Handle sell button click
   const handleSell = () => {
     if (isNaN(sellPercentage) || sellPercentage <= 0) {
+      console.log('Invalid percentage');
       return;
     }
     
@@ -162,222 +223,115 @@ const TradingControls: FC<TradingControlsProps> = ({
     onSell(sellPercentage);
   };
 
-  // COMPACT MOBILE UI
-  if (isMobile) {
-    return (
-      <div className="bg-[#0d0d0f] text-white grid grid-cols-1 gap-2 p-3 relative border border-gray-800 rounded-lg">
-        {/* Balance display */}
-        <div className="flex justify-between items-center mb-1">
-          <div className="text-sm">
-            <span className="text-gray-400">Balance:</span>
-            <span className="ml-1 text-green-400 font-bold">{walletBalance.toFixed(3)}</span>
-          </div>
-          
-          {hasActiveGame && (
-            <div className="text-sm">
-              <span className="text-gray-400">Profit:</span>
-              <span className="ml-1 text-yellow-400 font-bold">
-                {(holdings * (currentMultiplier - 1)).toFixed(3)}
-              </span>
-            </div>
-          )}
-        </div>
-        
-        {/* Auto Cashout toggle */}
-        <div 
-          className="flex justify-between items-center bg-gray-800 p-2 rounded-md mb-1 cursor-pointer"
-          onClick={() => setShowAutoCashout(!showAutoCashout)}
-        >
-          <div className="flex items-center text-sm">
-            <div className={`h-2 w-2 rounded-full mr-2 ${autoCashoutEnabled ? 'bg-green-500' : 'bg-gray-600'}`}></div>
-            <span className="text-gray-300">Auto @ {autoCashoutValue}x</span>
-          </div>
-          <div className="text-xs text-gray-400">
-            {showAutoCashout ? '▲' : '▼'}
-          </div>
-        </div>
-        
-        {/* Auto Cashout settings (collapsible) */}
-        {showAutoCashout && (
-          <div className="bg-gray-800 p-2 rounded-md mb-1">
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-gray-300 text-xs">Enable</label>
-              <div className="relative inline-block w-8 h-4">
-                <input
-                  type="checkbox"
-                  id="auto-cashout-toggle"
-                  checked={autoCashoutEnabled}
-                  onChange={(e) => setAutoCashoutEnabled(e.target.checked)}
-                  className="opacity-0 absolute w-0 h-0"
-                />
-                <label 
-                  htmlFor="auto-cashout-toggle"
-                  className={`absolute cursor-pointer top-0 left-0 right-0 bottom-0 rounded-full transition-colors ${
-                    autoCashoutEnabled ? 'bg-green-600' : 'bg-gray-600'
-                  }`}
-                >
-                  <span 
-                    className={`absolute h-3 w-3 mt-0.5 bg-white rounded-full transition-transform ${
-                      autoCashoutEnabled ? 'translate-x-4 ml-0' : 'translate-x-0.5'
-                    }`} 
-                  />
-                </label>
-              </div>
-            </div>
-            
-            <div className="flex gap-1 mb-1">
-              <input
-                type="text"
-                value={autoCashoutValue}
-                onChange={handleAutoCashoutValueChange}
-                className="flex-1 bg-gray-700 text-white px-2 py-1 text-sm rounded-l-md focus:outline-none"
-                placeholder="2.00"
-                disabled={!autoCashoutEnabled}
-              />
-              <span className="bg-gray-600 text-gray-300 px-2 py-1 text-sm rounded-r-md">x</span>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-1">
-              {quickAutoCashoutValues.map((value) => (
-                <button
-                  key={value}
-                  onClick={() => setQuickAutoCashoutValue(value)}
-                  className={`px-2 py-1 text-xs rounded-md ${
-                    parseFloat(autoCashoutValue) === value
-                      ? 'bg-green-600 text-white'
-                      : 'bg-gray-700 text-gray-300'
-                  }`}
-                  disabled={!autoCashoutEnabled}
-                >
-                  {value.toFixed(1)}x
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        
-        {/* Bet input group */}
-        <div className="grid grid-cols-3 gap-1 mb-1">
-          <input
-            type="text"
-            value={amount}
-            onChange={handleAmountChange}
-            className="col-span-2 bg-gray-800 text-white px-3 py-2 rounded-l-md focus:outline-none"
-            placeholder="0.00"
-            disabled={!isGameActive}
-          />
-          <button
-            onClick={() => setQuickAmount(walletBalance)}
-            className="bg-gray-700 text-gray-300 px-2 rounded-r-md text-sm"
-            disabled={!isGameActive}
-          >
-            Max
-          </button>
-        </div>
-        
-        {/* Quick amount buttons */}
-        <div className="grid grid-cols-2 gap-1 mb-1">
-          {quickAmounts.map((amt) => (
-            <button
-              key={amt}
-              onClick={() => setQuickAmount(amt)}
-              className={`px-2 py-1 text-xs rounded-md ${
-                parseFloat(amount) === amt
-                  ? 'bg-green-600 text-white'
-                  : 'bg-gray-700 text-gray-300'
-              }`}
-              disabled={!isGameActive}
-            >
-              {amt.toString()} SOL
-            </button>
-          ))}
-        </div>
-        
-        {/* Buy/Sell buttons */}
-        <div className="grid grid-cols-5 gap-1">
-          <button
-            onClick={handleBuy}
-            disabled={isPlacingBet || !connected || parseFloat(amount) > walletBalance || !isGameActive || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0}
-            className={`col-span-2 py-2 rounded-md font-bold flex items-center justify-center ${
-              isPlacingBet || !connected || parseFloat(amount) > walletBalance || !isGameActive || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0
-                ? 'bg-gray-700 text-gray-500'
-                : 'bg-green-600 text-white'
-            }`}
-          >
-            {isPlacingBet ? (
-              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
-            ) : (
-              'Bet'
-            )}
-          </button>
-          
-          <button
-            onClick={() => handleSetSellPercentage(100)}
-            disabled={!hasActiveGame || !isGameActive}
-            className={`py-1 rounded-md text-xs ${
-              !hasActiveGame || !isGameActive
-                ? 'bg-gray-700 text-gray-500'
-                : 'bg-blue-600 text-white'
-            }`}
-          >
-            100%
-          </button>
-          
-          <button
-            onClick={handleSell}
-            disabled={isCashingOut || !connected || holdings <= 0 || !hasActiveGame || !isGameActive || sellPercentage <= 0}
-            className={`col-span-2 py-2 rounded-md font-bold flex items-center justify-center ${
-              isCashingOut || !connected || holdings <= 0 || !hasActiveGame || !isGameActive || sellPercentage <= 0
-                ? 'bg-gray-700 text-gray-500'
-                : 'bg-yellow-600 text-white'
-            }`}
-          >
-            {isCashingOut ? (
-              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
-            ) : (
-              'Cash'
-            )}
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // Format token balance with appropriate precision
+  const formatBalance = (balance: number, token: TokenType) => {
+    if (token === TokenType.SOL) {
+      return balance.toFixed(3);
+    } else {
+      // RUGGED tokens might have different precision
+      return balance.toFixed(0);
+    }
+  };
 
-  // DESKTOP UI - SIMPLIFIED VERSION (removed problematic imports)
+  // Get the active balance based on wallet data
+  const activeBalance = currentToken === TokenType.SOL ? 
+    (walletData.isConnected ? parseFloat(walletData.balance) : solBalance) : 
+    ruggedBalance;
+
   return (
     <div className="bg-[#0d0d0f] text-white grid grid-cols-1 gap-3 p-4 relative border border-gray-800 rounded-lg">
-      {/* Wallet Actions - Deposit & Withdraw */}
-      <div className="flex justify-between mb-1">
-        <button 
-          className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm flex items-center"
-          onClick={() => {/* Handle deposit */}}
+      {/* Token Switcher */}
+      <div className="flex items-center justify-between bg-gray-800 hover:bg-gray-700 transition-colors rounded-lg p-2 cursor-pointer mb-2">
+        <div 
+          className="flex items-center justify-between w-full"
+          onClick={() => setShowDepositModal(true)}
         >
-          <span className="mr-1">↓</span> Deposit
-        </button>
-        
-        <button 
-          className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded-md text-sm border border-gray-600 flex items-center"
-          onClick={() => {/* Handle withdraw */}}
-        >
-          <span className="mr-1">↑</span> Withdraw
-        </button>
-      </div>
-      
-      {/* Balance section */}
-      <div className="bg-gray-800 p-3 rounded-md mb-1">
-        <div className="text-gray-400 text-sm">Wallet Balance</div>
-        <div className="text-xl font-bold text-green-400">
-          {walletBalance.toFixed(3)} SOL
+          <div className="flex items-center">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center mr-2 ${
+              currentToken === TokenType.SOL ? 'bg-blue-500' : 'bg-green-500'
+            }`}>
+              <span className="text-white font-bold text-xs">{currentToken === TokenType.SOL ? 'SOL' : 'RUG'}</span>
+            </div>
+            
+            <div className="flex flex-col">
+              <span className="text-xs text-gray-400">Balance</span>
+              <span className={`text-sm font-bold ${
+                currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
+              }`}>
+                {formatBalance(activeBalance, currentToken)} {currentToken}
+              </span>
+            </div>
+          </div>
+          
+          {/* Token Switch Buttons */}
+          <div className="flex space-x-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleTokenChange(TokenType.SOL);
+              }}
+              className={`px-3 py-1 text-xs rounded-md ${
+                currentToken === TokenType.SOL 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              SOL
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleTokenChange(TokenType.RUGGED);
+                if (ruggedBalance < 10) {
+                  setShowAirdropModal(true);
+                }
+              }}
+              className={`px-3 py-1 text-xs rounded-md ${
+                currentToken === TokenType.RUGGED 
+                  ? 'bg-green-600 text-white' 
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+              }`}
+            >
+              RUGGED
+            </button>
+          </div>
         </div>
       </div>
       
-      {/* Current multiplier display */}
-      <div className="bg-gray-800 p-3 rounded-md mb-1">
-        <div className="text-gray-400 text-sm">Current Multiplier</div>
-        <div className="text-2xl font-bold text-yellow-400">
-          {currentMultiplier.toFixed(2)}x
-        </div>
+      {/* Deposit/Withdraw Buttons */}
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <Button
+          variant="outline"
+          size="sm"
+          className="bg-blue-600/20 border-blue-600/40 hover:bg-blue-600/30 flex items-center justify-center"
+          onClick={() => setShowDepositModal(true)}
+        >
+          <ArrowDownLeft size={14} className="mr-1" />
+          Deposit
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="bg-yellow-600/20 border-yellow-600/40 hover:bg-yellow-600/30 flex items-center justify-center"
+          onClick={() => setShowWithdrawModal(true)}
+        >
+          <ArrowUpRight size={14} className="mr-1" />
+          Withdraw
+        </Button>
       </div>
+      
+      {/* Get RUGGED tokens button - only when RUGGED is selected */}
+      {currentToken === TokenType.RUGGED && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full mb-2 bg-green-600/20 border-green-600/40 hover:bg-green-600/30 flex items-center justify-center"
+          onClick={() => setShowAirdropModal(true)}
+        >
+          <CoinsIcon size={14} className="mr-1" />
+          Get RUGGED Tokens
+        </Button>
+      )}
       
       {/* Auto Cashout Settings */}
       <div className="mb-2">
@@ -447,7 +401,7 @@ const TradingControls: FC<TradingControlsProps> = ({
                   className={`px-2 py-1 text-xs rounded-md ${
                     parseFloat(autoCashoutValue) === value
                       ? 'bg-green-600 text-white'
-                      : 'bg-gray-700 text-gray-300'
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }`}
                   disabled={!autoCashoutEnabled || !isGameActive}
                 >
@@ -466,7 +420,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         {/* Amount Input */}
         <div className="mb-2">
           <label className="block text-gray-400 text-xs mb-1">
-            Bet Amount (SOL)
+            Bet Amount ({currentToken})
           </label>
           <div className="flex">
             <input
@@ -478,14 +432,14 @@ const TradingControls: FC<TradingControlsProps> = ({
               disabled={!isGameActive}
             />
             <button
-              onClick={() => setQuickAmount(walletBalance * 0.5)}
+              onClick={() => setQuickAmount(activeBalance * 0.5)}
               className="bg-gray-700 text-gray-300 px-2 text-xs border-l border-gray-900"
               disabled={!isGameActive}
             >
               Half
             </button>
             <button
-              onClick={() => setQuickAmount(walletBalance)}
+              onClick={() => setQuickAmount(activeBalance)}
               className="bg-gray-700 text-gray-300 px-2 text-xs rounded-r-md"
               disabled={!isGameActive}
             >
@@ -503,11 +457,11 @@ const TradingControls: FC<TradingControlsProps> = ({
               className={`px-2 py-1 text-xs rounded-md ${
                 parseFloat(amount) === amt
                   ? 'bg-green-600 text-white'
-                  : 'bg-gray-700 text-gray-300'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
               }`}
               disabled={!isGameActive}
             >
-              {amt.toString()} SOL
+              {amt.toString()} {currentToken}
             </button>
           ))}
         </div>
@@ -515,11 +469,11 @@ const TradingControls: FC<TradingControlsProps> = ({
         {/* Buy Button */}
         <button
           onClick={handleBuy}
-          disabled={isPlacingBet || !connected || parseFloat(amount) > walletBalance || !isGameActive || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0}
+          disabled={isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !isGameActive || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0}
           className={`w-full py-2 rounded-md font-bold mb-2 flex items-center justify-center ${
-            isPlacingBet || !connected || parseFloat(amount) > walletBalance || !isGameActive || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0
-              ? 'bg-gray-700 text-gray-500'
-              : 'bg-green-600 text-white'
+            isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !isGameActive || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0
+              ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+              : 'bg-green-600 hover:bg-green-700 text-white'
           }`}
         >
           {isPlacingBet ? (
@@ -529,6 +483,7 @@ const TradingControls: FC<TradingControlsProps> = ({
             </>
           ) : (
             <>
+              <Coins className="mr-2 h-5 w-5" />
               Place Bet
             </>
           )}
@@ -542,7 +497,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         {/* Sell Amount Input */}
         <div className="mb-2">
           <label className="block text-gray-400 text-xs mb-1">
-            Cash Out Amount (SOL)
+            Cash Out Amount ({currentToken})
           </label>
           <div className="flex">
             <input
@@ -581,7 +536,7 @@ const TradingControls: FC<TradingControlsProps> = ({
               className={`px-2 py-1 text-xs rounded-md ${
                 sellPercentage === 25
                   ? 'bg-yellow-600 text-white'
-                  : 'bg-gray-700 text-gray-300'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
               }`}
               disabled={!hasActiveGame || !isGameActive}
             >
@@ -592,7 +547,7 @@ const TradingControls: FC<TradingControlsProps> = ({
               className={`px-2 py-1 text-xs rounded-md ${
                 sellPercentage === 50
                   ? 'bg-yellow-600 text-white'
-                  : 'bg-gray-700 text-gray-300'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
               }`}
               disabled={!hasActiveGame || !isGameActive}
             >
@@ -603,7 +558,7 @@ const TradingControls: FC<TradingControlsProps> = ({
               className={`px-2 py-1 text-xs rounded-md ${
                 sellPercentage === 75
                   ? 'bg-yellow-600 text-white'
-                  : 'bg-gray-700 text-gray-300'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
               }`}
               disabled={!hasActiveGame || !isGameActive}
             >
@@ -614,7 +569,7 @@ const TradingControls: FC<TradingControlsProps> = ({
               className={`px-2 py-1 text-xs rounded-md ${
                 sellPercentage === 100
                   ? 'bg-yellow-600 text-white'
-                  : 'bg-gray-700 text-gray-300'
+                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
               }`}
               disabled={!hasActiveGame || !isGameActive}
             >
@@ -628,7 +583,7 @@ const TradingControls: FC<TradingControlsProps> = ({
           <div className="bg-gray-800 p-2 rounded-md text-center mb-3">
             <span className="text-xs text-gray-400">Potential profit at current multiplier:</span>
             <div className="text-lg font-bold text-yellow-400">
-              +{((holdings * sellPercentage / 100) * (currentMultiplier - 1)).toFixed(4)} SOL
+              +{((holdings * sellPercentage / 100) * (currentMultiplier - 1)).toFixed(currentToken === TokenType.SOL ? 3 : 0)} {currentToken}
             </div>
           </div>
         )}
@@ -636,11 +591,11 @@ const TradingControls: FC<TradingControlsProps> = ({
         {/* Sell Button */}
         <button
           onClick={handleSell}
-          disabled={isCashingOut || !connected || holdings <= 0 || !hasActiveGame || !isGameActive || sellPercentage <= 0}
+          disabled={isCashingOut || !isWalletReady || holdings <= 0 || !hasActiveGame || !isGameActive || sellPercentage <= 0}
           className={`w-full py-2 rounded-md font-bold flex items-center justify-center ${
-            isCashingOut || !connected || holdings <= 0 || !hasActiveGame || !isGameActive || sellPercentage <= 0
-              ? 'bg-gray-700 text-gray-500'
-              : 'bg-yellow-600 text-white'
+            isCashingOut || !isWalletReady || holdings <= 0 || !hasActiveGame || !isGameActive || sellPercentage <= 0
+              ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+              : 'bg-yellow-600 hover:bg-yellow-700 text-white'
           }`}
         >
           {isCashingOut ? (
@@ -650,6 +605,7 @@ const TradingControls: FC<TradingControlsProps> = ({
             </>
           ) : (
             <>
+              <Sparkles className="mr-2 h-5 w-5" />
               Cash Out
             </>
           )}
@@ -659,25 +615,25 @@ const TradingControls: FC<TradingControlsProps> = ({
       {/* Warning messages */}
       <div className="mt-1">
         {/* Warning message when not connected */}
-        {!connected && (
+        {!isWalletReady && (
           <div className="text-yellow-500 text-xs flex items-center">
-            <span className="text-sm mr-1">⚠️</span>
-            <span>Connect wallet to trade</span>
+            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
+            <span>Login to play</span>
           </div>
         )}
         
         {/* Insufficient funds warning */}
-        {connected && parseFloat(amount) > walletBalance && (
+        {isWalletReady && parseFloat(amount) > activeBalance && (
           <div className="text-red-500 text-xs flex items-center">
-            <span className="text-sm mr-1">⚠️</span>
+            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
             <span>Insufficient balance</span>
           </div>
         )}
         
         {/* No holdings warning */}
-        {connected && holdings <= 0 && hasActiveGame && (
+        {isWalletReady && holdings <= 0 && hasActiveGame && (
           <div className="text-yellow-500 text-xs flex items-center">
-            <span className="text-sm mr-1">⚠️</span>
+            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
             <span>No holdings to sell</span>
           </div>
         )}
@@ -685,11 +641,32 @@ const TradingControls: FC<TradingControlsProps> = ({
         {/* Game paused warning */}
         {!isGameActive && (
           <div className="text-red-500 text-xs flex items-center">
-            <span className="text-sm mr-1">⚠️</span>
+            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
             <span>Game paused. Waiting for next round.</span>
           </div>
         )}
       </div>
+
+      {/* Modals */}
+      <AirdropModal 
+        isOpen={showAirdropModal}
+        onClose={() => setShowAirdropModal(false)}
+      />
+      
+      <DepositModal 
+        isOpen={showDepositModal}
+        onClose={() => setShowDepositModal(false)}
+        currentToken={currentToken}
+      />
+      
+      <WithdrawModal 
+        isOpen={showWithdrawModal}
+        onClose={() => setShowWithdrawModal(false)}
+        currentToken={currentToken}
+        balance={currentToken === TokenType.SOL ? 
+          (walletData.isConnected ? parseFloat(walletData.balance) : solBalance) : 
+          ruggedBalance}
+      />
     </div>
   );
 };

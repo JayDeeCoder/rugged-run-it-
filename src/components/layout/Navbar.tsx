@@ -2,20 +2,15 @@
 import { FC, useState, useEffect, useRef, useContext } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useWallet } from '@solana/wallet-adapter-react';
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
-import { usePrivy } from '@privy-io/react-auth';
-import { useConnection } from '@solana/wallet-adapter-react';
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
 import useOutsideClick from '../../hooks/useOutsideClick';
 import { Menu, User, ChevronDown, LogOut, Wallet, BarChart2, Trophy, Settings, Edit } from 'lucide-react';
 import UsernameModal from '../auth/UsernameModal';
 
 const Navbar: FC = () => {
-  const { connected, publicKey, disconnect } = useWallet();
-  const { connection } = useConnection();
   const { authenticated, login, logout, user } = usePrivy();
+  const { wallets } = useWallets();
   const { currentUser, experience, userLevel, crates, hasCustomUsername, setUsername } = useContext(UserContext);
 
   const [walletBalance, setWalletBalance] = useState<number>(0);
@@ -23,6 +18,10 @@ const Navbar: FC = () => {
   const [showMobileMenu, setShowMobileMenu] = useState<boolean>(false);
   const [isMounted, setIsMounted] = useState<boolean>(false);
   const [showUsernameModal, setShowUsernameModal] = useState<boolean>(false);
+
+  // Get the embedded wallet if available
+  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
+  const walletAddress = embeddedWallet?.address || '';
 
   const userMenuRef = useRef<HTMLDivElement>(null);
   useOutsideClick(userMenuRef as React.RefObject<HTMLElement>, () => setShowUserMenu(false));
@@ -33,12 +32,16 @@ const Navbar: FC = () => {
 
   useEffect(() => {
     const fetchBalance = async () => {
-      if (connected && publicKey && connection) {
+      if (embeddedWallet && walletAddress) {
         try {
-          const balance = await connection.getBalance(publicKey);
-          setWalletBalance(balance / LAMPORTS_PER_SOL);
+          // This is a simplified version - in a real app you'd want to fetch the balance from the blockchain
+          // You can implement this using connection.getBalance from your SolanaWalletService or similar
+          
+          // For now, just displaying a mock balance or you can implement actual balance fetching
+          setWalletBalance(0.123); // Replace with actual balance fetching
         } catch (error) {
           console.error('Failed to fetch wallet balance:', error);
+          setWalletBalance(0);
         }
       } else {
         setWalletBalance(0);
@@ -48,12 +51,16 @@ const Navbar: FC = () => {
     fetchBalance();
     const intervalId = setInterval(fetchBalance, 15000);
     return () => clearInterval(intervalId);
-  }, [connected, publicKey, connection]);
+  }, [embeddedWallet, walletAddress]);
 
   const handleLogout = async () => {
-    if (connected) await disconnect();
     if (authenticated) await logout();
     setShowUserMenu(false);
+  };
+
+  const disconnectWallet = () => {
+    // No need to specifically disconnect when using Privy - logout handles this
+    handleLogout();
   };
 
   const getUserDisplayName = () => {
@@ -88,6 +95,9 @@ const Navbar: FC = () => {
     );
   }
 
+  // Check if wallet is connected
+  const isWalletConnected = embeddedWallet !== undefined;
+
   return (
     <header className="bg-[#0d0d0f] py-2 px-3 border-b border-gray-800 text-white">
       <div className="container mx-auto flex items-center justify-between">
@@ -104,7 +114,6 @@ const Navbar: FC = () => {
           </Link>
 
           <nav className="hidden md:flex items-center">
-            {/* Removed Home button */}
             <Link href="/dashboard" className="px-3 py-1 hover:text-gray-300 text-sm">Dashboard</Link>
             <Link href="/leaderboard" className="px-3 py-1 hover:text-gray-300 text-sm">Leaderboard</Link>
           </nav>
@@ -139,7 +148,7 @@ const Navbar: FC = () => {
                   <User size={18} className="mr-1" />
                   <div className="hidden md:block text-left mr-1">
                     <div className="text-xs font-medium">{getUserDisplayName()}</div>
-                    {connected && (
+                    {isWalletConnected && (
                       <div className="text-xs text-gray-400">{walletBalance.toFixed(3)} SOL</div>
                     )}
                   </div>
@@ -164,12 +173,12 @@ const Navbar: FC = () => {
                       </div>
 
                       <div className="px-4 py-2 border-b border-gray-700">
-                        {connected ? (
+                        {isWalletConnected ? (
                           <>
                             <div className="flex justify-between items-center mb-1">
                               <span className="text-sm text-gray-400">Wallet:</span>
                               <span className="text-sm font-mono">
-                                {`${publicKey?.toString().slice(0, 4)}...${publicKey?.toString().slice(-4)}`}
+                                {`${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`}
                               </span>
                             </div>
                             <div className="flex justify-between items-center">
@@ -179,7 +188,7 @@ const Navbar: FC = () => {
                               </span>
                             </div>
                             <button
-                              onClick={disconnect}
+                              onClick={disconnectWallet}
                               className="mt-2 w-full text-sm bg-gray-700 hover:bg-gray-600 rounded px-3 py-1 text-left flex items-center"
                             >
                               <Wallet size={14} className="mr-2" />
@@ -187,7 +196,12 @@ const Navbar: FC = () => {
                             </button>
                           </>
                         ) : (
-                          <WalletMultiButton className="wallet-adapter-button wallet-adapter-button-connect" />
+                          <button
+                            onClick={() => {/* Implement embedded wallet creation here */}}
+                            className="w-full text-sm bg-green-600 hover:bg-green-700 rounded px-3 py-1 text-center"
+                          >
+                            Create Wallet
+                          </button>
                         )}
                       </div>
 

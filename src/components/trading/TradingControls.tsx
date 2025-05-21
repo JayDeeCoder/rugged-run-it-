@@ -1,15 +1,13 @@
 // src/components/trading/TradingControls.tsx
 import { FC, useState, useEffect, useContext, useCallback } from 'react';
 import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon } from 'lucide-react';
-import { useWallet } from '@solana/wallet-adapter-react';
-import { useConnection } from '@solana/wallet-adapter-react';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
 import useLocalStorage from '../../hooks/useLocalStorage';
 import Button from '../common/Button';
 import { UserContext } from '../../context/UserContext';
 import { TradeContext } from '../../context/TradeContext';
 import { addPlayerBet } from '../../utils/gameDataGenerator';
 import { useTokenContext, TokenType } from '../../context/TokenContext';
-import { usePrivy } from '@privy-io/react-auth';
 import { useEmbeddedGameWallet } from '../../hooks/useEmbeddedGameWallet';
 import { toast } from 'react-hot-toast';
 
@@ -51,6 +49,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   
   // Use embedded game wallet instead of regular wallet
   const { authenticated } = usePrivy();
+  const { wallets } = useWallets();
   const { wallet: gameWallet, walletData } = useEmbeddedGameWallet();
   
   // Check if wallet is ready using the game wallet data
@@ -71,9 +70,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   const [autoCashoutValue, setAutoCashoutValue] = useLocalStorage<string>('auto-cashout-value', '2.0');
   const [showAutoCashout, setShowAutoCashout] = useState<boolean>(false);
   
-  // Get legacy context information (can be phased out for embedded wallet)
-  const { publicKey, connected } = useWallet();
-  const { connection } = useConnection();
+  // Get context information (for backward compatibility)
   const { currentUser, isAuthenticated } = useContext(UserContext);
   const { placeOrder } = useContext(TradeContext);
 
@@ -658,7 +655,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         isOpen={showDepositModal}
         onClose={() => setShowDepositModal(false)}
         currentToken={currentToken}
-        walletAddress={walletData.address || (publicKey ? publicKey.toString() : '')}
+        walletAddress={walletData.address || ''}
       />
       
       <WithdrawModal 
@@ -668,7 +665,6 @@ const TradingControls: FC<TradingControlsProps> = ({
         balance={currentToken === TokenType.SOL ? 
           (walletData.isConnected ? parseFloat(walletData.balance) : solBalance) : 
           ruggedBalance}
-          
       />
     </div>
   );

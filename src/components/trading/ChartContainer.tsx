@@ -1,7 +1,5 @@
 import { FC, useState, useEffect, useRef, useContext, useCallback } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
-import { useConnection } from '@solana/wallet-adapter-react';
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
 import CandlestickChart from './CandlestickChart';
 import TradingControls from './TradingControls';
 import SellEffects from './SellEffects';
@@ -13,6 +11,7 @@ import { UserContext } from '../../context/UserContext';
 import { toast } from 'react-hot-toast';
 import type { Order } from '../../types/trade';
 import { GameResult } from '../../types/trade';
+import { useEmbeddedGameWallet } from '../../hooks/useEmbeddedGameWallet';
 
 interface ChartContainerProps {
   useMobileHeight?: boolean;
@@ -45,8 +44,12 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   // Create a reference to the chart container
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
-  const { publicKey, connected } = useWallet();
-  const { connection } = useConnection();
+  // Use Privy hooks for authentication
+  const { authenticated } = usePrivy();
+  const { wallets } = useWallets();
+  
+  // Use embedded game wallet hook instead of Solana wallet adapter
+  const { wallet: gameWallet, walletData } = useEmbeddedGameWallet();
 
   const { trades, currentPrice, balance: gameBalance, placeOrder } = useContext(TradeContext);
   const { isAuthenticated, currentUser } = useContext(UserContext);
@@ -65,11 +68,13 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   // Fetch wallet balance
   useEffect(() => {
     const fetchBalance = async () => {
-      if (connected && publicKey && connection) {
+      if (authenticated && gameWallet) {
         try {
-          const balance = await connection.getBalance(publicKey);
-          if (isMountedRef.current) {
-            setWalletBalance(balance / LAMPORTS_PER_SOL);
+          // Use wallet data from the hook
+          if (walletData && walletData.balance) {
+            if (isMountedRef.current) {
+              setWalletBalance(parseFloat(walletData.balance));
+            }
           }
         } catch (error) {
           console.error('Failed to fetch wallet balance:', error);
@@ -86,7 +91,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     fetchBalance();
     const intervalId = setInterval(fetchBalance, 5000);
     return () => clearInterval(intervalId);
-  }, [connected, publicKey, connection, gameBalance, isAuthenticated]);
+  }, [authenticated, gameWallet, walletData, gameBalance, isAuthenticated]);
 
   // Calculate holdings from trades
   useEffect(() => {

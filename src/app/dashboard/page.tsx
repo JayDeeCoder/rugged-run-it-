@@ -1,13 +1,19 @@
 'use client';
 
 import { FC } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallets, usePrivy } from '@privy-io/react-auth';
 import Layout from '../../components/layout/Layout';
 import Link from 'next/link';
 
 const Dashboard: FC = () => {
-  // Use Solana wallet instead of Wagmi
-  const { publicKey, connected } = useWallet();
+  // Use Privy for wallet management
+  const { wallets } = useWallets();
+  const { authenticated } = usePrivy();
+  
+  // Get the first wallet (if any)
+  const activeWallet = wallets.length > 0 ? wallets[0] : null;
+  const isConnected = authenticated && wallets.length > 0;
+  const walletAddress = activeWallet?.address;
   
   return (
     <Layout>
@@ -36,9 +42,9 @@ const Dashboard: FC = () => {
         {/* Wallet Status */}
         <div className="bg-gray-900 rounded-lg p-6 mb-8">
           <h2 className="text-xl font-bold text-white mb-4">Wallet Status</h2>
-          {connected && publicKey ? (
+          {isConnected && walletAddress ? (
             <div>
-              <p className="text-green-400">Connected: {publicKey.toString().substring(0, 6)}...{publicKey.toString().substring(publicKey.toString().length - 4)}</p>
+              <p className="text-green-400">Connected: {walletAddress.substring(0, 6)}...{walletAddress.substring(walletAddress.length - 4)}</p>
             </div>
           ) : (
             <p className="text-yellow-400">Not connected. Please connect your wallet to see your stats.</p>

@@ -1,291 +1,277 @@
-// src/context/TokenContext.tsx
 'use client';
 
-import React, { createContext, useState, useEffect, useContext, ReactNode } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
-import { useConnection } from '@solana/wallet-adapter-react';
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { UserContext } from './UserContext';
+import React, { createContext, useState, useContext, useEffect, ReactNode, useCallback } from 'react';
+import { useWallets, usePrivy } from '@privy-io/react-auth';
+import { useRuggedGame } from '../app/dashboard/useRuggedGame';
+import { toast } from 'react-hot-toast';
 
-// Define token types enum
-export enum TokenType {
-  SOL = 'SOL',
-  RUGGED = 'RUGGED'
+// Define the types for our game state
+interface GameState {
+  gameId: number | null;
+  betAmount: string;
+  startTime: number | null;
+  currentMultiplier: number;
+  isActive: boolean;
+  hasAutoCashout: boolean;
+  autoCashoutMultiplier: number;
 }
 
-// Define token interface
-export interface Token {
-  symbol: TokenType;
-  name: string;
-  balance: number;
-  logoUrl?: string;
+// Define transaction history entry type
+export interface GameHistoryEntry {
+  id: string;
+  gameId: number;
+  betAmount: string;
+  timestamp: number;
+  result: 'win' | 'loss' | 'pending';
+  cashoutMultiplier: number | null;
+  profit: string | null;
 }
 
-// Context type definition
-interface TokenContextType {
-  tokens: Token[];
-  getTokenBalance: (symbol: TokenType) => number;
-  airdropToken: (symbol: TokenType, amount: number) => Promise<boolean>;
-  isAirdropAvailable: boolean;
-  lastAirdropTime: number | null;
-  airdropCooldown: number;
-  isProcessingAirdrop: boolean;
-  depositToken: (symbol: TokenType, amount: number) => Promise<boolean>;
-  withdrawToken: (symbol: TokenType, amount: number) => Promise<boolean>;
-  isProcessingTransaction: boolean;
-  currentToken: TokenType;
-  setCurrentToken: (token: TokenType) => void;
-  solBalance: number;
-  ruggedBalance: number;
+// Define context type
+interface GameContextType {
+  gameState: GameState;
+  gameHistory: GameHistoryEntry[];
+  startGame: (amount: string) => Promise<void>;
+  cashout: (percentage: number) => Promise<void>;
+  isLoading: boolean;
+  error: Error | null;
+  clearActiveGame: () => void;
+  setAutoCashout: (value: boolean, multiplier?: number) => void;
 }
 
-const defaultContext: TokenContextType = {
-  tokens: [],
-  getTokenBalance: () => 0,
-  airdropToken: async () => false,
-  isAirdropAvailable: false,
-  lastAirdropTime: null,
-  airdropCooldown: 24 * 60 * 60 * 1000, // 24 hours in milliseconds
-  isProcessingAirdrop: false,
-  depositToken: async () => false,
-  withdrawToken: async () => false,
-  isProcessingTransaction: false,
-  currentToken: TokenType.SOL,
-  setCurrentToken: () => {},
-  solBalance: 0,
-  ruggedBalance: 0
-};
+// Create the context
+const GameContext = createContext<GameContextType | undefined>(undefined);
 
-export const TokenContext = createContext<TokenContextType>(defaultContext);
-
-export const TokenProvider = ({ children }: { children: ReactNode }) => {
-  const [tokens, setTokens] = useState<Token[]>([
-    { symbol: TokenType.SOL, name: 'Solana', balance: 0 },
-    { symbol: TokenType.RUGGED, name: 'Rugged Token', balance: 0 },
-  ]);
-  const [lastAirdropTime, setLastAirdropTime] = useState<number | null>(null);
-  const [isProcessingAirdrop, setIsProcessingAirdrop] = useState(false);
-  const [isProcessingTransaction, setIsProcessingTransaction] = useState(false);
-  const [currentToken, setCurrentToken] = useState<TokenType>(TokenType.SOL);
-  const { publicKey, connected } = useWallet();
-  const { connection } = useConnection();
-  const { currentUser } = useContext(UserContext);
+// Create a provider component
+export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const { wallets } = useWallets();
+  const { authenticated } = usePrivy();
   
-  const airdropCooldown = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+  // Get the active wallet
+  const activeWallet = wallets.length > 0 ? wallets[0] : null;
+  const isConnected = wallets.length > 0 && authenticated;
+  const walletAddress = activeWallet?.address;
   
-  // Initialize token balances from localStorage or default values
+  const { 
+    placeBet, 
+    cashOut, 
+    isPlacingBet, 
+    isCashingOut, 
+    placeBetError, 
+    cashOutError,
+    currentGameId 
+  } = useRuggedGame();
+
+  // Game state
+  const [gameState, setGameState] = useState<GameState>({
+    gameId: null,
+    betAmount: '0',
+    startTime: null,
+    currentMultiplier: 1.0,
+    isActive: false,
+    hasAutoCashout: false,
+    autoCashoutMultiplier: 2.0
+  });
+
+  // Loading and error states
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  // Game history
+  const [gameHistory, setGameHistory] = useState<GameHistoryEntry[]>([]);
+
+  // Load game history from localStorage on mount
   useEffect(() => {
-    if (connected && publicKey && currentUser) {
-      // Load last airdrop time from localStorage
-      const savedLastAirdropTime = localStorage.getItem(`lastAirdropTime_${publicKey.toString()}`);
-      if (savedLastAirdropTime) {
-        setLastAirdropTime(parseInt(savedLastAirdropTime));
-      }
-      
-      // Load token balances from localStorage
-      const savedTokens = localStorage.getItem(`tokens_${publicKey.toString()}`);
-      if (savedTokens) {
+    if (isConnected && walletAddress) {
+      const savedHistory = localStorage.getItem(`game_history_${walletAddress}`);
+      if (savedHistory) {
         try {
-          setTokens(JSON.parse(savedTokens));
+          setGameHistory(JSON.parse(savedHistory));
         } catch (e) {
-          console.error('Failed to parse saved tokens:', e);
+          console.error('Failed to parse game history:', e);
         }
-      } else {
-        // If no saved tokens, initialize with default values
-        setTokens([
-          { symbol: TokenType.SOL, name: 'Solana', balance: 0 },
-          { symbol: TokenType.RUGGED, name: 'Rugged Token', balance: 0 },
-        ]);
       }
-      
-      // Fetch SOL balance from blockchain
-      updateSolBalance();
     }
-  }, [connected, publicKey, currentUser]);
-  
-  // Save tokens to localStorage when they change
+  }, [isConnected, walletAddress]);
+
+  // Save game history to localStorage when it changes
   useEffect(() => {
-    if (connected && publicKey && tokens.length > 0) {
-      localStorage.setItem(`tokens_${publicKey.toString()}`, JSON.stringify(tokens));
+    if (isConnected && walletAddress && gameHistory.length > 0) {
+      localStorage.setItem(`game_history_${walletAddress}`, JSON.stringify(gameHistory));
     }
-  }, [tokens, connected, publicKey]);
-  
-  // Update SOL balance from the blockchain
-  const updateSolBalance = async () => {
-    if (connected && publicKey && connection) {
-      try {
-        const balance = await connection.getBalance(publicKey);
-        setTokens(prev => 
-          prev.map(token => 
-            token.symbol === TokenType.SOL 
-              ? { ...token, balance: balance / LAMPORTS_PER_SOL } 
-              : token
-          )
-        );
-      } catch (error) {
-        console.error('Failed to fetch SOL balance:', error);
-      }
+  }, [gameHistory, isConnected, walletAddress]);
+
+  // Handle auto cashout - Fixed with eslint-disable comment
+  useEffect(() => {
+    if (
+      gameState.isActive && 
+      gameState.hasAutoCashout && 
+      gameState.currentMultiplier >= gameState.autoCashoutMultiplier
+    ) {
+      // Auto cashout when the multiplier reaches the threshold
+      cashout(100).catch(err => {
+        console.error('Auto cashout failed:', err);
+        toast.error('Auto cashout failed!');
+      });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState.currentMultiplier, gameState.hasAutoCashout, gameState.isActive, gameState.autoCashoutMultiplier]);
+
+  // Clear error state when component unmounts
+  useEffect(() => {
+    return () => {
+      setError(null);
+    };
+  }, []);
+
+  // Set auto cashout settings
+  const setAutoCashout = (value: boolean, multiplier: number = 2.0) => {
+    setGameState(prevState => ({
+      ...prevState,
+      hasAutoCashout: value,
+      autoCashoutMultiplier: multiplier
+    }));
   };
-  
-  // Check if an airdrop is available
-  const isAirdropAvailable = lastAirdropTime === null || 
-    (Date.now() - lastAirdropTime) > airdropCooldown;
-  
-  // Get token balance by symbol
-  const getTokenBalance = (symbol: TokenType): number => {
-    const token = tokens.find(t => t.symbol === symbol);
-    return token ? token.balance : 0;
-  };
-  
-  // Perform a token airdrop
-  const airdropToken = async (symbol: TokenType, amount: number): Promise<boolean> => {
-    if (!connected || !publicKey || !isAirdropAvailable || isProcessingAirdrop) {
-      return false;
+
+  // Start a new game
+  const startGame = async (amount: string) => {
+    if (!isConnected) {
+      toast.error('Please connect your wallet first!');
+      return;
     }
-    
-    setIsProcessingAirdrop(true);
-    
+
+    if (gameState.isActive) {
+      toast.error('You already have an active game!');
+      return;
+    }
+
     try {
-      // Handle SOL airdrops using devnet airdrop functionality
-      if (symbol === TokenType.SOL && connection) {
-        try {
-          // Devnet only allows airdrops up to 2 SOL
-          const airdropAmount = Math.min(amount, 2);
-          const signature = await connection.requestAirdrop(
-            publicKey,
-            airdropAmount * LAMPORTS_PER_SOL
-          );
-          
-          // Wait for confirmation
-          await connection.confirmTransaction(signature);
-          
-          // Update SOL balance
-          await updateSolBalance();
-        } catch (error) {
-          console.error('Failed to airdrop SOL:', error);
-          setIsProcessingAirdrop(false);
-          return false;
-        }
-      } else {
-        // Handle other tokens (simulated for now)
-        setTokens(prev => 
-          prev.map(token => 
-            token.symbol === symbol 
-              ? { ...token, balance: token.balance + amount } 
-              : token
-          )
-        );
-      }
-      
-      // Update last airdrop time
-      const now = Date.now();
-      setLastAirdropTime(now);
-      localStorage.setItem(`lastAirdropTime_${publicKey.toString()}`, now.toString());
-      
-      setIsProcessingAirdrop(false);
-      return true;
-    } catch (error) {
-      console.error('Failed to airdrop token:', error);
-      setIsProcessingAirdrop(false);
-      return false;
+      setIsLoading(true);
+      setError(null);
+
+      // Place bet through smart contract
+      await placeBet(amount);
+
+      // Update game state
+      setGameState({
+        gameId: currentGameId,
+        betAmount: amount,
+        startTime: Date.now(),
+        currentMultiplier: 1.0,
+        isActive: true,
+        hasAutoCashout: gameState.hasAutoCashout,
+        autoCashoutMultiplier: gameState.autoCashoutMultiplier
+      });
+
+      // Add to history as pending
+      const newHistoryEntry: GameHistoryEntry = {
+        id: `game_${Date.now()}`,
+        gameId: currentGameId,
+        betAmount: amount,
+        timestamp: Date.now(),
+        result: 'pending',
+        cashoutMultiplier: null,
+        profit: null
+      };
+
+      setGameHistory(prev => [newHistoryEntry, ...prev]);
+
+      toast.success('Game started!');
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to start game'));
+      toast.error('Failed to start game!');
+    } finally {
+      setIsLoading(false);
     }
   };
-  
-  // Deposit tokens to the game
-  const depositToken = async (symbol: TokenType, amount: number): Promise<boolean> => {
-    if (!connected || !publicKey || amount <= 0 || isProcessingTransaction) {
-      return false;
+
+  // Cashout from the current game - using useCallback to avoid recreating function
+  const cashout = useCallback(async (percentage: number) => {
+    if (!isConnected) {
+      toast.error('Please connect your wallet first!');
+      return;
     }
-    
-    setIsProcessingTransaction(true);
-    
+
+    if (!gameState.isActive || !gameState.gameId) {
+      toast.error('No active game to cash out from!');
+      return;
+    }
+
     try {
-      // Simulate a delay for processing
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // For now, just update the token balance (this would normally involve a blockchain transaction)
-      setTokens(prev => 
-        prev.map(token => 
-          token.symbol === symbol 
-            ? { ...token, balance: token.balance + amount } 
-            : token
+      setIsLoading(true);
+      setError(null);
+
+      // Cash out through smart contract
+      await cashOut(gameState.gameId, gameState.currentMultiplier);
+
+      // Calculate profit
+      const betAmount = parseFloat(gameState.betAmount);
+      const profit = (betAmount * gameState.currentMultiplier) - betAmount;
+
+      // Update history
+      setGameHistory(prev => 
+        prev.map(entry => 
+          entry.gameId === gameState.gameId 
+            ? {
+                ...entry,
+                result: 'win',
+                cashoutMultiplier: gameState.currentMultiplier,
+                profit: profit.toFixed(4)
+              }
+            : entry
         )
       );
-      
-      setIsProcessingTransaction(false);
-      return true;
-    } catch (error) {
-      console.error('Failed to deposit token:', error);
-      setIsProcessingTransaction(false);
-      return false;
+
+      // Clear active game
+      setGameState(prevState => ({
+        ...prevState,
+        isActive: false,
+        gameId: null,
+        startTime: null
+      }));
+
+      toast.success(`Cashed out at ${gameState.currentMultiplier.toFixed(2)}x!`);
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Failed to cash out'));
+      toast.error('Failed to cash out!');
+    } finally {
+      setIsLoading(false);
     }
+  }, [isConnected, gameState, cashOut]);
+
+  // Clear active game (used for resets)
+  const clearActiveGame = () => {
+    setGameState({
+      gameId: null,
+      betAmount: '0',
+      startTime: null,
+      currentMultiplier: 1.0,
+      isActive: false,
+      hasAutoCashout: gameState.hasAutoCashout,
+      autoCashoutMultiplier: gameState.autoCashoutMultiplier
+    });
   };
-  
-  // Withdraw tokens from the game
-  const withdrawToken = async (symbol: TokenType, amount: number): Promise<boolean> => {
-    if (!connected || !publicKey || amount <= 0 || isProcessingTransaction) {
-      return false;
-    }
-    
-    // Check if user has enough tokens
-    const tokenBalance = getTokenBalance(symbol);
-    if (tokenBalance < amount) {
-      return false;
-    }
-    
-    setIsProcessingTransaction(true);
-    
-    try {
-      // Simulate a delay for processing
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // For now, just update the token balance (this would normally involve a blockchain transaction)
-      setTokens(prev => 
-        prev.map(token => 
-          token.symbol === symbol 
-            ? { ...token, balance: token.balance - amount } 
-            : token
-        )
-      );
-      
-      setIsProcessingTransaction(false);
-      return true;
-    } catch (error) {
-      console.error('Failed to withdraw token:', error);
-      setIsProcessingTransaction(false);
-      return false;
-    }
+
+  // Create the value object to be provided by the context
+  const value = {
+    gameState,
+    gameHistory,
+    startGame,
+    cashout,
+    isLoading: isLoading || isPlacingBet || isCashingOut,
+    error: error || placeBetError || cashOutError,
+    clearActiveGame,
+    setAutoCashout
   };
-  
-  // Get specific balances
-  const solBalance = getTokenBalance(TokenType.SOL);
-  const ruggedBalance = getTokenBalance(TokenType.RUGGED);
-  
-  return (
-    <TokenContext.Provider value={{
-      tokens,
-      getTokenBalance,
-      airdropToken,
-      isAirdropAvailable,
-      lastAirdropTime,
-      airdropCooldown,
-      isProcessingAirdrop,
-      depositToken,
-      withdrawToken,
-      isProcessingTransaction,
-      currentToken,
-      setCurrentToken,
-      solBalance,
-      ruggedBalance
-    }}>
-      {children}
-    </TokenContext.Provider>
-  );
+
+  return <GameContext.Provider value={value}>{children}</GameContext.Provider>;
 };
 
-// Custom hook for using the token context
-export const useToken = () => useContext(TokenContext);
-
-// Alias for backward compatibility
-export const useTokenContext = useToken;
+// Custom hook to use the game context
+export const useGameContext = (): GameContextType => {
+  const context = useContext(GameContext);
+  if (context === undefined) {
+    throw new Error('useGameContext must be used within a GameProvider');
+  }
+  return context;
+};

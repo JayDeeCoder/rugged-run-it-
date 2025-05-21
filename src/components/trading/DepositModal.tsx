@@ -3,24 +3,31 @@ import { FC, useRef } from 'react';
 import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
-import { X } from 'lucide-react';
+import { X, Copy, Check } from 'lucide-react';
+import { useState } from 'react';
 
 // Define enum locally instead of importing
 enum TokenType {
     SOL = 'SOL',
     RUGGED = 'RUGGED'
-    // Add other tokens as needed
 }
 
 interface DepositModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentToken: TokenType;
+  walletAddress: string; // Add wallet address prop
 }
 
-const DepositModal: FC<DepositModalProps> = ({ isOpen, onClose, currentToken }) => {
+const DepositModal: FC<DepositModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  currentToken,
+  walletAddress 
+}) => {
   const { currentUser } = useContext(UserContext);
   const modalRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
   
   // Handle clicks outside the modal
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
@@ -33,11 +40,18 @@ const DepositModal: FC<DepositModalProps> = ({ isOpen, onClose, currentToken }) 
   // Get token symbol
   const tokenSymbol = currentToken;
   
-  // IMPORTANT: For debugging, let's see what properties currentUser actually has
-  console.log("Current user object:", currentUser);
+  // Function to copy address to clipboard
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(walletAddress);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
   
-  // Temporary hardcoded wallet address for testing
-  const dummyAddress = "8ZU6Pq...2fkm";
+  // Format address for display (truncate)
+  const formatAddress = (address: string) => {
+    if (address.length <= 12) return address;
+    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+  };
   
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
@@ -68,21 +82,42 @@ const DepositModal: FC<DepositModalProps> = ({ isOpen, onClose, currentToken }) 
           </div>
         </div>
         
-        {/* Wallet Address Display - Simple Version */}
+        {/* Wallet Address Display with copy button */}
         <div className="mb-6">
           <label className="block text-gray-300 mb-2 text-sm">
             Your Wallet Address
           </label>
-          <div className="bg-gray-800 border border-gray-700 rounded-md p-4 text-center">
-            <p className="text-white font-mono break-all">
-              {dummyAddress}
-            </p>
+          <div className="flex bg-gray-800 border border-gray-700 rounded-md overflow-hidden">
+            <div className="flex-1 p-4 font-mono text-white break-all overflow-x-auto">
+              {walletAddress}
+            </div>
+            <button 
+              onClick={copyToClipboard}
+              className="bg-gray-700 px-3 hover:bg-gray-600 transition-colors flex items-center"
+              title="Copy address"
+            >
+              {copied ? <Check size={18} className="text-green-500" /> : <Copy size={18} />}
+            </button>
+          </div>
+          <div className="text-center mt-2 text-xs text-gray-400">
+            Send {tokenSymbol} only to this address
           </div>
         </div>
         
-        {/* Simple Instructions */}
-        <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-4 rounded-md mb-6 text-sm">
-          <p>To deposit {tokenSymbol}, send tokens to the wallet address above.</p>
+        {/* QR Code placeholder - can be implemented with a QR code library */}
+        <div className="flex justify-center mb-6">
+          <div className="w-48 h-48 bg-white p-2 rounded-md flex items-center justify-center">
+            <div className="text-black text-xs text-center">
+              QR Code for {formatAddress(walletAddress)}
+              <br />
+              (Use a QR code library to implement)
+            </div>
+          </div>
+        </div>
+        
+        {/* Warning */}
+        <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-4 rounded-md mb-6 text-sm">
+          <p>Important: Only send {tokenSymbol} to this address. Sending any other assets may result in permanent loss.</p>
         </div>
       </div>
     </div>

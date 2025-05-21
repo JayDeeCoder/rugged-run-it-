@@ -1,255 +1,195 @@
-// src/components/layout/Navbar.tsx
-import { FC, useState, useEffect, useRef, useContext } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useWallet } from '@solana/wallet-adapter-react';
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { usePrivy } from '@privy-io/react-auth';
-import { useConnection } from '@solana/wallet-adapter-react';
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { UserContext } from '../../context/UserContext';
-import useOutsideClick from '../../hooks/useOutsideClick';
-import { Menu, User, ChevronDown, LogOut, Wallet, BarChart2, Trophy, Settings, Edit } from 'lucide-react';
-import UsernameModal from '../auth/UsernameModal';
+import { Menu, X, User, LogOut, Settings } from 'lucide-react';
 
-const Navbar: FC = () => {
-  const { connected, publicKey, disconnect } = useWallet();
-  const { connection } = useConnection();
-  const { authenticated, login, logout, user } = usePrivy();
-  const { currentUser, experience, userLevel, crates, hasCustomUsername, setUsername } = useContext(UserContext);
-
-  const [walletBalance, setWalletBalance] = useState<number>(0);
-  const [showUserMenu, setShowUserMenu] = useState<boolean>(false);
-  const [showMobileMenu, setShowMobileMenu] = useState<boolean>(false);
-  const [isMounted, setIsMounted] = useState<boolean>(false);
-  const [showUsernameModal, setShowUsernameModal] = useState<boolean>(false);
-
-  const userMenuRef = useRef<HTMLDivElement>(null);
-  useOutsideClick(userMenuRef as React.RefObject<HTMLElement>, () => setShowUserMenu(false));
-
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
-  useEffect(() => {
-    const fetchBalance = async () => {
-      if (connected && publicKey && connection) {
-        try {
-          const balance = await connection.getBalance(publicKey);
-          setWalletBalance(balance / LAMPORTS_PER_SOL);
-        } catch (error) {
-          console.error('Failed to fetch wallet balance:', error);
-        }
-      } else {
-        setWalletBalance(0);
-      }
-    };
-
-    fetchBalance();
-    const intervalId = setInterval(fetchBalance, 15000);
-    return () => clearInterval(intervalId);
-  }, [connected, publicKey, connection]);
-
-  const handleLogout = async () => {
-    if (connected) await disconnect();
-    if (authenticated) await logout();
-    setShowUserMenu(false);
+const Navbar = () => {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false);
+  
+  // Use Privy hooks for authentication instead of wallet adapter
+  const { authenticated, user, login, logout, ready } = usePrivy();
+  
+  // Toggle mobile menu
+  const toggleMobileMenu = () => {
+    setIsMobileMenuOpen(!isMobileMenuOpen);
   };
-
-  const getUserDisplayName = () => {
-    return currentUser?.username || user?.email?.address || 'User';
+  
+  // Toggle user dropdown
+  const toggleUserDropdown = () => {
+    setIsUserDropdownOpen(!isUserDropdownOpen);
   };
-
-  const handleSetUsername = () => {
-    setShowUsernameModal(true);
-    setShowUserMenu(false);
-  };
-
-  const handleUsernameSubmit = (username: string) => {
-    setUsername(username);
-  };
-
-  if (!isMounted) {
-    return (
-      <header className="bg-[#0d0d0f] py-2 px-3 border-b border-gray-800 text-white">
-        <div className="container mx-auto flex items-center justify-between">
-          <Link href="/" className="flex items-center">
-            <Image
-              src="/images/ruggedfun-logo-resize-new.png"
-              alt="RUGGED.FUN"
-              width={140}
-              height={35}
-              className="object-contain"
-              priority
-            />
-          </Link>
-        </div>
-      </header>
-    );
-  }
-
+  
   return (
-    <header className="bg-[#0d0d0f] py-2 px-3 border-b border-gray-800 text-white">
-      <div className="container mx-auto flex items-center justify-between">
-        <div className="flex items-center">
-          <Link href="/" className="flex items-center mr-4">
-            <Image
-              src="/images/ruggedfun-logo-resize-new.png"
-              alt="RUGGED.FUN"
-              width={140}
-              height={35}
-              className="object-contain"
-              priority
-            />
+    <nav className="bg-[#0d0d0f] border-b border-gray-800 py-4 px-6">
+      <div className="container mx-auto flex justify-between items-center">
+        {/* Logo */}
+        <Link href="/" className="flex items-center">
+          <Image 
+            src="/images/logo.png" 
+            alt="Logo" 
+            width={40} 
+            height={40} 
+            className="mr-2"
+          />
+          <span className="text-white text-xl font-bold">RUGGED.FUN</span>
+        </Link>
+        
+        {/* Desktop Navigation */}
+        <div className="hidden md:flex items-center space-x-6">
+          <Link href="/dashboard" className="text-gray-300 hover:text-white">
+            Dashboard
           </Link>
-
-          <nav className="hidden md:flex items-center">
-            {/* Removed Home button */}
-            <Link href="/dashboard" className="px-3 py-1 hover:text-gray-300 text-sm">Dashboard</Link>
-            <Link href="/leaderboard" className="px-3 py-1 hover:text-gray-300 text-sm">Leaderboard</Link>
-          </nav>
-        </div>
-
-        <div className="flex items-center">
-          {authenticated ? (
-            <>
-              <div className="hidden md:flex items-center mr-3">
-                {userLevel && (
-                  <div className="flex items-center bg-gray-800 rounded-full px-2 py-1 mr-2">
-                    <span className="text-xs text-gray-400 mr-1">Lv.</span>
-                    <span className="text-sm font-medium">{userLevel}</span>
+          <Link href="/trade" className="text-gray-300 hover:text-white">
+            Trade
+          </Link>
+          <Link href="/leaderboard" className="text-gray-300 hover:text-white">
+            Leaderboard
+          </Link>
+          
+          {/* REMOVED: Wallet Adapter Button */}
+          {/* Replace with Privy authentication */}
+          {!ready ? (
+            <div className="animate-pulse bg-gray-700 rounded-md h-10 w-24"></div>
+          ) : authenticated ? (
+            <div className="relative">
+              <button 
+                onClick={toggleUserDropdown}
+                className="flex items-center bg-gray-800 hover:bg-gray-700 text-white rounded-md px-4 py-2"
+              >
+                <User size={18} className="mr-2" />
+                <span className="max-w-[100px] truncate">
+                  {user?.email?.address || "Account"}
+                </span>
+              </button>
+              
+              {/* User dropdown menu */}
+              {isUserDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-48 bg-gray-800 rounded-md shadow-lg z-10">
+                  <div className="py-1">
+                    <Link 
+                      href="/profile"
+                      className="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
+                      onClick={() => setIsUserDropdownOpen(false)}
+                    >
+                      <div className="flex items-center">
+                        <User size={16} className="mr-2" />
+                        Profile
+                      </div>
+                    </Link>
+                    <Link 
+                      href="/settings"
+                      className="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700"
+                      onClick={() => setIsUserDropdownOpen(false)}
+                    >
+                      <div className="flex items-center">
+                        <Settings size={16} className="mr-2" />
+                        Settings
+                      </div>
+                    </Link>
+                    <button 
+                      onClick={() => {
+                        logout();
+                        setIsUserDropdownOpen(false);
+                      }}
+                      className="block w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-700"
+                    >
+                      <div className="flex items-center">
+                        <LogOut size={16} className="mr-2" />
+                        Logout
+                      </div>
+                    </button>
                   </div>
-                )}
-                <div className="hidden md:block h-2 w-20 bg-gray-800 rounded-full mr-2">
-                  <div className="h-full bg-green-500 rounded-full" style={{ width: `${experience}%` }}></div>
                 </div>
-                {crates > 0 && (
-                  <div className="flex items-center bg-yellow-900 rounded-full px-2 py-1 mr-2">
-                    <span className="text-xs text-yellow-500 mr-1">🎁</span>
-                    <span className="text-sm font-medium text-yellow-400">{crates}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="relative" ref={userMenuRef}>
-                <button
-                  className="flex items-center bg-gray-800 hover:bg-gray-700 rounded-md px-2 py-1 transition-colors"
-                  onClick={() => setShowUserMenu(!showUserMenu)}
-                >
-                  <User size={18} className="mr-1" />
-                  <div className="hidden md:block text-left mr-1">
-                    <div className="text-xs font-medium">{getUserDisplayName()}</div>
-                    {connected && (
-                      <div className="text-xs text-gray-400">{walletBalance.toFixed(3)} SOL</div>
-                    )}
-                  </div>
-                  <ChevronDown size={14} className={`transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
-                </button>
-
-                {showUserMenu && (
-                  <div className="absolute right-0 mt-2 w-56 bg-gray-800 rounded-md shadow-lg overflow-hidden z-50">
-                    <div className="py-2">
-                      <div className="px-4 py-2 border-b border-gray-700">
-                        <div className="font-medium flex items-center justify-between">
-                          <span>{getUserDisplayName()}</span>
-                          <button 
-                            onClick={handleSetUsername}
-                            className="text-xs bg-gray-700 hover:bg-gray-600 p-1 rounded"
-                            title="Change username"
-                          >
-                            <Edit size={12} />
-                          </button>
-                        </div>
-                        <div className="text-sm text-gray-400">{user?.email?.address}</div>
-                      </div>
-
-                      <div className="px-4 py-2 border-b border-gray-700">
-                        {connected ? (
-                          <>
-                            <div className="flex justify-between items-center mb-1">
-                              <span className="text-sm text-gray-400">Wallet:</span>
-                              <span className="text-sm font-mono">
-                                {`${publicKey?.toString().slice(0, 4)}...${publicKey?.toString().slice(-4)}`}
-                              </span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-sm text-gray-400">Balance:</span>
-                              <span className="text-sm font-medium text-green-400">
-                                {walletBalance.toFixed(3)} SOL
-                              </span>
-                            </div>
-                            <button
-                              onClick={disconnect}
-                              className="mt-2 w-full text-sm bg-gray-700 hover:bg-gray-600 rounded px-3 py-1 text-left flex items-center"
-                            >
-                              <Wallet size={14} className="mr-2" />
-                              Disconnect Wallet
-                            </button>
-                          </>
-                        ) : (
-                          <WalletMultiButton className="wallet-adapter-button wallet-adapter-button-connect" />
-                        )}
-                      </div>
-
-                      <div className="py-1">
-                        <Link href="/dashboard" className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center" onClick={() => setShowUserMenu(false)}>
-                          <BarChart2 size={14} className="mr-2" /> Dashboard
-                        </Link>
-                        <Link href="/leaderboard" className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center" onClick={() => setShowUserMenu(false)}>
-                          <Trophy size={14} className="mr-2" /> Leaderboard
-                        </Link>
-                        <Link href="/settings" className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center" onClick={() => setShowUserMenu(false)}>
-                          <Settings size={14} className="mr-2" /> Settings
-                        </Link>
-                      </div>
-
-                      <div className="border-t border-gray-700 py-1">
-                        <button
-                          onClick={handleLogout}
-                          className="w-full text-left px-4 py-2 text-sm hover:bg-gray-700 flex items-center text-red-400"
-                        >
-                          <LogOut size={14} className="mr-2" />
-                          Log Out
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
+              )}
+            </div>
           ) : (
-            <button
-              onClick={login}
-              className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded-md text-sm transition-colors"
+            <button 
+              onClick={() => login()}
+              className="bg-green-600 hover:bg-green-700 text-white rounded-md px-4 py-2"
             >
               Login
             </button>
           )}
-
-          <button className="ml-3 md:hidden" onClick={() => setShowMobileMenu(!showMobileMenu)}>
-            <Menu size={22} />
-          </button>
         </div>
+        
+        {/* Mobile menu button */}
+        <button 
+          className="md:hidden text-gray-300 hover:text-white"
+          onClick={toggleMobileMenu}
+        >
+          {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+        </button>
       </div>
-
-      {showMobileMenu && (
-        <div className="md:hidden bg-gray-800 mt-3 rounded-md p-2">
-          <nav className="flex flex-col">
-            <Link href="/dashboard" className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm">Dashboard</Link>
-            <Link href="/leaderboard" className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm">Leaderboard</Link>
-            {authenticated && <Link href="/settings" className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm">Settings</Link>}
-          </nav>
+      
+      {/* Mobile menu */}
+      {isMobileMenuOpen && (
+        <div className="md:hidden mt-4 px-6 pb-4">
+          <div className="flex flex-col space-y-3">
+            <Link 
+              href="/dashboard" 
+              className="text-gray-300 hover:text-white py-2"
+              onClick={() => setIsMobileMenuOpen(false)}
+            >
+              Dashboard
+            </Link>
+            <Link 
+              href="/trade" 
+              className="text-gray-300 hover:text-white py-2"
+              onClick={() => setIsMobileMenuOpen(false)}
+            >
+              Trade
+            </Link>
+            <Link 
+              href="/leaderboard" 
+              className="text-gray-300 hover:text-white py-2"
+              onClick={() => setIsMobileMenuOpen(false)}
+            >
+              Leaderboard
+            </Link>
+            
+            {/* REMOVED: Mobile Wallet Adapter Button */}
+            {/* Replace with Privy authentication */}
+            {!ready ? (
+              <div className="animate-pulse bg-gray-700 rounded-md h-10 w-full"></div>
+            ) : authenticated ? (
+              <div className="border-t border-gray-800 pt-3 mt-2">
+                <div className="text-sm text-gray-400 mb-2">Logged in as:</div>
+                <div className="text-white mb-2">
+                  {user?.email?.address || "User"}
+                </div>
+                <div className="flex space-x-2">
+                  <Link 
+                    href="/profile"
+                    className="flex-1 text-center bg-gray-800 hover:bg-gray-700 text-white rounded-md px-4 py-2 text-sm"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                  >
+                    Profile
+                  </Link>
+                  <button 
+                    onClick={() => {
+                      logout();
+                      setIsMobileMenuOpen(false);
+                    }}
+                    className="flex-1 bg-red-900 hover:bg-red-800 text-white rounded-md px-4 py-2 text-sm"
+                  >
+                    Logout
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button 
+                onClick={() => login()}
+                className="w-full bg-green-600 hover:bg-green-700 text-white rounded-md px-4 py-2 mt-2"
+              >
+                Login
+              </button>
+            )}
+          </div>
         </div>
       )}
-
-      {/* Username Modal */}
-      <UsernameModal 
-        isOpen={showUsernameModal}
-        onClose={() => setShowUsernameModal(false)}
-        onSubmit={handleUsernameSubmit}
-        currentUsername={currentUser?.username || ''}
-      />
-    </header>
+    </nav>
   );
 };
 

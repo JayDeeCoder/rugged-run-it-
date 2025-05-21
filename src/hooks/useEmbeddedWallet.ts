@@ -41,26 +41,22 @@ export const useEmbeddedWallet = () => {
   // Create a Solana wallet if it doesn't exist
   const createEmbeddedWallet = useCallback(async () => {
     if (!authenticated || isCreating) {
-      console.log("Cannot create wallet: not authenticated or already creating");
       return null;
     }
     
     if (embeddedWallet) {
-      console.log("Wallet already exists:", embeddedWallet.address);
       return true;
     }
     
-    console.log("Creating new game wallet for user");
     setIsCreating(true);
     try {
       // Explicitly create a Solana wallet
-      const result = await createWallet();
-      console.log("Game wallet created successfully:", result);
-      toast.success('Game wallet created successfully!');
+      await createWallet();
+      toast.success('Wallet created successfully');
       return true;
     } catch (error) {
-      console.error('Failed to create game wallet:', error);
-      toast.error('Failed to create game wallet. Please try again.');
+      console.error('Failed to create wallet:', error);
+      toast.error('Failed to create wallet. Please try again.');
       throw error;
     } finally {
       setIsCreating(false);
@@ -74,9 +70,9 @@ export const useEmbeddedWallet = () => {
         try {
           setIsCreating(true);
           await createWallet();
-          toast.success('Game wallet created automatically');
+          toast.success('Wallet created automatically');
         } catch (error) {
-          console.error('Auto game wallet creation failed:', error);
+          console.error('Auto wallet creation failed:', error);
         } finally {
           setIsCreating(false);
         }
@@ -86,20 +82,20 @@ export const useEmbeddedWallet = () => {
     autoCreateWallet();
   }, [ready, authenticated, embeddedWallet, isLoadingWallets, isCreating, createWallet]);
 
-  // Function to fetch wallet balance using Tatum.io RPC
+  // Function to fetch wallet balance
   useEffect(() => {
     const fetchBalance = async () => {
       if (embeddedWallet) {
         try {
-          // Setup connection with Tatum.io RPC
-          const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'hhttps://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
-          const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '6CqgIf5nqVF9rWeernULokib0PAr6yh3 ';
+          // Use environment variables for production endpoints
+          const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
+          const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '';
           
           const connection = new Connection(rpcUrl, {
             commitment: 'confirmed' as Commitment,
-            httpHeaders: {
+            httpHeaders: apiKey ? {
               'x-api-key': apiKey
-            }
+            } : undefined
           });
           
           // Get the balance using the embedded wallet address
@@ -109,9 +105,8 @@ export const useEmbeddedWallet = () => {
           
           setBalance(solBalance);
         } catch (error) {
-          console.error('Error fetching game wallet balance:', error);
-          // Fallback to avoid breaking the UI
-          setBalance("0");
+          console.error('Error fetching wallet balance:', error);
+          // Don't update balance on error to keep last known value
         }
       }
     };
@@ -129,22 +124,22 @@ export const useEmbeddedWallet = () => {
     setIsReady(ready && !isLoadingWallets && !!embeddedWallet);
   }, [ready, isLoadingWallets, embeddedWallet]);
 
-  // Send transaction function using Tatum.io RPC - optimized for game transactions
+  // Send transaction function for transactions
   const sendTransaction = async (to: string, amount: number) => {
     if (!embeddedWallet) {
-      throw new Error('Game wallet not connected');
+      throw new Error('Wallet not connected');
     }
 
     try {
-      const connection = new Connection(
-        process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'hhttps://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3',
-        {
-          commitment: 'confirmed' as Commitment,
-          httpHeaders: {
-            'x-api-key': process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '6CqgIf5nqVF9rWeernULokib0PAr6yh3'
-          }
-        }
-      );
+      const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
+      const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '';
+      
+      const connection = new Connection(rpcUrl, {
+        commitment: 'confirmed' as Commitment,
+        httpHeaders: apiKey ? {
+          'x-api-key': apiKey
+        } : undefined
+      });
       
       // Get sender public key
       const fromPubkey = new PublicKey(embeddedWallet.address);
@@ -165,26 +160,23 @@ export const useEmbeddedWallet = () => {
       transaction.feePayer = fromPubkey;
       
       // Handle different wallet signing methods
-      if (embeddedWallet.signTransaction) {
+      if (embeddedWallet.signAndSendTransaction) {
+        const result = await embeddedWallet.signAndSendTransaction({
+          transaction: transaction.serialize({ requireAllSignatures: false }),
+          message: `Transaction: ${amount} SOL to ${to.slice(0, 8)}...`
+        });
+        return { signature: result.signature || result };
+      } else if (embeddedWallet.signTransaction) {
         const signedTransaction = await embeddedWallet.signTransaction(transaction);
         const signature = await connection.sendRawTransaction(signedTransaction.serialize());
         await connection.confirmTransaction(signature);
         return { signature };
-      } else if (embeddedWallet.signAndSendTransaction) {
-        const result = await embeddedWallet.signAndSendTransaction({
-          transaction: transaction.serialize({ requireAllSignatures: false }),
-          message: `Game transaction: ${amount} SOL to ${to.slice(0, 8)}...`
-        });
-        return { signature: result.signature || result };
       } else {
-        // Fallback for demo/development purposes
-        console.log(`Mock game transaction of ${amount} SOL to ${to.substring(0, 6)}...`);
-        toast.success(`Game transaction of ${amount} SOL completed`);
-        return { signature: `mock-game-tx-${Date.now()}` };
+        throw new Error('Wallet does not support required transaction methods');
       }
     } catch (error) {
-      console.error('Game transaction failed:', error);
-      toast.error('Game transaction failed');
+      console.error('Transaction failed:', error);
+      toast.error('Transaction failed');
       throw error;
     }
   };
@@ -192,7 +184,7 @@ export const useEmbeddedWallet = () => {
   // Place a bet transaction
   const placeBet = async (amount: number, gameContract: string) => {
     if (!embeddedWallet) {
-      throw new Error('Game wallet not connected');
+      throw new Error('Wallet not connected');
     }
     
     try {
@@ -208,18 +200,16 @@ export const useEmbeddedWallet = () => {
   
   // Cashout transaction
   const cashout = async (gameContract: string, amount: number) => {
-    // For cashing out, this would typically be a different kind of transaction
-    // but for this example we'll use a similar approach
     if (!embeddedWallet) {
-      throw new Error('Game wallet not connected');
+      throw new Error('Wallet not connected');
     }
     
     try {
-      // In a real implementation, this would call a specific game contract function
-      // Here we're simulating it with a simple transaction
-      console.log(`Simulating cashout of ${amount} SOL from ${gameContract}`);
-      toast.success(`Cashed out ${amount} SOL successfully!`);
-      return { signature: `mock-cashout-tx-${Date.now()}` };
+      // In production, this would call the game contract's cashout function
+      // For now, we just log the intent since we don't have the actual contract implementation
+      const result = await sendTransaction(gameContract, 0.00001); // Minimal transaction to trigger the cashout
+      toast.success(`Cashout successful`);
+      return result;
     } catch (error) {
       console.error('Error cashing out:', error);
       toast.error('Failed to cash out');

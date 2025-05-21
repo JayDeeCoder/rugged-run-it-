@@ -8,6 +8,7 @@ import { UserProvider } from '../context/UserContext';
 import { ChatProvider } from '../context/ChatContext';
 import { TradeProvider } from '../context/TradeContext';
 import { GameProvider } from '../context/GameContext';
+import { TokenProvider } from '../context/TokenContext';
 
 // Client component with all the providers that need 'use client'
 // Removed SolanaProvider since we're using Privy instead
@@ -19,13 +20,15 @@ export default function ClientLayout({
   return (
     <PrivyAuthProvider>
       <UserProvider>
-        <GameProvider>
-          <TradeProvider>
-            <ChatProvider>
-              {children}
-            </ChatProvider>
-          </TradeProvider>
-        </GameProvider>
+        <TokenProvider>
+          <GameProvider>
+            <TradeProvider>
+              <ChatProvider>
+                {children}
+              </ChatProvider>
+            </TradeProvider>
+          </GameProvider>
+        </TokenProvider>
       </UserProvider>
     </PrivyAuthProvider>
   );

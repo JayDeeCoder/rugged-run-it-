@@ -22,6 +22,7 @@ const AirdropModal: FC<AirdropModalProps> = ({ isOpen, onClose }) => {
   // Check if wallet is ready using the game wallet data
   const isWalletReady = authenticated && gameWallet !== undefined;
   
+  // Use useTokenContext hook instead of useToken
   const { airdropToken, isAirdropAvailable, lastAirdropTime, airdropCooldown, isProcessingAirdrop } = useTokenContext();
   
   const modalRef = useRef<HTMLDivElement>(null);

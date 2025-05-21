@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useState, useContext, useEffect, ReactNode, useCallback } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallets, usePrivy } from '@privy-io/react-auth';
 import { useRuggedGame } from '../app/dashboard/useRuggedGame';
 import { toast } from 'react-hot-toast';
 
@@ -44,7 +44,14 @@ const GameContext = createContext<GameContextType | undefined>(undefined);
 
 // Create a provider component
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { publicKey, connected } = useWallet();
+  const { wallets } = useWallets();
+  const { authenticated } = usePrivy();
+  
+  // Get the active wallet
+  const activeWallet = wallets.length > 0 ? wallets[0] : null;
+  const isConnected = wallets.length > 0 && authenticated;
+  const walletAddress = activeWallet?.address;
+  
   const { 
     placeBet, 
     cashOut, 
@@ -75,8 +82,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Load game history from localStorage on mount
   useEffect(() => {
-    if (connected && publicKey) {
-      const walletAddress = publicKey.toString();
+    if (isConnected && walletAddress) {
       const savedHistory = localStorage.getItem(`game_history_${walletAddress}`);
       if (savedHistory) {
         try {
@@ -86,15 +92,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
     }
-  }, [connected, publicKey]);
+  }, [isConnected, walletAddress]);
 
   // Save game history to localStorage when it changes
   useEffect(() => {
-    if (connected && publicKey && gameHistory.length > 0) {
-      const walletAddress = publicKey.toString();
+    if (isConnected && walletAddress && gameHistory.length > 0) {
       localStorage.setItem(`game_history_${walletAddress}`, JSON.stringify(gameHistory));
     }
-  }, [gameHistory, connected, publicKey]);
+  }, [gameHistory, isConnected, walletAddress]);
 
   // Handle auto cashout - Fixed with eslint-disable comment
   useEffect(() => {
@@ -130,7 +135,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Start a new game
   const startGame = async (amount: string) => {
-    if (!connected) {
+    if (!isConnected) {
       toast.error('Please connect your wallet first!');
       return;
     }
@@ -182,7 +187,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Cashout from the current game - using useCallback to avoid recreating function
   const cashout = useCallback(async (percentage: number) => {
-    if (!connected) {
+    if (!isConnected) {
       toast.error('Please connect your wallet first!');
       return;
     }
@@ -232,7 +237,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } finally {
       setIsLoading(false);
     }
-  }, [connected, gameState, cashOut]);
+  }, [isConnected, gameState, cashOut]);
 
   // Clear active game (used for resets)
   const clearActiveGame = () => {

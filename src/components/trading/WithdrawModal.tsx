@@ -5,7 +5,12 @@ import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
 import { ArrowDownToLine, Wallet, Check, Loader, X, Copy, ExternalLink } from 'lucide-react';
-import { TokenType } from '../../types/tokens';
+// Define the TokenType enum locally
+enum TokenType {
+  SOL = 'SOL',
+  RUGGED = 'RUGGED'
+  // Add other tokens as needed
+}
 
 interface WithdrawModalProps {
   isOpen: boolean;

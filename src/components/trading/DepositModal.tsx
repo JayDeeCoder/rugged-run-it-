@@ -4,7 +4,13 @@ import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
 import { X } from 'lucide-react';
-import { TokenType } from '../../types/tokens';
+
+// Define enum locally instead of importing
+enum TokenType {
+    SOL = 'SOL',
+    RUGGED = 'RUGGED'
+    // Add other tokens as needed
+}
 
 interface DepositModalProps {
   isOpen: boolean;

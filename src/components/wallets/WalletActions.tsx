@@ -1,11 +1,24 @@
 import { useState } from 'react';
-import { ArrowUpToLine, ArrowDownToLine } from 'lucide-react'; // Add these imports
+import { ArrowUpToLine, ArrowDownToLine } from 'lucide-react';
 import DepositModal from '../trading/DepositModal';
-import WithdrawModal from './WithdrawModal';
+import WithdrawModal from '../../components/trading/WithdrawModal';
+
+// Define the TokenType enum locally
+enum TokenType {
+  SOL = 'SOL',
+  RUGGED = 'RUGGED'
+  // Add other tokens as needed
+}
 
 const WalletActions = () => {
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
+  
+  // Use the local TokenType enum
+  const currentToken = TokenType.SOL;
+  
+  // Current balance
+  const balance = 0.123;
   
   return (
     <div className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-4">
@@ -29,17 +42,20 @@ const WalletActions = () => {
         </button>
       </div>
       
-      {/* Modals */}
+      {/* Pass the enum value to the modals */}
       <DepositModal 
         isOpen={isDepositModalOpen} 
         onClose={() => setIsDepositModalOpen(false)} 
+        currentToken={currentToken}
       />
       
       <WithdrawModal 
         isOpen={isWithdrawModalOpen} 
         onClose={() => setIsWithdrawModalOpen(false)}
+        currentToken={currentToken}
+        balance={balance}
         onSuccess={() => {
-          // Handle successful withdrawal, e.g., refresh balance
+          // Handle successful withdrawal
           console.log('Withdrawal successful');
         }}
       />

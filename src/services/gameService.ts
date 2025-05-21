@@ -1,13 +1,13 @@
 import { Connection, Keypair, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import logger from '../utils/logger';
 
-// Load Solana connection with Tatum.io RPC
+// Load Solana connection with ALCHEMY RPC
 const connection = new Connection(
-  process.env.SOLANA_RPC_URL || 'https://solana-mainnet.gateway.tatum.io/', 
+  process.env.SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3', 
   {
     commitment: 'confirmed',
     httpHeaders: {
-      'x-api-key': process.env.TATUM_API_KEY || ''
+      'x-api-key': process.env.ALCHEMY_API_KEY || ''
     }
   }
 );

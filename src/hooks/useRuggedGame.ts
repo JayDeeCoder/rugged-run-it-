@@ -28,7 +28,7 @@ export interface GameResult {
 export class RuggedGameService {
   // House wallet address - funds go here when users get rugged
   private static HOUSE_WALLET_ADDRESS = process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS || 
-                                       'DmFLNxVq5k9DvyVGJj7TprKUFjF9TbKdcA4QQfT3xMHM';
+                                       'J85gzK8UMx95GXCHXWYzoKwVt453nCSVFDaa9CVRGgkn';
   
   // Keep track of game states
   private activeGames: Map<string, GameState> = new Map();
@@ -39,8 +39,8 @@ export class RuggedGameService {
     console.log("RuggedGameService initialized with house wallet:", RuggedGameService.HOUSE_WALLET_ADDRESS);
     
     // Initialize Solana connection
-    const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.gateway.tatum.io/';
-    const apiKey = process.env.NEXT_PUBLIC_TATUM_API_KEY || 't-682a1c08650ecaebde72d2aa-264faa21e495426f9a2eb26f';
+    const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
+    const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '6CqgIf5nqVF9rWeernULokib0PAr6yh3';
     
     this.connection = new Connection(rpcUrl, {
       commitment: 'confirmed',

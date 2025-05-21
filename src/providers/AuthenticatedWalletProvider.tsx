@@ -1,39 +1,43 @@
 'use client';
 
 import React, { FC, ReactNode, useEffect, useState } from 'react';
-import { usePrivy } from '@privy-io/react-auth';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
 import SolanaWalletProvider from './SolanaWalletProvider';
-import { useWallet } from '@solana/wallet-adapter-react';
 
 interface AuthenticatedWalletProviderProps {
   children: ReactNode;
 }
 
 const AuthenticatedWalletProvider: FC<AuthenticatedWalletProviderProps> = ({ children }) => {
-  const { authenticated, ready } = usePrivy();
-  const { disconnect } = useWallet();
+  const { authenticated, ready, logout } = usePrivy();
+  const { wallets } = useWallets();
   const [canConnectWallet, setCanConnectWallet] = useState(false);
+  
+  // Find embedded wallet if available
+  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
 
-  // Disconnect wallet if user is not authenticated
+  // Manage wallet connection state based on authentication
   useEffect(() => {
     if (ready) {
       if (authenticated) {
         setCanConnectWallet(true);
       } else {
-        // Force disconnect wallet if not authenticated
-        disconnect?.();
+        // If not authenticated, we don't need to explicitly disconnect
+        // as the Privy provider handles this automatically on logout
         setCanConnectWallet(false);
       }
     }
-  }, [authenticated, ready, disconnect]);
+  }, [authenticated, ready]);
 
   // Clone children with props properly
   const childrenWithProps = React.Children.map(children, child => {
     // Check if valid element before trying to clone
     if (React.isValidElement(child)) {
-      // Create a new props object manually instead of spreading
+      // Create a new props object with wallet information
       const newProps = {
-        canConnectWallet: canConnectWallet
+        canConnectWallet,
+        embeddedWallet: embeddedWallet || null,
+        isWalletReady: canConnectWallet && !!embeddedWallet
       };
       
       // Clone with the new props object

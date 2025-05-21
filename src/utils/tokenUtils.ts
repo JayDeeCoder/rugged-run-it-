@@ -15,11 +15,11 @@ export const getTokenBalance = async (
 ): Promise<number> => {
   try {
     // Use Tatum API endpoint for token accounts
-    const endpoint = `${process.env.NEXT_PUBLIC_TATUM_API_ENDPOINT || 'https://api.tatum.io'}/v3/solana/account/tokenBalance/${tokenMint}/${owner.toString()}`;
+    const endpoint = `${process.env.NEXT_PUBLIC_ALCHEMY_API_ENDPOINT || 'https://solana-mainnet.g.alchemy.com'}/v2/solana/account/tokenBalance/${tokenMint}/${owner.toString()}`;
     
     const response = await fetch(endpoint, {
       headers: {
-        'x-api-key': process.env.NEXT_PUBLIC_TATUM_API_KEY || 't-682a1c08650ecaebde72d2aa-264faa21e495426f9a2eb26f'
+        'x-api-key': process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '6CqgIf5nqVF9rWeernULokib0PAr6yh3'
       }
     });
     

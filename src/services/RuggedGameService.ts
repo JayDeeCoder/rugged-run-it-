@@ -1,15 +1,16 @@
 // src/services/RuggedGameService.ts
-import { Connection, PublicKey, Transaction, SendOptions, LAMPORTS_PER_SOL, SystemProgram } from '@solana/web3.js';
-import solanaWalletService from './SolanaWalletService';
+import { Connection, PublicKey, Transaction, LAMPORTS_PER_SOL, SystemProgram } from '@solana/web3.js';
 import { toast } from 'react-hot-toast';
 
 // Types for game state management
+export type TokenType = 'SOL' | 'RUGGED';
+
 export interface GameState {
   gameId: string;
   multiplier: number;
   isActive: boolean;
   betAmount: number;
-  betToken: 'SOL' | 'RUGGED';
+  betToken: TokenType;
   playerAddress: string;
   startTime: number;
   rugPullProbability: number;
@@ -25,10 +26,18 @@ export interface GameResult {
   transactionId?: string;
 }
 
+// Interface for wallet with embedded wallet methods
+export interface EmbeddedWallet {
+  address: string;
+  walletClientType: string; // 'privy' for embedded wallets
+  sendTransaction?: (options: any) => Promise<string>;
+  signAndSendTransaction?: (options: any) => Promise<string>;
+}
+
 export class RuggedGameService {
   // House wallet address - funds go here when users get rugged
   private static HOUSE_WALLET_ADDRESS = process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS || 
-                                       'DmFLNxVq5k9DvyVGJj7TprKUFjF9TbKdcA4QQfT3xMHM';
+                                       'J85gzK8UMx95GXCHXWYzoKwVt453nCSVFDaa9CVRGgkn';
   
   // Keep track of game states
   private activeGames: Map<string, GameState> = new Map();
@@ -40,18 +49,23 @@ export class RuggedGameService {
   
   /**
    * Start a new game by placing a bet
-   * Updated to better support embedded wallets from Privy
+   * Only supports embedded wallets
    */
   async placeBet(
     playerAddress: string, 
     betAmount: number, 
-    wallet: any,
-    betToken: 'SOL' | 'RUGGED' = 'SOL'
+    wallet: EmbeddedWallet,
+    betToken: TokenType = 'SOL'
   ): Promise<GameState> {
     try {
       // Validate wallet is available
       if (!wallet) {
         throw new Error('Wallet is required to place a bet');
+      }
+
+      // Verify this is an embedded wallet
+      if (wallet.walletClientType !== 'privy') {
+        throw new Error('Only embedded wallets are supported');
       }
 
       // Generate unique game ID
@@ -72,53 +86,36 @@ export class RuggedGameService {
       
       // For SOL bets, transfer the bet amount to the house wallet
       if (betToken === 'SOL') {
-        let signature;
+        let signature: string;
         
-        // Check if this is a Privy embedded wallet
-        if (wallet.walletClientType === 'privy') {
-          console.log('Using Privy embedded wallet for transaction');
+        // Create transaction using embedded wallet
+        const transaction = new Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: new PublicKey(wallet.address),
+            toPubkey: new PublicKey(RuggedGameService.HOUSE_WALLET_ADDRESS),
+            lamports: Math.floor(betAmount * LAMPORTS_PER_SOL)
+          })
+        );
+        
+        // Get proper method from wallet
+        if (wallet.sendTransaction) {
+          // Privy's sendTransaction method
+          signature = await wallet.sendTransaction({
+            transaction: transaction.serialize({ requireAllSignatures: false }),
+            message: `Bet of ${betAmount} SOL in RUGGED game`
+          });
           
-          // Create transaction using embedded wallet
-          const transaction = new Transaction().add(
-            SystemProgram.transfer({
-              fromPubkey: new PublicKey(wallet.address),
-              toPubkey: new PublicKey(RuggedGameService.HOUSE_WALLET_ADDRESS),
-              lamports: Math.floor(betAmount * LAMPORTS_PER_SOL)
-            })
-          );
+          console.log('Transaction sent via Privy wallet sendTransaction:', signature);
+        } else if (wallet.signAndSendTransaction) {
+          // Alternative method for Privy embedded wallet
+          signature = await wallet.signAndSendTransaction({
+            transaction: transaction.serialize({ requireAllSignatures: false }),
+            message: `Bet of ${betAmount} SOL in RUGGED game`
+          });
           
-          // Get proper method from wallet
-          if (wallet.sendTransaction) {
-            // Privy's sendTransaction method
-            signature = await wallet.sendTransaction({
-              transaction: transaction.serialize({ requireAllSignatures: false }),
-              message: `Bet of ${betAmount} SOL in RUGGED game`
-            });
-            
-            console.log('Transaction sent via Privy wallet sendTransaction:', signature);
-          } else if (wallet.signAndSendTransaction) {
-            // Alternative method for Privy embedded wallet
-            signature = await wallet.signAndSendTransaction({
-              transaction: transaction.serialize({ requireAllSignatures: false }),
-              message: `Bet of ${betAmount} SOL in RUGGED game`
-            });
-            
-            console.log('Transaction sent via Privy wallet signAndSendTransaction:', signature);
-          } else {
-            throw new Error('Embedded wallet does not support required transaction methods');
-          }
+          console.log('Transaction sent via Privy wallet signAndSendTransaction:', signature);
         } else {
-          // For standard Solana wallets (Phantom, Solflare, etc.)
-          console.log('Using standard Solana wallet adapter');
-          
-          // Use the SolanaWalletService for standard wallet adapters
-          signature = await solanaWalletService.sendSol(
-            wallet,
-            RuggedGameService.HOUSE_WALLET_ADDRESS, 
-            betAmount
-          );
-          
-          console.log('Transaction sent via standard wallet adapter:', signature);
+          throw new Error('Embedded wallet does not support required transaction methods');
         }
         
         console.log(`Bet of ${betAmount} SOL placed successfully, transaction: ${signature}`);
@@ -157,31 +154,31 @@ export class RuggedGameService {
    */
   async cashOut(
     gameId: string, 
-    wallet: any
+    wallet: EmbeddedWallet
   ): Promise<GameResult> {
-    // Get game state
-    const gameState = this.activeGames.get(gameId);
-    if (!gameState) {
-      throw new Error('Game not found');
-    }
-    
-    if (!gameState.isActive) {
-      throw new Error('Game is not active');
-    }
-    
-    if (gameState.isRugPulled) {
-      throw new Error('Game was already rugged');
-    }
-    
-    // Calculate winnings
-    const winnings = gameState.betAmount * gameState.multiplier;
-    const houseFee = winnings * this.houseFeePercentage;
-    const payout = winnings - houseFee;
-    
     try {
+      // Get game state
+      const gameState = this.activeGames.get(gameId);
+      if (!gameState) {
+        throw new Error('Game not found');
+      }
+      
+      if (!gameState.isActive) {
+        throw new Error('Game is not active');
+      }
+      
+      if (gameState.isRugPulled) {
+        throw new Error('Game was already rugged');
+      }
+      
+      // Calculate winnings
+      const winnings = gameState.betAmount * gameState.multiplier;
+      const houseFee = winnings * this.houseFeePercentage;
+      const payout = winnings - houseFee;
+      
       let signature = '';
       
-      // For SOL: House wallet sends the winnings back to player
+      // For SOL: House wallet would send the winnings back to player
       // This would be handled by your backend in production
       if (gameState.betToken === 'SOL') {
         // IMPORTANT: In production, this would be a server-side operation
@@ -196,7 +193,7 @@ export class RuggedGameService {
         
         // For demo purposes, we're just logging and not actually sending funds
         signature = `simulated_payout_tx_${Date.now()}`;
-      } else {
+      } else if (gameState.betToken === 'RUGGED') {
         // For RUGGED token - similar implementation would be needed
         console.log(`House would send ${payout} RUGGED to ${gameState.playerAddress}`);
         signature = `simulated_token_payout_tx_${Date.now()}`;
@@ -217,7 +214,9 @@ export class RuggedGameService {
       };
     } catch (error) {
       console.error('Error cashing out:', error);
-      throw new Error('Failed to cash out. Please try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      toast.error(`Failed to cash out: ${errorMessage}`);
+      throw new Error(`Failed to cash out: ${errorMessage}`);
     }
   }
   

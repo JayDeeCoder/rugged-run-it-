@@ -1,43 +1,69 @@
-import { FC, ReactNode, useMemo } from 'react';
-import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
-import { ConnectionProvider, WalletProvider } from '@solana/wallet-adapter-react';
-import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
-import { 
-  PhantomWalletAdapter,
-  SolflareWalletAdapter,
-  AlphaWalletAdapter,
-  CoinbaseWalletAdapter
-} from '@solana/wallet-adapter-wallets';
-import { clusterApiUrl } from '@solana/web3.js';
+import { FC, ReactNode, useMemo, createContext, useContext } from 'react';
+import { Connection, clusterApiUrl } from '@solana/web3.js';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
 
-// Import styles
-import '@solana/wallet-adapter-react-ui/styles.css';
+// Create a context for providing Solana connection
+interface SolanaConnectionContextProps {
+  connection: Connection;
+  network: string;
+  isReady: boolean;
+  embeddedWallet: any | null;
+}
+
+const SolanaConnectionContext = createContext<SolanaConnectionContextProps>({
+  connection: new Connection(clusterApiUrl('mainnet-beta')),
+  network: 'mainnet-beta',
+  isReady: false,
+  embeddedWallet: null
+});
+
+// Hook for accessing the connection context
+export const useSolanaConnection = () => useContext(SolanaConnectionContext);
 
 interface SolanaWalletProviderProps {
   children: ReactNode;
 }
 
+/**
+ * Provider that only works with embedded Privy wallets
+ * Replaces the standard Solana wallet adapter infrastructure
+ */
 const SolanaWalletProvider: FC<SolanaWalletProviderProps> = ({ children }) => {
-  // Use Mainnet for production, or Devnet for testing
-  const network = WalletAdapterNetwork.Mainnet;
-  const endpoint = useMemo(() => clusterApiUrl(network), [network]);
+  // Get authentication state from Privy
+  const { authenticated, ready } = usePrivy();
+  
+  // Get available wallets from Privy
+  const { wallets } = useWallets();
+  
+  // Find embedded wallet if available
+  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
 
-  // Initialize wallet adapters
-  const wallets = useMemo(() => [
-    new PhantomWalletAdapter(),
-    new SolflareWalletAdapter(),
-    new AlphaWalletAdapter(),
-    new CoinbaseWalletAdapter()
-  ], []);
+  // Use Mainnet for production
+  const network = 'mainnet-beta';
+  
+  // Create connection to Solana network
+  const connection = useMemo(() => {
+    const endpoint = clusterApiUrl(network);
+    
+    // You can add custom RPC configuration here
+    return new Connection(
+      endpoint, 
+      { commitment: 'confirmed' }
+    );
+  }, [network]);
+  
+  // Create context value
+  const contextValue = {
+    connection,
+    network,
+    isReady: ready && authenticated && !!embeddedWallet,
+    embeddedWallet: embeddedWallet || null
+  };
 
   return (
-    <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider wallets={wallets} autoConnect={false}>
-        <WalletModalProvider>
-          {children}
-        </WalletModalProvider>
-      </WalletProvider>
-    </ConnectionProvider>
+    <SolanaConnectionContext.Provider value={contextValue}>
+      {children}
+    </SolanaConnectionContext.Provider>
   );
 };
 

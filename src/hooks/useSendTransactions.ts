@@ -13,7 +13,7 @@ export const useSendTransaction = () => {
       throw new Error('Embedded wallet not connected');
     }
     
-    const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+    const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'hhttps://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
     const connection = new Connection(rpcUrl);
     
     // Create transaction

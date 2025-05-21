@@ -1,3 +1,4 @@
+// src/components/trading/TradingControls.tsx
 import { FC, useState, useEffect, useContext, useCallback } from 'react';
 import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon } from 'lucide-react';
 import { useWallet } from '@solana/wallet-adapter-react';
@@ -657,6 +658,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         isOpen={showDepositModal}
         onClose={() => setShowDepositModal(false)}
         currentToken={currentToken}
+        walletAddress={walletData.address || (publicKey ? publicKey.toString() : '')}
       />
       
       <WithdrawModal 

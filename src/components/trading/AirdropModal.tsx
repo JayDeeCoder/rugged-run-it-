@@ -1,8 +1,9 @@
-// AirdropModal.tsx
+// src/components/trading/AirdropModal.tsx
 import { FC, useState, useRef } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
 import { toast } from 'react-hot-toast';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { usePrivy } from '@privy-io/react-auth';
+import { useEmbeddedGameWallet } from '../../hooks/useEmbeddedGameWallet';
 import { useTokenContext, TokenType } from '../../context/TokenContext';
 
 interface AirdropModalProps {
@@ -13,7 +14,14 @@ interface AirdropModalProps {
 const AirdropModal: FC<AirdropModalProps> = ({ isOpen, onClose }) => {
   const [amount, setAmount] = useState<string>('0.1');
   const [token, setToken] = useState<TokenType>(TokenType.SOL);
-  const { connected } = useWallet();
+  
+  // Use Privy and embedded wallet instead of Solana wallet adapter
+  const { authenticated } = usePrivy();
+  const { wallet: gameWallet, walletData } = useEmbeddedGameWallet();
+  
+  // Check if wallet is ready using the game wallet data
+  const isWalletReady = authenticated && gameWallet !== undefined;
+  
   const { airdropToken, isAirdropAvailable, lastAirdropTime, airdropCooldown, isProcessingAirdrop } = useTokenContext();
   
   const modalRef = useRef<HTMLDivElement>(null);
@@ -37,8 +45,8 @@ const AirdropModal: FC<AirdropModalProps> = ({ isOpen, onClose }) => {
   };
   
   const handleAirdropRequest = async () => {
-    if (!connected) {
-      toast.error('Please connect your wallet first');
+    if (!isWalletReady) {
+      toast.error('Please login to request an airdrop');
       return;
     }
     
@@ -90,6 +98,14 @@ const AirdropModal: FC<AirdropModalProps> = ({ isOpen, onClose }) => {
     return `Available in ${hours}h ${minutes}m`;
   };
   
+  // Get current wallet balance for the selected token
+  const getCurrentBalance = () => {
+    if (token === TokenType.SOL && walletData.isConnected) {
+      return parseFloat(walletData.balance);
+    }
+    return 0; // Default to 0 for other tokens or when wallet is not connected
+  };
+  
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
       <div 
@@ -97,6 +113,24 @@ const AirdropModal: FC<AirdropModalProps> = ({ isOpen, onClose }) => {
         className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4"
       >
         <h2 className="text-xl font-bold text-white mb-4">Request Airdrop</h2>
+        
+        {/* Current wallet and balance info */}
+        {isWalletReady && (
+          <div className="mb-4 bg-gray-700 rounded-md p-3">
+            <div className="text-sm text-gray-400">Current Wallet</div>
+            <div className="text-white truncate">
+              {walletData.address ? 
+                `${walletData.address.substring(0, 6)}...${walletData.address.substring(walletData.address.length - 4)}` : 
+                'Wallet connecting...'}
+            </div>
+            {token === TokenType.SOL && walletData.isConnected && (
+              <div className="mt-1 text-sm">
+                <span className="text-gray-400">Balance: </span>
+                <span className="text-green-400">{walletData.balance} SOL</span>
+              </div>
+            )}
+          </div>
+        )}
         
         <div className="mb-4">
           <label className="block text-gray-300 mb-2">
@@ -156,9 +190,9 @@ const AirdropModal: FC<AirdropModalProps> = ({ isOpen, onClose }) => {
           <button
             type="button"
             onClick={handleAirdropRequest}
-            disabled={isProcessingAirdrop || !connected || !isAirdropAvailable}
+            disabled={isProcessingAirdrop || !isWalletReady || !isAirdropAvailable}
             className={`px-4 py-2 rounded-md transition-colors flex items-center justify-center ${
-              isProcessingAirdrop || !connected || !isAirdropAvailable 
+              isProcessingAirdrop || !isWalletReady || !isAirdropAvailable 
                 ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
                 : 'bg-green-600 hover:bg-green-700 text-white'
             }`}

@@ -3,7 +3,7 @@ import { ArrowUpToLine, ArrowDownToLine } from 'lucide-react';
 import DepositModal from '../trading/DepositModal';
 import WithdrawModal from '../../components/trading/WithdrawModal';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
 
 // Define the TokenType enum locally
 enum TokenType {
@@ -11,28 +11,51 @@ enum TokenType {
     RUGGED = 'RUGGED'
 }
 
-// Solana connection settings
-const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+// Alchemy Solana RPC URL
+const ALCHEMY_SOLANA_RPC_URL = 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
 
 const WalletActions = () => {
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
   const [balance, setBalance] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [isCreatingWallet, setIsCreatingWallet] = useState(false);
   
-  // Use Solana wallet adapter to get wallet state
-  const { publicKey, connected, connecting } = useWallet();
+  // Use Privy hooks for authentication and wallet access
+  const { authenticated, user, login, ready, createWallet } = usePrivy();
+  const { wallets } = useWallets();
+  
+  // Find embedded wallet specifically (we don't want external adapters)
+  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
+  
+  // Create connection to Solana using Alchemy's endpoint
+  const connection = new Connection(ALCHEMY_SOLANA_RPC_URL);
   
   // Use the locally defined TokenType enum
   const currentToken = TokenType.SOL;
   
-  // Get wallet address from publicKey
-  const walletAddress = publicKey?.toString() || null;
+  // Get wallet address from embedded wallet
+  const walletAddress = embeddedWallet?.address || null;
+  
+  // Handle wallet creation
+  const handleCreateWallet = async () => {
+    if (!authenticated) return;
+    
+    setIsCreatingWallet(true);
+    try {
+      await createWallet();
+      // Wallet creation should update the wallets array automatically
+    } catch (error) {
+      console.error('Error creating wallet:', error);
+    } finally {
+      setIsCreatingWallet(false);
+    }
+  };
   
   // Fetch balance when wallet is connected
   useEffect(() => {
     const fetchBalance = async () => {
-      if (!connected || !publicKey) {
+      if (!authenticated || !walletAddress) {
         setIsLoading(false);
         return;
       }
@@ -40,10 +63,8 @@ const WalletActions = () => {
       try {
         setIsLoading(true);
         
-        // Create connection to Solana
-        const connection = new Connection(SOLANA_RPC_URL);
-        
-        // Get SOL balance
+        // Get SOL balance from Alchemy's Solana RPC
+        const publicKey = new PublicKey(walletAddress);
         const balance = await connection.getBalance(publicKey);
         const solBalance = balance / LAMPORTS_PER_SOL;
         
@@ -61,29 +82,68 @@ const WalletActions = () => {
     const intervalId = setInterval(fetchBalance, 30000); // Every 30 seconds
     
     return () => clearInterval(intervalId);
-  }, [connected, publicKey]);
+  }, [authenticated, walletAddress, connection]);
   
-  // Show connecting state
-  if (connecting || isLoading) {
+  // Show loading state while Privy is initializing
+  if (!ready) {
     return (
       <div className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-4">
         <h2 className="text-xl font-bold text-white mb-4">Wallet</h2>
         <div className="flex justify-center items-center py-4">
           <div className="animate-pulse text-gray-400">
-            {connecting ? 'Connecting to wallet...' : 'Loading wallet information...'}
+            Initializing wallet...
           </div>
         </div>
       </div>
     );
   }
   
-  // Show not connected state
-  if (!connected || !walletAddress) {
+  // Show login prompt if not authenticated
+  if (!authenticated) {
+    return (
+      <div className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-4">
+        <h2 className="text-xl font-bold text-white mb-4">Wallet</h2>
+        <div className="flex flex-col items-center justify-center py-4">
+          <div className="text-gray-400 mb-4">Please login to access your wallet</div>
+          <button 
+            onClick={() => login()}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium"
+          >
+            Login with Privy
+          </button>
+        </div>
+      </div>
+    );
+  }
+  
+  // Show wallet creation UI if authenticated but no embedded wallet
+  if (authenticated && !walletAddress) {
+    return (
+      <div className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-4">
+        <h2 className="text-xl font-bold text-white mb-4">Wallet</h2>
+        <div className="flex flex-col items-center justify-center py-4">
+          <div className="text-gray-400 mb-4">You need an embedded wallet to continue</div>
+          <button 
+            onClick={handleCreateWallet}
+            disabled={isCreatingWallet}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium"
+          >
+            {isCreatingWallet ? 'Creating Wallet...' : 'Create Embedded Wallet'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+  
+  // Show connecting state
+  if (isLoading && authenticated) {
     return (
       <div className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-4">
         <h2 className="text-xl font-bold text-white mb-4">Wallet</h2>
         <div className="flex justify-center items-center py-4">
-          <div className="text-gray-400">Please connect your wallet</div>
+          <div className="animate-pulse text-gray-400">
+            Loading wallet information...
+          </div>
         </div>
       </div>
     );
@@ -93,11 +153,21 @@ const WalletActions = () => {
     <div className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-4">
       <h2 className="text-xl font-bold text-white mb-4">Wallet</h2>
       
-      {/* Wallet address and balance display */}
+      {/* User info display */}
+      {user && (
+        <div className="mb-4 bg-gray-800 rounded-lg p-3">
+          <div className="text-sm text-gray-400 mb-1">Logged in as</div>
+          <div className="text-white">
+            {user.email?.address || user.google?.email || 'User'}
+          </div>
+        </div>
+      )}
+      
+      {/* Embedded wallet display */}
       <div className="mb-4 p-3 bg-gray-800 rounded-lg">
         <div className="flex justify-between items-center">
           <div>
-            <div className="text-sm text-gray-400 mb-1">Wallet Address</div>
+            <div className="text-sm text-gray-400 mb-1">Embedded Wallet</div>
             <div className="text-white font-mono text-sm truncate">{walletAddress}</div>
           </div>
           <div className="text-right">
@@ -125,12 +195,12 @@ const WalletActions = () => {
         </button>
       </div>
       
-      {/* Modals with real wallet address and balance */}
+      {/* Modals with embedded wallet address and balance */}
       <DepositModal 
         isOpen={isDepositModalOpen} 
         onClose={() => setIsDepositModalOpen(false)} 
         currentToken={currentToken}
-        walletAddress={walletAddress}
+        walletAddress={walletAddress!}
       />
       
       <WithdrawModal 
@@ -139,9 +209,13 @@ const WalletActions = () => {
         currentToken={currentToken}
         balance={balance}
         onSuccess={() => {
-          // Refresh wallet data after successful withdrawal
-          // In a real app, you might want to manually refresh the balance here
-          // rather than doing a full page reload
+          // Refresh balance after successful withdrawal
+          if (walletAddress) {
+            const publicKey = new PublicKey(walletAddress);
+            connection.getBalance(publicKey).then(newBalance => {
+              setBalance(newBalance / LAMPORTS_PER_SOL);
+            }).catch(console.error);
+          }
         }}
       />
     </div>

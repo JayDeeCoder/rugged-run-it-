@@ -1,40 +1,36 @@
-// src/components/trading/WithdrawModal.tsx
+// src/components/trading/DepositModal.tsx
 import { FC, useState, useRef, useEffect } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
-import { isValidSolanaAddress } from '../../utils/walletUtils';
-import { ArrowDownToLine, Wallet, Check, Loader, X, Copy, ExternalLink } from 'lucide-react';
+import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, ExternalLink, QrCode } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 
 // Define the TokenType enum locally
 enum TokenType {
   SOL = 'SOL',
   RUGGED = 'RUGGED'
-  // Add other tokens as needed
 }
 
-interface WithdrawModalProps {
+interface DepositModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
-  currentToken: TokenType; // Add this prop
-  balance: number; // Add this prop
+  currentToken: TokenType;
+  walletAddress: string;
 }
 
-const WithdrawModal: FC<WithdrawModalProps> = ({ 
+const DepositModal: FC<DepositModalProps> = ({ 
   isOpen, 
   onClose, 
   onSuccess, 
-  currentToken, // Use the new prop
-  balance // Use the new prop 
+  currentToken,
+  walletAddress
 }) => {
-  const [amount, setAmount] = useState<string>('');
-  const [destinationAddress, setDestinationAddress] = useState<string>('');
+  const [copied, setCopied] = useState<boolean>(false);
+  const [showQR, setShowQR] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<boolean>(false);
-  const [addressError, setAddressError] = useState<string | null>(null);
   
   // Get token symbol based on currentToken
   const tokenSymbol = currentToken;
@@ -47,11 +43,9 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   // Reset state when modal opens/closes
   useEffect(() => {
     if (isOpen) {
-      setAmount('');
-      setDestinationAddress('');
-      setError(null);
-      setSuccess(false);
-      setAddressError(null);
+      setCopied(false);
+      setShowQR(false);
+      setIsLoading(false);
     }
   }, [isOpen]);
   
@@ -63,88 +57,56 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   // If not open, don't render
   if (!isOpen) return null;
   
-  // Validate Solana address using the new utility
-  const validateAddress = (address: string): boolean => {
-    if (!address) {
-      setAddressError('Destination address is required');
-      return false;
-    } 
-    
-    if (!isValidSolanaAddress(address)) {
-      setAddressError('Please enter a valid Solana address');
-      return false;
-    }
-    
-    setAddressError(null);
-    return true;
-  };
-  
-  // Handle amount change
-  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    // Allow only numbers and up to 6 decimal places
-    if (/^(\d+)?(\.\d{0,6})?$/.test(value) || value === '') {
-      setAmount(value);
-    }
-  };
-  
-  // Handle setting max amount
-  const handleSetMaxAmount = () => {
-    // Use balance prop instead of currentUser.balance
-    if (balance > 0) {
-      // Set slightly less than max to account for network fees
-      const maxAmount = Math.max(0, balance - 0.001);
-      setAmount(maxAmount.toFixed(6));
-    }
-  };
-  
-  // Handle withdraw submit
-  const handleWithdraw = async () => {
+  // Copy wallet address to clipboard
+  const copyAddress = async () => {
     try {
-      setError(null);
-      
-      // Validate inputs
-      if (!amount || parseFloat(amount) <= 0) {
-        setError('Please enter a valid amount');
-        return;
-      }
-      
-      if (!validateAddress(destinationAddress)) {
-        return;
-      }
-      
-      const withdrawAmount = parseFloat(amount);
-      
-      // Use balance prop instead of currentUser.balance
-      if (withdrawAmount > balance) {
-        setError('Insufficient balance');
-        return;
-      }
-      
-      // Start loading
-      setIsLoading(true);
-      
-      // Here you would call your API to process the withdrawal
-      // For this example, we'll simulate a successful withdrawal after a delay
-      setTimeout(() => {
-        setIsLoading(false);
-        setSuccess(true);
-        
-        // Call onSuccess callback if provided
-        if (onSuccess) {
-          setTimeout(() => {
-            onSuccess();
-            onClose();
-          }, 2000);
-        }
-      }, 2000);
-      
-    } catch (err) {
-      setIsLoading(false);
-      setError('Failed to process withdrawal. Please try again.');
-      console.error('Withdraw error:', err);
+      await navigator.clipboard.writeText(walletAddress);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('Failed to copy address:', error);
     }
   };
+
+  // Handle deposit confirmation (for UI purposes)
+  const handleDepositConfirmation = () => {
+    setIsLoading(true);
+    
+    // Simulate checking for deposit
+    setTimeout(() => {
+      setIsLoading(false);
+      if (onSuccess) {
+        onSuccess();
+      }
+      onClose();
+    }, 3000);
+  };
+
+  // Get network info based on token
+  const getNetworkInfo = () => {
+    switch (currentToken) {
+      case TokenType.SOL:
+        return {
+          network: 'Solana Mainnet',
+          minDeposit: '0.001 SOL',
+          confirmations: '1 confirmation'
+        };
+      case TokenType.RUGGED:
+        return {
+          network: 'Solana (SPL Token)',
+          minDeposit: '1 RUGGED',
+          confirmations: '1 confirmation'
+        };
+      default:
+        return {
+          network: 'Unknown',
+          minDeposit: 'N/A',
+          confirmations: 'N/A'
+        };
+    }
+  };
+
+  const networkInfo = getNetworkInfo();
   
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
@@ -152,11 +114,11 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         ref={modalRef} 
         className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
       >
-        {/* Header - now with dynamic token symbol */}
+        {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white flex items-center">
-            <ArrowDownToLine size={20} className="mr-2" />
-            Withdraw {tokenSymbol}
+            <ArrowUpToLine size={20} className="mr-2" />
+            Deposit {tokenSymbol}
           </h2>
           <button
             onClick={onClose}
@@ -167,120 +129,136 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           </button>
         </div>
         
-        {/* Success State */}
-        {success ? (
-          <div className="text-center py-8">
-            <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
-                <Check size={32} className="text-green-500" />
+        {/* Network Info */}
+        <div className="bg-gray-800 p-4 rounded-md mb-6">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-gray-400">Network:</span>
+            <span className="text-white font-medium">{networkInfo.network}</span>
+          </div>
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-gray-400">Min Deposit:</span>
+            <span className="text-white">{networkInfo.minDeposit}</span>
+          </div>
+          <div className="flex justify-between items-center">
+            <span className="text-gray-400">Confirmations:</span>
+            <span className="text-white">{networkInfo.confirmations}</span>
+          </div>
+        </div>
+        
+        {/* Wallet Address Section */}
+        <div className="mb-6">
+          <label className="block text-gray-300 mb-2 text-sm">
+            Your Deposit Address
+          </label>
+          
+          {/* Address Display */}
+          <div className="bg-gray-800 p-3 rounded-md mb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex-1 mr-2">
+                <div className="text-white font-mono text-sm break-all">
+                  {walletAddress}
+                </div>
               </div>
+              <button
+                onClick={copyAddress}
+                className="flex items-center bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded transition-colors"
+              >
+                {copied ? (
+                  <>
+                    <Check size={14} className="mr-1" />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy size={14} className="mr-1" />
+                    Copy
+                  </>
+                )}
+              </button>
             </div>
-            <h3 className="text-xl font-bold text-white mb-2">Withdrawal Successful</h3>
-            <p className="text-gray-400 mb-6">Your {tokenSymbol} has been sent to the specified address.</p>
+          </div>
+          
+          {/* QR Code Toggle */}
+          <div className="flex justify-center mb-4">
             <button
-              onClick={onClose}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md transition-colors w-full"
+              onClick={() => setShowQR(!showQR)}
+              className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors"
             >
-              Done
+              <QrCode size={16} className="mr-2" />
+              {showQR ? 'Hide QR Code' : 'Show QR Code'}
             </button>
           </div>
-        ) : (
-          /* Form State */
-          <>
-            {/* Balance Display - now with dynamic token symbol and using the balance prop */}
-            <div className="bg-gray-800 p-4 rounded-md mb-6">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-400">Available Balance</span>
-                <span className="text-xl font-bold text-white">
-                  {balance.toFixed(6)} {tokenSymbol}
-                </span>
-              </div>
-            </div>
-            
-            {/* Amount Input */}
-            <div className="mb-6">
-              <label className="block text-gray-300 mb-2 text-sm">
-                Amount to Withdraw
-              </label>
-              <div className="flex">
-                <input
-                  type="text"
-                  value={amount}
-                  onChange={handleAmountChange}
-                  placeholder="0.000000"
-                  disabled={isLoading}
-                  className="flex-1 bg-gray-800 text-white px-4 py-3 rounded-l-md focus:outline-none focus:ring-1 focus:ring-green-500 border border-gray-700"
-                />
-                <button
-                  onClick={handleSetMaxAmount}
-                  disabled={isLoading}
-                  className="bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-3 rounded-r-md transition-colors"
-                >
-                  MAX
-                </button>
-              </div>
-            </div>
-            
-            {/* Destination Address Input */}
-            <div className="mb-6">
-              <label className="block text-gray-300 mb-2 text-sm">
-                Destination Wallet Address
-              </label>
-              <input
-                type="text"
-                value={destinationAddress}
-                onChange={(e) => setDestinationAddress(e.target.value)}
-                onBlur={() => validateAddress(destinationAddress)}
-                placeholder="Solana Wallet Address"
-                disabled={isLoading}
-                className={`w-full bg-gray-800 text-white px-4 py-3 rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 border ${
-                  addressError ? 'border-red-500' : 'border-gray-700'
-                }`}
+          
+          {/* QR Code Display */}
+          {showQR && (
+            <div className="flex justify-center bg-white p-4 rounded-lg mb-4">
+              <QRCodeSVG 
+                value={walletAddress} 
+                size={200}
+                level="M"
+                includeMargin={true}
               />
-              {addressError && (
-                <p className="text-red-500 text-xs mt-1">{addressError}</p>
-              )}
             </div>
-            
-            {/* Error Message */}
-            {error && (
-              <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-500 p-3 rounded-md mb-6">
-                {error}
-              </div>
+          )}
+        </div>
+        
+        {/* Important Notes */}
+        <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md mb-6 text-sm">
+          <div className="font-medium mb-2">Important Notes:</div>
+          <ul className="list-disc list-inside space-y-1 text-xs">
+            <li>Only send {tokenSymbol} to this address</li>
+            <li>Deposits will appear after {networkInfo.confirmations}</li>
+            <li>Minimum deposit: {networkInfo.minDeposit}</li>
+            <li>Double-check the address before sending</li>
+          </ul>
+        </div>
+        
+        {/* Action Buttons */}
+        <div className="flex space-x-3">
+          <button
+            onClick={onClose}
+            disabled={isLoading}
+            className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-md transition-colors"
+          >
+            Close
+          </button>
+          
+          <button
+            onClick={handleDepositConfirmation}
+            disabled={isLoading}
+            className={`flex-1 px-4 py-2 rounded-md transition-colors flex items-center justify-center ${
+              isLoading
+                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                : 'bg-green-600 hover:bg-green-700 text-white'
+            }`}
+          >
+            {isLoading ? (
+              <>
+                <Loader size={16} className="mr-2 animate-spin" />
+                Checking...
+              </>
+            ) : (
+              <>
+                <Wallet size={16} className="mr-2" />
+                I've Sent {tokenSymbol}
+              </>
             )}
-            
-            {/* Warning Message */}
-            <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md mb-6 text-sm">
-              Double check the destination address. Withdrawals cannot be reversed!
+          </button>
+        </div>
+        
+        {/* Loading State Overlay */}
+        {isLoading && (
+          <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-lg">
+            <div className="bg-gray-800 p-4 rounded-lg text-center">
+              <Loader size={32} className="animate-spin text-green-500 mx-auto mb-2" />
+              <div className="text-white font-medium">Checking for deposit...</div>
+              <div className="text-gray-400 text-sm">This may take a few moments</div>
             </div>
-            
-            {/* Submit Button - now with dynamic token symbol */}
-            <button
-              onClick={handleWithdraw}
-              disabled={isLoading || !amount || !destinationAddress}
-              className={`w-full py-3 rounded-md font-bold flex items-center justify-center ${
-                isLoading || !amount || !destinationAddress
-                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                  : 'bg-green-600 hover:bg-green-700 text-white'
-              }`}
-            >
-              {isLoading ? (
-                <>
-                  <Loader size={18} className="mr-2 animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Wallet size={18} className="mr-2" />
-                  Withdraw {tokenSymbol}
-                </>
-              )}
-            </button>
-          </>
+          </div>
         )}
       </div>
     </div>
   );
 };
 
-export default WithdrawModal;
+export default DepositModal;

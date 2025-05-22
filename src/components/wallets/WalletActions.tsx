@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { ArrowUpToLine, ArrowDownToLine } from 'lucide-react';
-import DepositModal from '../trading/DepositModal';
-import WithdrawModal from '../../components/trading/WithdrawModal';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../../utils/walletUtils';
+
+// Import the modals - we'll create proper imports
+import DepositModal from '../trading/DepositModal';
+import WithdrawModal from '../trading/WithdrawModal';
 
 // Define the TokenType enum locally
 enum TokenType {
@@ -209,12 +211,23 @@ const WalletActions = () => {
         </button>
       </div>
       
-      {/* Modals with embedded wallet address and balance */}
+      {/* Modals with correct props */}
       <DepositModal 
         isOpen={isDepositModalOpen} 
         onClose={() => setIsDepositModalOpen(false)} 
         currentToken={currentToken}
         walletAddress={walletAddress!}
+        onSuccess={() => {
+          // Refresh balance after successful deposit
+          if (walletAddress && isValidSolanaAddress(walletAddress)) {
+            const publicKey = safeCreatePublicKey(walletAddress);
+            if (publicKey) {
+              connection.getBalance(publicKey).then(newBalance => {
+                setBalance(newBalance / LAMPORTS_PER_SOL);
+              }).catch(console.error);
+            }
+          }
+        }}
       />
       
       <WithdrawModal 
@@ -224,22 +237,13 @@ const WalletActions = () => {
         balance={balance}
         onSuccess={() => {
           // Refresh balance after successful withdrawal
-          if (walletAddress) {
-            // Validate wallet address before using
-            if (!isValidSolanaAddress(walletAddress)) {
-              console.error('Invalid wallet address:', walletAddress);
-              return;
-            }
-            
+          if (walletAddress && isValidSolanaAddress(walletAddress)) {
             const publicKey = safeCreatePublicKey(walletAddress);
-            if (!publicKey) {
-              console.error('Failed to create PublicKey:', walletAddress);
-              return;
+            if (publicKey) {
+              connection.getBalance(publicKey).then(newBalance => {
+                setBalance(newBalance / LAMPORTS_PER_SOL);
+              }).catch(console.error);
             }
-            
-            connection.getBalance(publicKey).then(newBalance => {
-              setBalance(newBalance / LAMPORTS_PER_SOL);
-            }).catch(console.error);
           }
         }}
       />

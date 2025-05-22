@@ -102,4 +102,31 @@ export const GameResultsProvider: React.FC<{ children: ReactNode }> = ({ childre
     return {
       totalGames,
       averageMultiplier: parseFloat(averageMultiplier.toFixed(2)),
-      highestMultiplier: parseFloat(high
+      highestMultiplier: parseFloat(highestMultiplier.toFixed(2)),
+      successRate: parseFloat(successRate.toFixed(2))
+    };
+  }, [gameResults]);
+
+  const value: GameResultsContextType = {
+    gameResults,
+    addGameResult,
+    clearGameResults,
+    getRecentResults,
+    getStatistics,
+  };
+
+  return (
+    <GameResultsContext.Provider value={value}>
+      {children}
+    </GameResultsContext.Provider>
+  );
+};
+
+// Custom hook to use the game results context
+export const useGameResults = (): GameResultsContextType => {
+  const context = useContext(GameResultsContext);
+  if (!context) {
+    throw new Error('useGameResults must be used within a GameResultsProvider');
+  }
+  return context;
+};

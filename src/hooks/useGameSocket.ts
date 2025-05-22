@@ -6,7 +6,7 @@ interface GameSocketData {
   gameHistory: GameState[];
   isConnected: boolean;
   placeBet: (walletAddress: string, betAmount: number, userId?: string) => Promise<boolean>;
-  cashOut: (walletAddress: string) => Promise<boolean>;
+  cashOut: (walletAddress: string) => Promise<{ success: boolean; multiplier?: number }>;
 }
 
 export const useGameSocket = (walletAddress?: string, userId?: string): GameSocketData => {
@@ -16,43 +16,51 @@ export const useGameSocket = (walletAddress?: string, userId?: string): GameSock
 
   useEffect(() => {
     // Set up event listeners
-    gameAPI.on('connect', () => {
+    const handleConnect = () => {
       setIsConnected(true);
-    });
+    };
 
-    gameAPI.on('disconnect', () => {
+    const handleDisconnect = () => {
       setIsConnected(false);
-    });
+    };
 
-    gameAPI.on('gameState', (gameState: GameState) => {
+    const handleGameState = (gameState: GameState) => {
       setCurrentGame(gameState);
-    });
+    };
 
-    gameAPI.on('gameStarted', (data: any) => {
+    const handleGameStarted = (data: any) => {
       setCurrentGame(prev => prev ? { ...prev, ...data } : null);
-    });
+    };
 
-    gameAPI.on('multiplierUpdate', (data: { multiplier: number; timestamp: number }) => {
+    const handleMultiplierUpdate = (data: { multiplier: number; timestamp: number }) => {
       setCurrentGame(prev => prev ? { ...prev, multiplier: data.multiplier } : null);
-    });
+    };
 
-    gameAPI.on('gameCrashed', (data: { crashMultiplier: number; timestamp: number }) => {
+    const handleGameCrashed = (data: { crashMultiplier: number; timestamp: number }) => {
       setCurrentGame(prev => prev ? { ...prev, status: 'crashed', multiplier: data.crashMultiplier } : null);
-    });
+    };
 
-    gameAPI.on('gameHistory', (history: GameState[]) => {
+    const handleGameHistory = (history: GameState[]) => {
       setGameHistory(history);
-    });
+    };
+
+    gameAPI.on('connect', handleConnect);
+    gameAPI.on('disconnect', handleDisconnect);
+    gameAPI.on('gameState', handleGameState);
+    gameAPI.on('gameStarted', handleGameStarted);
+    gameAPI.on('multiplierUpdate', handleMultiplierUpdate);
+    gameAPI.on('gameCrashed', handleGameCrashed);
+    gameAPI.on('gameHistory', handleGameHistory);
 
     return () => {
       // Clean up listeners
-      gameAPI.off('connect', () => {});
-      gameAPI.off('disconnect', () => {});
-      gameAPI.off('gameState', () => {});
-      gameAPI.off('gameStarted', () => {});
-      gameAPI.off('multiplierUpdate', () => {});
-      gameAPI.off('gameCrashed', () => {});
-      gameAPI.off('gameHistory', () => {});
+      gameAPI.off('connect', handleConnect);
+      gameAPI.off('disconnect', handleDisconnect);
+      gameAPI.off('gameState', handleGameState);
+      gameAPI.off('gameStarted', handleGameStarted);
+      gameAPI.off('multiplierUpdate', handleMultiplierUpdate);
+      gameAPI.off('gameCrashed', handleGameCrashed);
+      gameAPI.off('gameHistory', handleGameHistory);
     };
   }, []);
 
@@ -60,8 +68,8 @@ export const useGameSocket = (walletAddress?: string, userId?: string): GameSock
     return gameAPI.placeBet(walletAddress, betAmount, userId);
   }, []);
 
-  const cashOut = useCallback(async (walletAddress: string): Promise<boolean> => {
-    npm install gameAPI.cashOut(walletAddress);
+  const cashOut = useCallback(async (walletAddress: string): Promise<{ success: boolean; multiplier?: number }> => {
+    return gameAPI.cashOut(walletAddress);
   }, []);
 
   return {

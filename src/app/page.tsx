@@ -6,7 +6,6 @@ import Layout from '../components/layout/Layout';
 import dynamic from 'next/dynamic';
 import ChatBox from '../components/chat/ChatBox';
 import MobileChat from '../components/chat/MobileChat';
-import { mockLeaderboardEntries } from '../data/MockData';
 import { usePrivy } from '@privy-io/react-auth';
 import useWindowSize from '../hooks/useWindowSize';
 
@@ -163,7 +162,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* Leaderboard Section - fully responsive */}
+            {/* Leaderboard Section - fully responsive, no mock data */}
             <div className={`
               w-full max-w-full overflow-x-hidden
               ${isExtraSmall ? 'mt-2 mb-2 px-1' : 
@@ -174,7 +173,7 @@ export default function Home() {
               ${(isLeaderboardVisible || isMobile || isTablet) ? 'opacity-100' : 'opacity-0'}
             `}>
               <div className="w-full max-w-full">
-                <Leaderboard entries={mockLeaderboardEntries} />
+                <Leaderboard />
               </div>
             </div>
             

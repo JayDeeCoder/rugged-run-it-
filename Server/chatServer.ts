@@ -1,6 +1,6 @@
 // ./Server/chatServer.ts
 import http from 'http';
-import { WebSocketServer } from 'ws'; // Import WebSocketServer directly
+import { WebSocketServer, WebSocket } from 'ws'; // Import both WebSocketServer and WebSocket
 import { createClient } from '@supabase/supabase-js';
 
 // Types
@@ -8,7 +8,7 @@ interface Client {
   id: string;
   username: string;
   walletAddress?: string;
-  ws: WebSocket;
+  ws: WebSocket; // Now WebSocket type is properly imported
   joinedAt: Date;
   lastActivity: Date;
 }
@@ -68,7 +68,7 @@ const server = http.createServer((req, res) => {
   res.end('Chat Server - WebSocket endpoint available at ws://localhost:3002');
 });
 
-// Create a WebSocket server instance - FIXED: Use WebSocketServer instead of WebSocket.Server
+// Create a WebSocket server instance
 const wss = new WebSocketServer({ server });
 
 // Store connected clients
@@ -138,7 +138,7 @@ wss.on('connection', (ws) => {
   const client: Client = {
     id: clientId,
     username: `Guest_${clientId.slice(-4)}`,
-    ws: ws as any, // Type assertion needed for compatibility
+    ws: ws, // No need for type assertion now
     joinedAt: new Date(),
     lastActivity: new Date()
   };

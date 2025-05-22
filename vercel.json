@@ -13,9 +13,11 @@
       }
     ],
     "env": {
-      "NEXT_PUBLIC_SUPABASE_URL": "@supabase_url",
-      "NEXT_PUBLIC_SUPABASE_ANON_KEY": "@supabase_anon_key",
-      "NEXT_PUBLIC_GAME_SERVER_URL": "@game_server_url",
-      "NEXT_PUBLIC_SOLANA_RPC_URL": "@solana_rpc_url"
+      "NEXT_PUBLIC_SUPABASE_URL": "https://ineaxxqjkryoobobxrsw.supabase.co",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImluZWF4eHFqa3J5b29ib2J4cnN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc3NzMxMzIsImV4cCI6MjA2MzM0OTEzMn0.DiFLCCe5-UnzsGpG7dsqJWoUbxmaJxc_v89pxxsa1aA ",
+    "NEXT_PUBLIC_PRIVY_APP_ID": "cmacb9iyc00paky0mrursgxdk",
+    "NEXT_PUBLIC_SOLANA_RPC_URL": "https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3",
+    "NEXT_PUBLIC_ALCHEMY_API_KEY": "6CqgIf5nqVF9rWeernULokib0PAr6yh3",
+    "NEXT_PUBLIC_GAME_SERVER_URL": "https://api.irugged.fun"
     }
   }

@@ -3,11 +3,12 @@ import { FC, useState, useEffect, useRef, useContext } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
-import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { UserContext } from '../../context/UserContext';
 import useOutsideClick from '../../hooks/useOutsideClick';
 import { Menu, User, ChevronDown, LogOut, Wallet, BarChart2, Trophy, Settings, Edit } from 'lucide-react';
 import UsernameModal from '../auth/UsernameModal';
+import { safeCreatePublicKey, isValidSolanaAddress } from '../../utils/walletUtils';
 
 const Navbar: FC = () => {
   const { authenticated, login, logout, user } = usePrivy();
@@ -39,6 +40,13 @@ const Navbar: FC = () => {
         try {
           setIsLoadingBalance(true);
           
+          // Validate wallet address before proceeding
+          if (!isValidSolanaAddress(walletAddress)) {
+            console.error('Invalid wallet address:', walletAddress);
+            setWalletBalance(0);
+            return;
+          }
+          
           // Create Solana connection using Alchemy RPC
           const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
           const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '6CqgIf5nqVF9rWeernULokib0PAr6yh3';
@@ -50,8 +58,15 @@ const Navbar: FC = () => {
             }
           });
           
+          // Safely create PublicKey object
+          const publicKey = safeCreatePublicKey(walletAddress);
+          if (!publicKey) {
+            console.error('Failed to create PublicKey for address:', walletAddress);
+            setWalletBalance(0);
+            return;
+          }
+          
           // Get actual balance from blockchain
-          const publicKey = new PublicKey(walletAddress);
           const lamports = await connection.getBalance(publicKey);
           const solBalance = lamports / LAMPORTS_PER_SOL;
           
@@ -116,8 +131,8 @@ const Navbar: FC = () => {
     );
   }
 
-  // Check if wallet is connected
-  const isWalletConnected = embeddedWallet !== undefined;
+  // Check if wallet is connected and address is valid
+  const isWalletConnected = embeddedWallet !== undefined && isValidSolanaAddress(walletAddress);
 
   return (
     <header className="bg-[#0d0d0f] py-2 px-3 border-b border-gray-800 text-white">
@@ -219,12 +234,20 @@ const Navbar: FC = () => {
                             </button>
                           </>
                         ) : (
-                          <button
-                            onClick={() => {/* Implement embedded wallet creation here */}}
-                            className="w-full text-sm bg-green-600 hover:bg-green-700 rounded px-3 py-1 text-center"
-                          >
-                            Create Wallet
-                          </button>
+                          <div className="text-center">
+                            <div className="text-sm text-gray-400 mb-2">
+                              {embeddedWallet ? 'Invalid wallet address' : 'No wallet connected'}
+                            </div>
+                            <button
+                              onClick={() => {
+                                // Implement embedded wallet creation here
+                                console.log('Create wallet clicked');
+                              }}
+                              className="w-full text-sm bg-green-600 hover:bg-green-700 rounded px-3 py-1 text-center"
+                            >
+                              Create Wallet
+                            </button>
+                          </div>
                         )}
                       </div>
 

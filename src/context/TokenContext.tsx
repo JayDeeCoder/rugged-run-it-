@@ -3,8 +3,9 @@
 
 import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
 import { useWallets, usePrivy } from '@privy-io/react-auth';
-import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { toast } from 'react-hot-toast';
+import { isValidSolanaAddress, safeCreatePublicKey, isValidWallet, getValidWalletAddress } from '../utils/walletUtils';
 
 // Import TokenType from types file
 export enum TokenType {
@@ -47,34 +48,6 @@ const defaultValue: TokenContextType = {
 
 const TokenContext = createContext<TokenContextType>(defaultValue);
 
-// Helper function to validate Solana address
-const isValidSolanaAddress = (address: string): boolean => {
-  try {
-    // Check if address exists and is a string
-    if (!address || typeof address !== 'string') {
-      return false;
-    }
-    
-    // Check length (Solana addresses are typically 32-44 characters)
-    if (address.length < 32 || address.length > 44) {
-      return false;
-    }
-    
-    // Check if it contains only valid base58 characters
-    const base58Regex = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/;
-    if (!base58Regex.test(address)) {
-      return false;
-    }
-    
-    // Try to create a PublicKey instance
-    new PublicKey(address);
-    return true;
-  } catch (error) {
-    console.warn('Invalid Solana address:', address, error);
-    return false;
-  }
-};
-
 export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { authenticated } = usePrivy();
   const { wallets } = useWallets();
@@ -89,11 +62,15 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Airdrop cooldown (24 hours)
   const airdropCooldown = 24 * 60 * 60 * 1000;
   
-  // Get embedded wallet - with better filtering
+  // Get embedded wallet - with better filtering and validation
   const embeddedWallet = wallets.find(wallet => 
     wallet.walletClientType === 'privy' && 
-    wallet.chainId === 'solana'
-  ) || wallets.find(wallet => wallet.walletClientType === 'privy');
+    wallet.chainId === 'solana' &&
+    isValidWallet(wallet)
+  ) || wallets.find(wallet => 
+    wallet.walletClientType === 'privy' &&
+    isValidWallet(wallet)
+  );
   
   // Solana connection
   const connection = new Connection(
@@ -108,19 +85,29 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   
   // Load airdrop timestamp from localStorage
   useEffect(() => {
-    if (embeddedWallet && isValidSolanaAddress(embeddedWallet.address)) {
-      const saved = localStorage.getItem(`airdrop_${embeddedWallet.address}`);
+    const walletAddress = getValidWalletAddress(embeddedWallet);
+    if (walletAddress) {
+      const saved = localStorage.getItem(`airdrop_${walletAddress}`);
       if (saved) {
-        setLastAirdropTime(parseInt(saved));
+        try {
+          setLastAirdropTime(parseInt(saved));
+        } catch (error) {
+          console.error('Failed to parse airdrop timestamp:', error);
+        }
       }
     }
   }, [embeddedWallet]);
   
   // Save airdrop timestamp to localStorage
   const saveAirdropTime = (timestamp: number) => {
-    if (embeddedWallet && isValidSolanaAddress(embeddedWallet.address)) {
-      localStorage.setItem(`airdrop_${embeddedWallet.address}`, timestamp.toString());
-      setLastAirdropTime(timestamp);
+    const walletAddress = getValidWalletAddress(embeddedWallet);
+    if (walletAddress) {
+      try {
+        localStorage.setItem(`airdrop_${walletAddress}`, timestamp.toString());
+        setLastAirdropTime(timestamp);
+      } catch (error) {
+        console.error('Failed to save airdrop timestamp:', error);
+      }
     }
   };
   
@@ -134,24 +121,34 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return;
     }
     
-    // Validate the wallet address before proceeding
-    if (!isValidSolanaAddress(embeddedWallet.address)) {
+    // Get valid wallet address
+    const walletAddress = getValidWalletAddress(embeddedWallet);
+    if (!walletAddress) {
       console.error('Invalid wallet address:', embeddedWallet.address);
-      // Don't throw an error, just log and return
       return;
     }
     
     try {
+      // Create PublicKey safely
+      const publicKey = safeCreatePublicKey(walletAddress);
+      if (!publicKey) {
+        console.error('Failed to create PublicKey for address:', walletAddress);
+        return;
+      }
+      
       // Get SOL balance
-      const publicKey = new PublicKey(embeddedWallet.address);
       const lamports = await connection.getBalance(publicKey);
       setSolBalance(lamports / LAMPORTS_PER_SOL);
       
       // For RUGGED tokens, we'll use a mock implementation
       // In a real app, you'd fetch the SPL token balance
-      const savedRuggedBalance = localStorage.getItem(`rugged_balance_${embeddedWallet.address}`);
+      const savedRuggedBalance = localStorage.getItem(`rugged_balance_${walletAddress}`);
       if (savedRuggedBalance) {
-        setRuggedBalance(parseFloat(savedRuggedBalance));
+        try {
+          setRuggedBalance(parseFloat(savedRuggedBalance));
+        } catch (error) {
+          console.error('Failed to parse saved RUGGED balance:', error);
+        }
       }
     } catch (error) {
       console.error('Failed to refresh balances:', error);
@@ -161,7 +158,7 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   
   // Initial balance fetch
   useEffect(() => {
-    if (authenticated && embeddedWallet && isValidSolanaAddress(embeddedWallet.address)) {
+    if (authenticated && isValidWallet(embeddedWallet)) {
       refreshBalances();
       
       // Set up interval to refresh balances
@@ -177,13 +174,21 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return false;
     }
     
-    if (!isValidSolanaAddress(embeddedWallet.address)) {
+    const walletAddress = getValidWalletAddress(embeddedWallet);
+    if (!walletAddress) {
       toast.error('Invalid wallet address');
       return false;
     }
     
     if (!isAirdropAvailable) {
-      toast.error('Airdrop not available yet');
+      const timeRemaining = lastAirdropTime ? (lastAirdropTime + airdropCooldown - Date.now()) : 0;
+      const hoursRemaining = Math.ceil(timeRemaining / (1000 * 60 * 60));
+      toast.error(`Airdrop not available yet. Try again in ${hoursRemaining} hours.`);
+      return false;
+    }
+    
+    if (amount <= 0) {
+      toast.error('Invalid airdrop amount');
       return false;
     }
     
@@ -196,13 +201,17 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       if (token === TokenType.SOL) {
         // For SOL, we'll simulate by just updating the local balance
         // In a real app, this would be a server-side operation
-        setSolBalance(prev => prev + amount);
+        setSolBalance(prev => Math.max(0, prev + amount));
         toast.success(`Received ${amount} SOL airdrop!`);
       } else if (token === TokenType.RUGGED) {
         // For RUGGED tokens, update localStorage and state
-        const newBalance = ruggedBalance + amount;
+        const newBalance = Math.max(0, ruggedBalance + amount);
         setRuggedBalance(newBalance);
-        localStorage.setItem(`rugged_balance_${embeddedWallet.address}`, newBalance.toString());
+        try {
+          localStorage.setItem(`rugged_balance_${walletAddress}`, newBalance.toString());
+        } catch (error) {
+          console.error('Failed to save RUGGED balance to localStorage:', error);
+        }
         toast.success(`Received ${amount} RUGGED tokens!`);
       }
       
@@ -212,7 +221,7 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       return true;
     } catch (error) {
       console.error('Airdrop failed:', error);
-      toast.error('Airdrop failed');
+      toast.error('Airdrop failed. Please try again.');
       return false;
     } finally {
       setIsProcessingAirdrop(false);

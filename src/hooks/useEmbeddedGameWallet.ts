@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { useWallets } from '@privy-io/react-auth';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { safeCreatePublicKey, isValidSolanaAddress } from '../utils/walletUtils';
 
 // Your Alchemy Solana RPC URL
 const SOLANA_RPC_URL = 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
@@ -12,34 +13,6 @@ interface GameWalletData {
   balance: string;
   isConnected: boolean;
 }
-
-// Helper function to validate Solana address
-const isValidSolanaAddress = (address: string): boolean => {
-  try {
-    // Check if address exists and is a string
-    if (!address || typeof address !== 'string') {
-      return false;
-    }
-    
-    // Check length (Solana addresses are typically 32-44 characters)
-    if (address.length < 32 || address.length > 44) {
-      return false;
-    }
-    
-    // Check if it contains only valid base58 characters
-    const base58Regex = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/;
-    if (!base58Regex.test(address)) {
-      return false;
-    }
-    
-    // Try to create a PublicKey instance
-    new PublicKey(address);
-    return true;
-  } catch (error) {
-    console.warn('Invalid Solana address:', address, error);
-    return false;
-  }
-};
 
 export function useEmbeddedGameWallet() {
   const { authenticated } = usePrivy();
@@ -115,7 +88,14 @@ export function useEmbeddedGameWallet() {
           
           // Create connection using your Alchemy RPC URL
           const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
-          const publicKey = new PublicKey(wallet.address);
+          
+          // Safe PublicKey creation
+          const publicKey = safeCreatePublicKey(wallet.address);
+          if (!publicKey) {
+            console.error('Invalid wallet address - cannot create PublicKey:', wallet.address);
+            return;
+          }
+          
           const lamports = await connection.getBalance(publicKey);
           const solBalance = (lamports / LAMPORTS_PER_SOL).toFixed(6);
           
@@ -151,7 +131,14 @@ export function useEmbeddedGameWallet() {
     try {
       // Use your Alchemy RPC URL for balance refresh
       const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
-      const publicKey = new PublicKey(wallet.address);
+      
+      // Safe PublicKey creation
+      const publicKey = safeCreatePublicKey(wallet.address);
+      if (!publicKey) {
+        console.error('Invalid wallet address - cannot create PublicKey:', wallet.address);
+        throw new Error('Invalid wallet address - cannot create PublicKey');
+      }
+      
       const lamports = await connection.getBalance(publicKey);
       const solBalance = (lamports / LAMPORTS_PER_SOL).toFixed(6);
       

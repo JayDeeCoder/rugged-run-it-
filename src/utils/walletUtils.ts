@@ -3,6 +3,8 @@ import { PublicKey } from '@solana/web3.js';
 
 /**
  * Validates if a string is a valid Solana address
+ * @param address The address string to validate
+ * @returns boolean indicating if the address is valid
  */
 export const isValidSolanaAddress = (address: string): boolean => {
   try {
@@ -22,52 +24,62 @@ export const isValidSolanaAddress = (address: string): boolean => {
       return false;
     }
     
-    // Try to create a PublicKey instance
+    // Try to create a PublicKey instance - this will throw if invalid
     new PublicKey(address);
     return true;
   } catch (error) {
+    // Log the error for debugging but don't throw
+    console.warn('Invalid Solana address validation failed:', address, error);
     return false;
   }
 };
 
 /**
- * Safely creates a PublicKey from a string address
+ * Safely creates a PublicKey instance with proper error handling
+ * @param address The address string to convert to PublicKey
+ * @returns PublicKey instance or null if invalid
  */
 export const safeCreatePublicKey = (address: string): PublicKey | null => {
   try {
+    // First validate the address
     if (!isValidSolanaAddress(address)) {
       return null;
     }
+    
+    // Create and return the PublicKey
     return new PublicKey(address);
   } catch (error) {
-    console.warn('Failed to create PublicKey:', error);
+    console.error('Failed to create PublicKey:', address, error);
     return null;
   }
 };
 
 /**
- * Formats a wallet address for display
+ * Validates wallet object and its address
+ * @param wallet The wallet object to validate
+ * @returns boolean indicating if the wallet is valid and has a valid address
  */
-export const formatWalletAddress = (address: string, chars: number = 4): string => {
-  if (!address || !isValidSolanaAddress(address)) {
-    return 'Invalid Address';
+export const isValidWallet = (wallet: any): boolean => {
+  if (!wallet) {
+    return false;
   }
   
-  if (address.length <= chars * 2) {
-    return address;
+  if (!wallet.address || typeof wallet.address !== 'string') {
+    return false;
   }
   
-  return `${address.substring(0, chars)}...${address.substring(address.length - chars)}`;
+  return isValidSolanaAddress(wallet.address);
 };
 
 /**
- * Checks if a wallet is a valid Solana embedded wallet
+ * Safely gets wallet address with validation
+ * @param wallet The wallet object
+ * @returns The wallet address if valid, null otherwise
  */
-export const isValidSolanaWallet = (wallet: any): boolean => {
-  return (
-    wallet &&
-    wallet.walletClientType === 'privy' &&
-    wallet.address &&
-    isValidSolanaAddress(wallet.address)
-  );
+export const getValidWalletAddress = (wallet: any): string | null => {
+  if (!isValidWallet(wallet)) {
+    return null;
+  }
+  
+  return wallet.address;
 };

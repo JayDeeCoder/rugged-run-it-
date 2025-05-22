@@ -77,6 +77,21 @@ interface LeaderboardEntry {
     rank?: number;
 }
 
+// Fix: Add proper typing for Supabase query result
+interface BetWithUser {
+    wallet_address: string;
+    user_id: string;
+    bet_amount: number;
+    profit_loss: number | null;
+    cashout_multiplier: number | null;
+    users: {
+        username: string;
+        avatar: string;
+        level: number;
+        badge: string;
+    } | null;
+}
+
 // Socket event interfaces
 interface PlaceBetData {
     walletAddress: string;
@@ -434,7 +449,7 @@ async function updateLeaderboard(): Promise<void> {
     try {
         const today = new Date().toISOString().split('T')[0];
         
-        // Calculate daily leaderboard
+        // Calculate daily leaderboard - Fixed typing
         const { data: dailyStats } = await supabase
             .from('player_bets')
             .select(`
@@ -443,20 +458,22 @@ async function updateLeaderboard(): Promise<void> {
                 bet_amount,
                 profit_loss,
                 cashout_multiplier,
-                users:user_id (username, avatar, level, badge)
+                users!inner (username, avatar, level, badge)
             `)
             .gte('created_at', today)
-            .not('profit_loss', 'is', null);
+            .not('profit_loss', 'is', null) as { data: BetWithUser[] | null };
 
         if (dailyStats) {
             const leaderboardMap = new Map<string, LeaderboardEntry>();
 
             for (const bet of dailyStats) {
                 const key = bet.wallet_address;
+                const userData = bet.users;
+                
                 const existing = leaderboardMap.get(key) || {
                     userId: bet.user_id,
                     walletAddress: bet.wallet_address,
-                    username: bet.users?.username || 'Anonymous',
+                    username: userData?.username || 'Anonymous',
                     totalProfit: 0,
                     profitPercentage: 0,
                     gamesPlayed: 0,

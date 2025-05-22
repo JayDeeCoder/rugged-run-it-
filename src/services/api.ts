@@ -80,6 +80,13 @@ export interface BetEntry {
   created_at: string;
 }
 
+// Type for partial bet data from Supabase queries
+export interface BetStatsData {
+  bet_amount: number;
+  profit_loss?: number;
+  cashout_multiplier?: number;
+}
+
 export interface ChatMessage {
   id: string;
   wallet_address: string;
@@ -97,6 +104,12 @@ export interface SystemSetting {
   value: string;
   description?: string;
   updated_at: string;
+}
+
+// Type for partial system setting data from queries
+export interface SystemSettingData {
+  key: string;
+  value: string;
 }
 
 // Game API with WebSocket support
@@ -468,11 +481,14 @@ export class UserAPI {
         };
       }
 
-      const totalWagered = data.reduce((sum: number, bet: BetEntry) => sum + bet.bet_amount, 0);
-      const totalWon = data.reduce((sum: number, bet: BetEntry) => sum + Math.max(0, bet.profit_loss || 0), 0);
-      const gamesPlayed = data.length;
-      const bestMultiplier = Math.max(...data.map((bet: BetEntry) => bet.cashout_multiplier || 0));
-      const wins = data.filter((bet: BetEntry) => (bet.profit_loss || 0) > 0).length;
+      // Use proper typing for the partial bet data
+      const betData: BetStatsData[] = data;
+
+      const totalWagered = betData.reduce((sum: number, bet: BetStatsData) => sum + bet.bet_amount, 0);
+      const totalWon = betData.reduce((sum: number, bet: BetStatsData) => sum + Math.max(0, bet.profit_loss || 0), 0);
+      const gamesPlayed = betData.length;
+      const bestMultiplier = Math.max(...betData.map((bet: BetStatsData) => bet.cashout_multiplier || 0));
+      const wins = betData.filter((bet: BetStatsData) => (bet.profit_loss || 0) > 0).length;
       const winRate = gamesPlayed > 0 ? wins / gamesPlayed : 0;
 
       return {
@@ -624,7 +640,8 @@ export class SystemAPI {
       }
 
       const settings: Record<string, string> = {};
-      data?.forEach((setting: SystemSetting) => {
+      // Use proper typing for the partial system setting data
+      data?.forEach((setting: SystemSettingData) => {
         settings[setting.key] = setting.value;
       });
 
@@ -656,6 +673,3 @@ export class SystemAPI {
 
 // Create singleton instances
 export const gameAPI = new GameAPI();
-
-// Export everything with default implementations
-export { GameAPI, LeaderboardAPI, ChartAPI, UserAPI, ChatAPI, SystemAPI };

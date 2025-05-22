@@ -17,7 +17,7 @@
   "include": [
     "*.ts",
     "src/**/*"
-  ],
+, "../game-server/production-game-server.ts"  ],
   "exclude": [
     "node_modules",
     "dist"

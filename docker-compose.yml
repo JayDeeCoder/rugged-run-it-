@@ -1,49 +1,54 @@
-version: '3.8'
-
+# Remove the version line as it's obsolete
 services:
-  # Game Server
+  # Game server
   game-server:
-    build:
-      context: ./server
-      dockerfile: Dockerfile
-    ports:
-      - "3001:3001"
+    build: ./production-game-server  # or whatever your game server directory is called
+    container_name: production-game-server
     environment:
       - NODE_ENV=production
-      - PORT=3001
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - SOLANA_RPC_URL=${SOLANA_RPC_URL}
-      - HOUSE_WALLET_ADDRESS=${HOUSE_WALLET_ADDRESS}
-      - FRONTEND_URL=${FRONTEND_URL}
-    volumes:
-      - ./server:/app
-      - /app/node_modules
-    depends_on:
-      - redis
+    networks:
+      - app-network
     restart: unless-stopped
 
-  # Redis for caching and session storage
+  # Chat server - fix the path case
+  chat-server:
+    build: ./Server  # Capital S to match your directory
+    container_name: chat-server
+    environment:
+      - NODE_ENV=production
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - CHAT_PORT=3002
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # Redis (if you need it)
   redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+    image: redis:alpine
+    container_name: redis
+    networks:
+      - app-network
     restart: unless-stopped
 
   # Nginx reverse proxy
   nginx:
     image: nginx:alpine
+    container_name: nginx
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./ssl:/etc/nginx/ssl
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
     depends_on:
       - game-server
+      - chat-server
+    networks:
+      - app-network
     restart: unless-stopped
 
-volumes:
-  redis_data:
+networks:
+  app-network:
+    driver: bridge

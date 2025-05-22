@@ -111,7 +111,7 @@ let gameHistory: GameState[] = [];
 const GAME_CONFIG = {
     MIN_GAME_DURATION: 5000, // 5 seconds
     MAX_GAME_DURATION: 180000, // 3 minutes
-    HOUSE_EDGE: 0.05, // 5%
+    HOUSE_EDGE: 0.20, // 20%
     UPDATE_INTERVAL: 100, // 100ms updates
     MIN_BET: 0.001,
     MAX_BET: 10.0,

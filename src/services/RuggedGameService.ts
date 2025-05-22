@@ -1,6 +1,7 @@
 // src/services/RuggedGameService.ts
 import { Connection, PublicKey, Transaction, LAMPORTS_PER_SOL, SystemProgram } from '@solana/web3.js';
 import { toast } from 'react-hot-toast';
+import { safeCreatePublicKey, isValidSolanaAddress } from '../utils/walletUtils';
 
 // Types for game state management
 export type TokenType = 'SOL' | 'RUGGED';
@@ -68,6 +69,18 @@ export class RuggedGameService {
         throw new Error('Only embedded wallets are supported');
       }
 
+      // Validate player address before using
+      if (!isValidSolanaAddress(playerAddress)) {
+        console.error('Invalid player address:', playerAddress);
+        throw new Error('Invalid player address');
+      }
+
+      // Validate wallet address before using
+      if (!isValidSolanaAddress(wallet.address)) {
+        console.error('Invalid wallet address:', wallet.address);
+        throw new Error('Invalid wallet address');
+      }
+
       // Generate unique game ID
       const gameId = `game_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
       
@@ -88,11 +101,30 @@ export class RuggedGameService {
       if (betToken === 'SOL') {
         let signature: string;
         
+        // Validate house wallet address before using
+        if (!isValidSolanaAddress(RuggedGameService.HOUSE_WALLET_ADDRESS)) {
+          console.error('Invalid house wallet address:', RuggedGameService.HOUSE_WALLET_ADDRESS);
+          throw new Error('Invalid house wallet address');
+        }
+
+        // Create safe PublicKey instances
+        const fromPubkey = safeCreatePublicKey(wallet.address);
+        if (!fromPubkey) {
+          console.error('Invalid address:', wallet.address);
+          throw new Error('Failed to create valid PublicKey for wallet address');
+        }
+
+        const toPubkey = safeCreatePublicKey(RuggedGameService.HOUSE_WALLET_ADDRESS);
+        if (!toPubkey) {
+          console.error('Invalid address:', RuggedGameService.HOUSE_WALLET_ADDRESS);
+          throw new Error('Failed to create valid PublicKey for house wallet address');
+        }
+
         // Create transaction using embedded wallet
         const transaction = new Transaction().add(
           SystemProgram.transfer({
-            fromPubkey: new PublicKey(wallet.address),
-            toPubkey: new PublicKey(RuggedGameService.HOUSE_WALLET_ADDRESS),
+            fromPubkey,
+            toPubkey,
             lamports: Math.floor(betAmount * LAMPORTS_PER_SOL)
           })
         );
@@ -169,6 +201,12 @@ export class RuggedGameService {
       
       if (gameState.isRugPulled) {
         throw new Error('Game was already rugged');
+      }
+      
+      // Validate player address before using
+      if (!isValidSolanaAddress(gameState.playerAddress)) {
+        console.error('Invalid player address:', gameState.playerAddress);
+        throw new Error('Invalid player address in game state');
       }
       
       // Calculate winnings

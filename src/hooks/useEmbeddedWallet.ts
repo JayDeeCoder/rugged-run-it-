@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useWallets, usePrivy, ConnectedWallet } from '@privy-io/react-auth';
 import { Connection, PublicKey, LAMPORTS_PER_SOL, Commitment, Transaction, SystemProgram } from '@solana/web3.js';
+import { safeCreatePublicKey, isValidSolanaAddress } from '../utils/walletUtils';
 import { toast } from 'react-hot-toast';
 
 interface ExtendedConnectedWallet extends ConnectedWallet {
@@ -98,8 +99,19 @@ export const useEmbeddedWallet = () => {
             } : undefined
           });
           
+          // Validate wallet address before using
+          if (!isValidSolanaAddress(embeddedWallet.address)) {
+            console.error('Invalid wallet address:', embeddedWallet.address);
+            return;
+          }
+          
           // Get the balance using the embedded wallet address
-          const publicKey = new PublicKey(embeddedWallet.address);
+          const publicKey = safeCreatePublicKey(embeddedWallet.address);
+          if (!publicKey) {
+            console.error('Failed to create PublicKey:', embeddedWallet.address);
+            return;
+          }
+          
           const lamports = await connection.getBalance(publicKey);
           const solBalance = (lamports / LAMPORTS_PER_SOL).toFixed(6);
           
@@ -141,9 +153,30 @@ export const useEmbeddedWallet = () => {
         } : undefined
       });
       
+      // Validate wallet address before using
+      if (!isValidSolanaAddress(embeddedWallet.address)) {
+        console.error('Invalid wallet address:', embeddedWallet.address);
+        throw new Error('Invalid wallet address');
+      }
+      
+      // Validate recipient address before using
+      if (!isValidSolanaAddress(to)) {
+        console.error('Invalid recipient address:', to);
+        throw new Error('Invalid recipient address');
+      }
+      
       // Get sender public key
-      const fromPubkey = new PublicKey(embeddedWallet.address);
-      const toPubkey = new PublicKey(to);
+      const fromPubkey = safeCreatePublicKey(embeddedWallet.address);
+      if (!fromPubkey) {
+        console.error('Failed to create wallet PublicKey:', embeddedWallet.address);
+        throw new Error('Failed to create wallet PublicKey');
+      }
+      
+      const toPubkey = safeCreatePublicKey(to);
+      if (!toPubkey) {
+        console.error('Failed to create recipient PublicKey:', to);
+        throw new Error('Failed to create recipient PublicKey');
+      }
       
       // Create transaction
       const transaction = new Transaction().add(

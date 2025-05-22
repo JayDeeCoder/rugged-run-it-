@@ -1,5 +1,6 @@
 import { Connection, Keypair, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import logger from '../utils/logger';
+import { safeCreatePublicKey, isValidSolanaAddress } from '../utils/walletUtils';
 
 // Load Solana connection with ALCHEMY RPC
 const connection = new Connection(
@@ -52,6 +53,12 @@ class GameService {
     transactionId?: string
   ): Promise<GameState> {
     try {
+      // Validate player wallet address before using
+      if (!isValidSolanaAddress(playerWallet)) {
+        console.error('Invalid player wallet address:', playerWallet);
+        throw new Error('Invalid player wallet address');
+      }
+
       // Verify the transaction on the blockchain if transactionId is provided
       if (transactionId) {
         // Get transaction details from Solana
@@ -140,13 +147,26 @@ class GameService {
     try {
       let transactionId = '';
       
-      // Send real transaction using Tatum.io RPC
+      // Send real transaction using Alchemy RPC
       if (game.token === 'SOL') {
+        // Validate player wallet address before using
+        if (!isValidSolanaAddress(game.playerWallet)) {
+          console.error('Invalid player wallet address:', game.playerWallet);
+          throw new Error('Invalid player wallet address');
+        }
+
+        // Create safe PublicKey for player wallet
+        const toPubkey = safeCreatePublicKey(game.playerWallet);
+        if (!toPubkey) {
+          console.error('Invalid address:', game.playerWallet);
+          throw new Error('Failed to create valid PublicKey for player wallet');
+        }
+
         // Send SOL from house wallet to player
         const transaction = new Transaction().add(
           SystemProgram.transfer({
             fromPubkey: houseKeypair.publicKey,
-            toPubkey: new PublicKey(game.playerWallet),
+            toPubkey,
             lamports: Math.floor(payout * LAMPORTS_PER_SOL)
           })
         );

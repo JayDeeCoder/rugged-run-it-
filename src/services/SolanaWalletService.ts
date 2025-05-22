@@ -1,5 +1,6 @@
 // src/services/SolanaWalletService.ts
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, Commitment } from '@solana/web3.js';
+import { safeCreatePublicKey, isValidSolanaAddress } from '../utils/walletUtils';
 import logger from '../utils/logger';
 
 /**
@@ -11,7 +12,7 @@ class SolanaWalletService {
   private apiKey: string;
   
   constructor() {
-    this.rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3 ';
+    this.rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
     this.apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '6CqgIf5nqVF9rWeernULokib0PAr6yh3';
   }
   
@@ -51,13 +52,42 @@ class SolanaWalletService {
         throw new Error('Amount must be greater than 0');
       }
       
+      // Validate recipient address before using
+      if (!isValidSolanaAddress(recipientAddress)) {
+        console.error('Invalid recipient address:', recipientAddress);
+        throw new Error('Invalid recipient address provided');
+      }
+      
+      // Create PublicKey instances with safe creation
+      let fromPubkey: PublicKey;
+      if (wallet.publicKey instanceof PublicKey) {
+        fromPubkey = wallet.publicKey;
+      } else {
+        const walletAddressString = wallet.publicKey.toString();
+        if (!isValidSolanaAddress(walletAddressString)) {
+          console.error('Invalid wallet address:', walletAddressString);
+          throw new Error('Invalid wallet address');
+        }
+        
+        const safeFromPubkey = safeCreatePublicKey(walletAddressString);
+        if (!safeFromPubkey) {
+          console.error('Failed to create wallet PublicKey:', walletAddressString);
+          throw new Error('Failed to create wallet PublicKey');
+        }
+        fromPubkey = safeFromPubkey;
+      }
+      
+      const toPubkey = safeCreatePublicKey(recipientAddress);
+      if (!toPubkey) {
+        console.error('Failed to create recipient PublicKey:', recipientAddress);
+        throw new Error('Failed to create recipient PublicKey');
+      }
+      
       // Create transaction
       const transaction = new Transaction().add(
         SystemProgram.transfer({
-          fromPubkey: wallet.publicKey instanceof PublicKey 
-            ? wallet.publicKey 
-            : new PublicKey(wallet.publicKey.toString()),
-          toPubkey: new PublicKey(recipientAddress),
+          fromPubkey,
+          toPubkey,
           lamports: Math.floor(amount * LAMPORTS_PER_SOL),
         })
       );
@@ -65,9 +95,7 @@ class SolanaWalletService {
       // Set recent blockhash and fee payer
       const { blockhash } = await connection.getLatestBlockhash();
       transaction.recentBlockhash = blockhash;
-      transaction.feePayer = wallet.publicKey instanceof PublicKey 
-        ? wallet.publicKey 
-        : new PublicKey(wallet.publicKey.toString());
+      transaction.feePayer = fromPubkey;
       
       // Sign transaction
       if (!wallet.signTransaction) {
@@ -98,7 +126,25 @@ class SolanaWalletService {
   async getBalance(address: string | PublicKey): Promise<number> {
     try {
       const connection = await this.getConnection();
-      const publicKey = typeof address === 'string' ? new PublicKey(address) : address;
+      
+      let publicKey: PublicKey;
+      if (typeof address === 'string') {
+        // Validate address before using
+        if (!isValidSolanaAddress(address)) {
+          console.error('Invalid wallet address:', address);
+          return 0;
+        }
+        
+        const safePublicKey = safeCreatePublicKey(address);
+        if (!safePublicKey) {
+          console.error('Failed to create PublicKey:', address);
+          return 0;
+        }
+        publicKey = safePublicKey;
+      } else {
+        publicKey = address;
+      }
+      
       const lamports = await connection.getBalance(publicKey);
       return lamports / LAMPORTS_PER_SOL;
     } catch (error) {

@@ -4,6 +4,7 @@ import DepositModal from '../trading/DepositModal';
 import WithdrawModal from '../../components/trading/WithdrawModal';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { safeCreatePublicKey, isValidSolanaAddress } from '../../utils/walletUtils';
 
 // Define the TokenType enum locally
 enum TokenType {
@@ -63,8 +64,21 @@ const WalletActions = () => {
       try {
         setIsLoading(true);
         
+        // Validate wallet address before using
+        if (!isValidSolanaAddress(walletAddress)) {
+          console.error('Invalid wallet address:', walletAddress);
+          setIsLoading(false);
+          return;
+        }
+        
         // Get SOL balance from Alchemy's Solana RPC
-        const publicKey = new PublicKey(walletAddress);
+        const publicKey = safeCreatePublicKey(walletAddress);
+        if (!publicKey) {
+          console.error('Failed to create PublicKey:', walletAddress);
+          setIsLoading(false);
+          return;
+        }
+        
         const balance = await connection.getBalance(publicKey);
         const solBalance = balance / LAMPORTS_PER_SOL;
         
@@ -211,7 +225,18 @@ const WalletActions = () => {
         onSuccess={() => {
           // Refresh balance after successful withdrawal
           if (walletAddress) {
-            const publicKey = new PublicKey(walletAddress);
+            // Validate wallet address before using
+            if (!isValidSolanaAddress(walletAddress)) {
+              console.error('Invalid wallet address:', walletAddress);
+              return;
+            }
+            
+            const publicKey = safeCreatePublicKey(walletAddress);
+            if (!publicKey) {
+              console.error('Failed to create PublicKey:', walletAddress);
+              return;
+            }
+            
             connection.getBalance(publicKey).then(newBalance => {
               setBalance(newBalance / LAMPORTS_PER_SOL);
             }).catch(console.error);

@@ -1,5 +1,6 @@
 import { useWallets, usePrivy } from '@privy-io/react-auth';
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { safeCreatePublicKey, isValidSolanaAddress } from '../utils/walletUtils';
 
 export const useSendTransaction = () => {
   const { wallets } = useWallets();
@@ -13,14 +14,38 @@ export const useSendTransaction = () => {
       throw new Error('Embedded wallet not connected');
     }
     
-    const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'hhttps://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
+    // Validate addresses before using them
+    if (!isValidSolanaAddress(embeddedWallet.address)) {
+      console.error('Invalid wallet address:', embeddedWallet.address);
+      throw new Error('Invalid wallet address');
+    }
+    
+    if (!isValidSolanaAddress(to)) {
+      console.error('Invalid recipient address:', to);
+      throw new Error('Invalid recipient address');
+    }
+    
+    const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
     const connection = new Connection(rpcUrl);
+    
+    // Safe PublicKey creation
+    const fromPubkey = safeCreatePublicKey(embeddedWallet.address);
+    if (!fromPubkey) {
+      console.error('Invalid wallet address - cannot create PublicKey:', embeddedWallet.address);
+      throw new Error('Invalid wallet address - cannot create PublicKey');
+    }
+    
+    const toPubkey = safeCreatePublicKey(to);
+    if (!toPubkey) {
+      console.error('Invalid recipient address - cannot create PublicKey:', to);
+      throw new Error('Invalid recipient address - cannot create PublicKey');
+    }
     
     // Create transaction
     const transaction = new Transaction().add(
       SystemProgram.transfer({
-        fromPubkey: new PublicKey(embeddedWallet.address),
-        toPubkey: new PublicKey(to),
+        fromPubkey,
+        toPubkey,
         lamports: amount * LAMPORTS_PER_SOL,
       })
     );
@@ -28,7 +53,7 @@ export const useSendTransaction = () => {
     // Get a recent blockhash
     const { blockhash } = await connection.getLatestBlockhash();
     transaction.recentBlockhash = blockhash;
-    transaction.feePayer = new PublicKey(embeddedWallet.address);
+    transaction.feePayer = fromPubkey;
     
     try {
       // Since the specific API methods vary between versions,
@@ -61,6 +86,12 @@ export const useSendTransaction = () => {
   const placeBet = async (amount: number, gameContractAddress: string) => {
     if (!embeddedWallet) {
       throw new Error('Embedded wallet not connected');
+    }
+    
+    // Validate game contract address
+    if (!isValidSolanaAddress(gameContractAddress)) {
+      console.error('Invalid game contract address:', gameContractAddress);
+      throw new Error('Invalid game contract address');
     }
     
     // Here you would implement the specific transaction for your game contract

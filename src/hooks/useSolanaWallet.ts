@@ -4,6 +4,7 @@ import { useSolanaWallets } from '@privy-io/react-auth/solana';
 import { usePrivy } from '@privy-io/react-auth';
 import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction, SystemProgram } from '@solana/web3.js';
 import { toast } from 'react-hot-toast';
+import { safeCreatePublicKey, isValidSolanaAddress } from '../utils/walletUtils';
 
 export interface SolanaWalletData {
   address: string | null;
@@ -68,8 +69,15 @@ export const useSolanaWallet = () => {
     const fetchBalance = async () => {
       if (solanaWallet?.address) {
         try {
-          // Setup connection with Tatum.io RPC
-          const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'hhttps://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
+          // Validate address before using
+          if (!isValidSolanaAddress(solanaWallet.address)) {
+            console.error('Invalid wallet address:', solanaWallet.address);
+            setBalance("0");
+            return;
+          }
+
+          // Setup connection with Alchemy RPC
+          const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
           const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '6CqgIf5nqVF9rWeernULokib0PAr6yh3';
           
           const connection = new Connection(rpcUrl, {
@@ -80,7 +88,13 @@ export const useSolanaWallet = () => {
           });
           
           // Get the balance using the wallet address
-          const publicKey = new PublicKey(solanaWallet.address);
+          const publicKey = safeCreatePublicKey(solanaWallet.address);
+          if (!publicKey) {
+            console.error('Invalid address:', solanaWallet.address);
+            setBalance("0");
+            return;
+          }
+
           const lamports = await connection.getBalance(publicKey);
           const solBalance = (lamports / LAMPORTS_PER_SOL).toFixed(6);
           
@@ -106,9 +120,21 @@ export const useSolanaWallet = () => {
       throw new Error('Solana wallet not connected');
     }
 
+    // Validate wallet address before using
+    if (!isValidSolanaAddress(solanaWallet.address)) {
+      console.error('Invalid wallet address:', solanaWallet.address);
+      throw new Error('Invalid wallet address');
+    }
+
+    // Validate recipient address before using
+    if (!isValidSolanaAddress(to)) {
+      console.error('Invalid recipient address:', to);
+      throw new Error('Invalid recipient address');
+    }
+
     try {
       const connection = new Connection(
-        process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'hhttps://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3',
+        process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3',
         {
           commitment: 'confirmed',
           httpHeaders: {
@@ -117,11 +143,23 @@ export const useSolanaWallet = () => {
         }
       );
       
-      // Create transaction
+      // Create transaction with safe PublicKey creation
+      const fromPubkey = safeCreatePublicKey(solanaWallet.address);
+      if (!fromPubkey) {
+        console.error('Invalid address:', solanaWallet.address);
+        throw new Error('Invalid wallet address');
+      }
+
+      const toPubkey = safeCreatePublicKey(to);
+      if (!toPubkey) {
+        console.error('Invalid address:', to);
+        throw new Error('Invalid recipient address');
+      }
+
       const transaction = new Transaction().add(
         SystemProgram.transfer({
-          fromPubkey: new PublicKey(solanaWallet.address),
-          toPubkey: new PublicKey(to),
+          fromPubkey,
+          toPubkey,
           lamports: Math.floor(amount * LAMPORTS_PER_SOL)
         })
       );
@@ -129,7 +167,7 @@ export const useSolanaWallet = () => {
       // Get recent blockhash
       const { blockhash } = await connection.getLatestBlockhash();
       transaction.recentBlockhash = blockhash;
-      transaction.feePayer = new PublicKey(solanaWallet.address);
+      transaction.feePayer = fromPubkey; // Reuse the same PublicKey instance
       
       // Sign and send transaction
       const signedTransaction = await solanaWallet.signTransaction(transaction);

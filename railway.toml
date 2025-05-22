@@ -1,0 +1,15 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+healthcheckPath = "/api/health"
+healthcheckTimeout = 30
+restartPolicyType = "always"
+
+[[services]]
+name = "game-server"
+startCommand = "npm start"
+
+[services.variables]
+NODE_ENV = "production"
+PORT = "3001"

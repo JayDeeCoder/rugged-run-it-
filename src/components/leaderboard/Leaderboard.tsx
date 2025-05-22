@@ -1,41 +1,70 @@
-import { FC, useState } from 'react';
-import { LeaderboardEntry } from '../../types/user';
+import { FC, useState, useEffect } from 'react';
+import { LeaderboardAPI, LeaderboardEntry } from '../../services/api';
 import LeaderboardItem from './LeaderboardItem';
 
 interface LeaderboardProps {
-  entries: LeaderboardEntry[];
+  entries?: LeaderboardEntry[]; // Make optional since we'll fetch from API
 }
 
-const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
-  const [activeTimeframe, setActiveTimeframe] = useState<'24hours' | '7days' | '30days'>('24hours');
+const Leaderboard: FC<LeaderboardProps> = ({ entries: propEntries }) => {
+  const [activeTimeframe, setActiveTimeframe] = useState<'daily' | 'weekly' | 'monthly' | 'all_time'>('daily');
+  const [entries, setEntries] = useState<LeaderboardEntry[]>(propEntries || []);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch leaderboard data when timeframe changes
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      setLoading(true);
+      setError(null);
+      
+      try {
+        const data = await LeaderboardAPI.getLeaderboard(activeTimeframe);
+        setEntries(data);
+      } catch (err) {
+        setError('Failed to load leaderboard');
+        console.error('Error fetching leaderboard:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchLeaderboard();
+  }, [activeTimeframe]);
 
   return (
     <div className="bg-[#0d0d0f] border border-gray-800 mx-2 rounded-lg text-gray-400 p-4 mt-8">
       <div className="flex items-center justify-between mb-4">
         <div className='flex text-sm items-center gap-2'>
           <button 
-            className={`border border-gray-800 rounded-md p-1 transition ${activeTimeframe === '24hours' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
-            onClick={() => setActiveTimeframe('24hours')}
+            className={`border border-gray-800 rounded-md p-1 transition ${activeTimeframe === 'daily' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
+            onClick={() => setActiveTimeframe('daily')}
           >
             24hours
           </button>
           <button 
-            className={`border border-gray-800 rounded-md p-1 transition ${activeTimeframe === '7days' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
-            onClick={() => setActiveTimeframe('7days')}
+            className={`border border-gray-800 rounded-md p-1 transition ${activeTimeframe === 'weekly' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
+            onClick={() => setActiveTimeframe('weekly')}
           >
             7days
           </button>
           <button 
-            className={`border border-gray-800 rounded-md p-1 transition ${activeTimeframe === '30days' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
-            onClick={() => setActiveTimeframe('30days')}
+            className={`border border-gray-800 rounded-md p-1 transition ${activeTimeframe === 'monthly' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
+            onClick={() => setActiveTimeframe('monthly')}
           >
             30days
+          </button>
+          <button 
+            className={`border border-gray-800 rounded-md p-1 transition ${activeTimeframe === 'all_time' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
+            onClick={() => setActiveTimeframe('all_time')}
+          >
+            All Time
           </button>
         </div>
         <h2 className="text-3xl uppercase">Leaderboard</h2>
         <div className='flex items-center'>
           <span className="h-2 w-2 bg-blue-500 rounded-full mr-2"></span>
-          <span className="text-xs text-gray-400">Updates every 5 minutes</span>
+          <span className="text-xs text-gray-400">Live Updates</span>
         </div>
       </div>
       
@@ -47,14 +76,34 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
       
       {/* Scrollable container with hidden scrollbar */}
       <div className="max-h-64 overflow-y-auto scrollbar-hide">
-        {entries.map((entry, index) => (
-          <LeaderboardItem
-            key={entry.user.username}
-            rank={index + 1}
-            user={entry.user}
-            profit={entry.profit}
-          />
-        ))}
+        {loading ? (
+          <div className="flex justify-center py-8">
+            <div className="animate-pulse text-gray-400">Loading leaderboard...</div>
+          </div>
+        ) : error ? (
+          <div className="text-center py-8 text-red-500">
+            {error}
+          </div>
+        ) : entries.length === 0 ? (
+          <div className="text-center py-8 text-gray-400">
+            No entries for this period
+          </div>
+        ) : (
+          entries.map((entry) => (
+            <LeaderboardItem
+              key={entry.id}
+              rank={entry.rank}
+              user={{
+                username: entry.username,
+                level: entry.level || 1,
+                role: 'user',
+                avatar: entry.avatar || '👤',
+                badge: entry.badge as any || 'user'
+              }}
+              profit={entry.total_profit}
+            />
+          ))
+        )}
       </div>
     </div>
   );

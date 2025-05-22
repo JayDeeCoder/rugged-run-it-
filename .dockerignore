@@ -1,0 +1,63 @@
+# Dependencies
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Production builds
+.next
+dist
+out
+
+# Environment variables
+.env*
+!.env.example
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage
+
+# Cache
+.cache
+.next/cache
+
+# Temporary folders
+tmp
+temp
+
+# Development files
+README.md
+docs/
+
+# Test files
+**/*.test.*
+**/*.spec.*
+__tests__
+
+# Mock data
+src/data/MockData.ts
+src/hooks/useRuggedGame.ts

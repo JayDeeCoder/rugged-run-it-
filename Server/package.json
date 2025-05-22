@@ -1,24 +1,37 @@
 {
-    "name": "rugged-chat-server",
-    "version": "1.0.0",
-    "description": "WebSocket chat server for Rugged.fun",
-    "main": "chatServer.ts",
-    "scripts": {
-      "start": "ts-node chatServer.ts",
-      "build": "tsc"
-    },
-    "dependencies": {
-      "ws": "^8.13.0",
-      "http": "^0.0.1-security",
-      "uuid": "^9.0.0"
-    },
-    "devDependencies": {
-      "typescript": "^5.0.4",
-      "ts-node": "^10.9.1",
-      "@types/ws": "^8.5.5",
-      "@types/uuid": "^9.0.2"
-    },
-    "engines": {
-      "node": ">=16.0.0"
-    }
+  "name": "rugged-game-server",
+  "version": "1.0.0",
+  "description": "RUGGED.fun Game Server",
+  "main": "dist/production-game-server.js",
+  "scripts": {
+    "start": "node dist/production-game-server.js",
+    "dev": "ts-node-dev --respawn --transpile-only production-game-server.ts",
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint . --ext .ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "socket.io": "^4.7.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.0",
+    "@types/uuid": "^9.0.7",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "jest": "^29.7.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
+}

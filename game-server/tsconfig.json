@@ -12,24 +12,19 @@
       "resolveJsonModule": true,
       "declaration": false,
       "removeComments": true,
+      "sourceMap": false,
       "noImplicitAny": true,
       "strictNullChecks": true,
       "strictFunctionTypes": true,
       "noImplicitThis": true,
       "noImplicitReturns": true,
       "noFallthroughCasesInSwitch": true,
-      "noUncheckedIndexedAccess": true,
-      "noImplicitOverride": true,
-      "allowUnusedLabels": false,
-      "allowUnreachableCode": false,
-      "exactOptionalPropertyTypes": true,
       "moduleResolution": "node",
-      "baseUrl": "./",
-      "sourceMap": false
+      "baseUrl": "./"
     },
     "include": [
       "*.ts",
-      "**/*.ts"
+      "src/**/*.ts"
     ],
     "exclude": [
       "node_modules",

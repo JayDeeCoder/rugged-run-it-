@@ -2,8 +2,8 @@
 services:
   # Game server
   game-server:
-    build: ./production-game-server  # or whatever your game server directory is called
-    container_name: production-game-server
+    build: ./game-server  # ✅ Correct path  # or whatever your game server directory is called
+    container_name: game-server
     environment:
       - NODE_ENV=production
     networks:
@@ -13,7 +13,7 @@ services:
   # Chat server - fix the path case
   chat-server:
     build: ./Server  # Capital S to match your directory
-    container_name: chat-server
+    container_name: chat-Server
     environment:
       - NODE_ENV=production
       - SUPABASE_URL=${SUPABASE_URL}

@@ -1,7 +1,7 @@
 // src/hooks/useEmbeddedGameWallet.ts
 import { useState, useEffect } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
-import { useWallets } from '@privy-io/react-auth';
+import { useSolanaWallets } from '@privy-io/react-auth/solana';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../utils/walletUtils';
 
@@ -16,7 +16,7 @@ interface GameWalletData {
 
 export function useEmbeddedGameWallet() {
   const { authenticated } = usePrivy();
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   const [wallet, setWallet] = useState<any>(undefined);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [walletData, setWalletData] = useState<GameWalletData>({
@@ -30,15 +30,9 @@ export function useEmbeddedGameWallet() {
     console.log("Finding embedded wallet, wallets:", wallets);
     
     if (authenticated && wallets.length > 0) {
-      // First look for a Solana-specific Privy wallet
-      let privyWallet = wallets.find(w => 
-        w.walletClientType === 'privy' && w.chainId === 'solana'
-      );
-      
-      // If not found, accept any Privy wallet
-      if (!privyWallet) {
-        privyWallet = wallets.find(w => w.walletClientType === 'privy');
-      }
+      // Since we're using useSolanaWallets(), all wallets are already Solana wallets
+      // Just find the first embedded/privy wallet
+      const privyWallet = wallets.find(w => w.walletClientType === 'privy');
       
       if (privyWallet) {
         console.log("Found Privy wallet:", privyWallet);

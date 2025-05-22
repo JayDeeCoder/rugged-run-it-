@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ArrowUpToLine, ArrowDownToLine } from 'lucide-react';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../../utils/walletUtils';
 
 // Import the modals - we'll create proper imports
@@ -26,7 +26,7 @@ const WalletActions = () => {
   
   // Use Privy hooks for authentication and wallet access
   const { authenticated, user, login, ready, createWallet } = usePrivy();
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   
   // Find embedded wallet specifically (we don't want external adapters)
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');

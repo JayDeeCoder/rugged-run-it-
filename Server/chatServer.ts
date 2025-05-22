@@ -1,200 +1,310 @@
-// Server/chatServer.ts
-import WebSocket from 'ws';
+// ./Server/chatServer.ts
 import http from 'http';
-import { v4 as uuidv4 } from 'uuid';
+import { WebSocketServer } from 'ws'; // Import WebSocketServer directly
+import { createClient } from '@supabase/supabase-js';
 
-// Define types for our chat messages
-interface User {
+// Types
+interface Client {
   id: string;
   username: string;
-  avatar?: string;
-  level?: number;
-  badge?: string;
+  walletAddress?: string;
+  ws: WebSocket;
+  joinedAt: Date;
+  lastActivity: Date;
 }
 
 interface ChatMessage {
   id: string;
-  user: User;
+  type: 'message' | 'user_joined' | 'user_left' | 'system';
+  user: {
+    id: string;
+    username: string;
+    avatar?: string;
+    level?: number;
+    badge?: string;
+  };
   text: string;
   timestamp: string;
-  isVerified?: boolean;
+  isVerified: boolean;
 }
 
-interface Client {
-  socket: WebSocket;
-  user: User | null;
+// Environment variables
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
+
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  console.error('Missing required environment variables: SUPABASE_URL or SUPABASE_ANON_KEY');
+  process.exit(1);
 }
 
-// Define specific data types for each message type
-interface MessageData {
-  text: string;
-  user: User;
-  id?: string;
-  timestamp?: string;
-  isVerified?: boolean;
-}
+// Initialize Supabase client
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-interface UserJoinedData {
-  user: User;
-}
+// Create HTTP server
+const server = http.createServer((req, res) => {
+  // Basic health check endpoint
+  if (req.url === '/health' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ 
+      status: 'ok', 
+      timestamp: new Date().toISOString(),
+      activeClients: clients.size 
+    }));
+    return;
+  }
+  
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
+  
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Chat Server - WebSocket endpoint available at ws://localhost:3002');
+});
 
-interface UserLeftData {
-  user: User;
-}
-
-interface ErrorData {
-  message: string;
-  code?: number;
-}
-
-interface UserCountData {
-  count: number;
-}
-
-interface ConnectionSuccessData {
-  clientId: string;
-}
-
-// Define the socket message with a union type for data
-type SocketMessage = 
-  | { type: 'message'; data: MessageData }
-  | { type: 'user_joined'; data: UserJoinedData }
-  | { type: 'user_left'; data: UserLeftData }
-  | { type: 'error'; data: ErrorData }
-  | { type: 'history'; data: ChatMessage[] }
-  | { type: 'user_count'; data: UserCountData }
-  | { type: 'connection_success'; data: ConnectionSuccessData };
-
-// Create an HTTP server
-const server = http.createServer();
-
-// Create a WebSocket server instance
-const wss = new WebSocket.Server({ server });
+// Create a WebSocket server instance - FIXED: Use WebSocketServer instead of WebSocket.Server
+const wss = new WebSocketServer({ server });
 
 // Store connected clients
 const clients = new Map<string, Client>();
 
-// Store recent messages (limited history)
+// Message history (in production, this should be persisted)
 const messageHistory: ChatMessage[] = [];
-const MAX_HISTORY = 50;
+const MAX_HISTORY = 100;
 
-// Broadcast message to all connected clients
-function broadcast(message: SocketMessage): void {
-  const data = JSON.stringify(message);
-  
-  clients.forEach((client) => {
-    if (client.socket.readyState === WebSocket.OPEN) {
-      client.socket.send(data);
+// Utility functions
+function generateClientId(): string {
+  return Math.random().toString(36).substring(2, 15);
+}
+
+function broadcastToAll(message: any, excludeClient?: string): void {
+  const messageStr = JSON.stringify(message);
+  clients.forEach((client, clientId) => {
+    if (clientId !== excludeClient && client.ws.readyState === WebSocket.OPEN) {
+      try {
+        client.ws.send(messageStr);
+      } catch (error) {
+        console.error(`Error sending message to client ${clientId}:`, error);
+        // Remove dead connection
+        clients.delete(clientId);
+      }
     }
   });
 }
 
-// Send user count to all clients
-function broadcastUserCount(): void {
-  broadcast({
+function saveMessageToHistory(message: ChatMessage): void {
+  messageHistory.push(message);
+  if (messageHistory.length > MAX_HISTORY) {
+    messageHistory.shift();
+  }
+}
+
+async function saveMessageToDatabase(message: ChatMessage): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('chat_messages')
+      .insert({
+        user_id: message.user.id,
+        username: message.user.username,
+        message: message.text,
+        message_type: message.type,
+        created_at: message.timestamp,
+        avatar: message.user.avatar,
+        level: message.user.level,
+        badge: message.user.badge
+      });
+    
+    if (error) {
+      console.error('Error saving message to database:', error);
+    }
+  } catch (error) {
+    console.error('Error saving message to database:', error);
+  }
+}
+
+// WebSocket connection handler
+wss.on('connection', (ws) => {
+  const clientId = generateClientId();
+  
+  console.log(`New client connected: ${clientId}`);
+  
+  // Initialize client
+  const client: Client = {
+    id: clientId,
+    username: `Guest_${clientId.slice(-4)}`,
+    ws: ws as any, // Type assertion needed for compatibility
+    joinedAt: new Date(),
+    lastActivity: new Date()
+  };
+  
+  clients.set(clientId, client);
+  
+  // Send connection success message
+  ws.send(JSON.stringify({
+    type: 'connection_success',
+    data: { clientId, timestamp: new Date().toISOString() }
+  }));
+  
+  // Send current user count
+  ws.send(JSON.stringify({
+    type: 'user_count',
+    data: { count: clients.size }
+  }));
+  
+  // Send message history
+  if (messageHistory.length > 0) {
+    ws.send(JSON.stringify({
+      type: 'history',
+      data: messageHistory.slice(-50) // Send last 50 messages
+    }));
+  }
+  
+  // Broadcast user count to all clients
+  broadcastToAll({
     type: 'user_count',
     data: { count: clients.size }
   });
-}
-
-// Handle new WebSocket connections
-wss.on('connection', (socket: WebSocket) => {
-  const clientId = uuidv4();
-  
-  // Store new client
-  clients.set(clientId, {
-    socket,
-    user: null, // Will be populated when they send a message
-  });
-  
-  console.log(`Client connected: ${clientId}. Total clients: ${clients.size}`);
-  
-  // Send connection confirmation
-  socket.send(JSON.stringify({
-    type: 'connection_success',
-    data: { clientId }
-  }));
-  
-  // Send message history to new client
-  socket.send(JSON.stringify({
-    type: 'history',
-    data: messageHistory
-  }));
-  
-  // Update user count for all clients
-  broadcastUserCount();
   
   // Handle incoming messages
-  socket.on('message', (data: WebSocket.Data) => {
+  ws.on('message', async (data) => {
     try {
-      // We need to parse JSON and do type checking
-      const parsed = JSON.parse(data.toString());
+      client.lastActivity = new Date();
+      const parsedData = JSON.parse(data.toString());
       
-      // Basic validation that it's a SocketMessage
-      if (typeof parsed === 'object' && parsed !== null && 'type' in parsed && 'data' in parsed) {
-        const message = parsed as SocketMessage;
+      if (parsedData.type === 'message') {
+        const messageData = parsedData.data;
         
-        if (message.type === 'message') {
-          // Add an ID to the message
-          const id = uuidv4();
-          const timestamp = new Date().toISOString();
-          
-          // Create the chat message
-          const chatMessage: ChatMessage = {
-            ...message.data,
-            id,
-            timestamp
-          };
-          
-          // Save to history
-          messageHistory.push(chatMessage);
-          if (messageHistory.length > MAX_HISTORY) {
-            messageHistory.shift(); // Remove oldest message when limit reached
-          }
-          
-          // Update client info if needed
-          if (message.data.user && message.data.user.id) {
-            const client = clients.get(clientId);
-            if (client) {
-              client.user = message.data.user;
-            }
-          }
-          
-          // Broadcast to all clients
-          broadcast({
-            type: 'message',
-            data: chatMessage
-          });
+        // Create message object
+        const message: ChatMessage = {
+          id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          type: 'message',
+          user: {
+            id: messageData.user.id || clientId,
+            username: messageData.user.username || client.username,
+            avatar: messageData.user.avatar || '👤',
+            level: messageData.user.level || 1,
+            badge: messageData.user.badge || 'user'
+          },
+          text: messageData.text || '',
+          timestamp: messageData.timestamp || new Date().toISOString(),
+          isVerified: messageData.isVerified || false
+        };
+        
+        // Basic message validation
+        if (!message.text.trim() || message.text.length > 500) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            data: { message: 'Invalid message content' }
+          }));
+          return;
         }
+        
+        // Update client info
+        client.username = message.user.username;
+        client.walletAddress = messageData.user.walletAddress;
+        
+        // Save to history and database
+        saveMessageToHistory(message);
+        await saveMessageToDatabase(message);
+        
+        // Broadcast to all clients
+        broadcastToAll({
+          type: 'message',
+          data: message
+        });
+        
+        console.log(`Message from ${client.username}: ${message.text}`);
       }
     } catch (error) {
       console.error('Error processing message:', error);
+      ws.send(JSON.stringify({
+        type: 'error',
+        data: { message: 'Error processing message' }
+      }));
     }
   });
   
-  // Handle disconnection
-  socket.on('close', () => {
-    const client = clients.get(clientId);
-    
-    if (client && client.user) {
-      // Notify others that a user has left
-      broadcast({
-        type: 'user_left',
-        data: { user: client.user }
-      });
-    }
-    
-    // Remove client
+  // Handle client disconnect
+  ws.on('close', () => {
+    console.log(`Client disconnected: ${clientId}`);
     clients.delete(clientId);
-    console.log(`Client disconnected: ${clientId}. Total clients: ${clients.size}`);
     
-    // Update user count
-    broadcastUserCount();
+    // Broadcast updated user count
+    broadcastToAll({
+      type: 'user_count',
+      data: { count: clients.size }
+    });
+    
+    // Broadcast user left message
+    broadcastToAll({
+      type: 'user_left',
+      data: { user: { id: clientId, username: client.username } }
+    });
+  });
+  
+  // Handle connection errors
+  ws.on('error', (error) => {
+    console.error(`WebSocket error for client ${clientId}:`, error);
+    clients.delete(clientId);
+  });
+  
+  // Send ping periodically to keep connection alive
+  const pingInterval = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.ping();
+    } else {
+      clearInterval(pingInterval);
+    }
+  }, 30000); // 30 seconds
+});
+
+// Cleanup inactive connections
+setInterval(() => {
+  const now = new Date();
+  clients.forEach((client, clientId) => {
+    const inactiveTime = now.getTime() - client.lastActivity.getTime();
+    if (inactiveTime > 300000) { // 5 minutes
+      console.log(`Removing inactive client: ${clientId}`);
+      try {
+        client.ws.close();
+      } catch (error) {
+        console.error('Error closing inactive connection:', error);
+      }
+      clients.delete(clientId);
+    }
+  });
+}, 60000); // Check every minute
+
+// Start server
+const PORT = process.env.CHAT_PORT || 3002;
+server.listen(PORT, () => {
+  console.log(`Chat server running on port ${PORT}`);
+  console.log(`WebSocket endpoint: ws://localhost:${PORT}`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('Chat server shutting down...');
+  wss.close(() => {
+    server.close(() => {
+      console.log('Chat server stopped');
+      process.exit(0);
+    });
   });
 });
 
-// Start the server
-const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-  console.log(`WebSocket server running on port ${PORT}`);
+process.on('SIGINT', () => {
+  console.log('Chat server shutting down...');
+  wss.close(() => {
+    server.close(() => {
+      console.log('Chat server stopped');
+      process.exit(0);
+    });
+  });
 });

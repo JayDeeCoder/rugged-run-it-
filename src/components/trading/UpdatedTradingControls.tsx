@@ -1,7 +1,7 @@
 import { FC, useState, useEffect } from 'react';
 import { useGameSocket } from '../../hooks/useGameSocket';
 import { UserAPI } from '../../services/api';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import { toast } from 'react-hot-toast';
 
 interface UpdatedTradingControlsProps {
@@ -16,7 +16,7 @@ const UpdatedTradingControls: FC<UpdatedTradingControlsProps> = ({
   isGameActive
 }) => {
   const { authenticated, user } = usePrivy();
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   const [amount, setAmount] = useState<string>('0.01');
   const [isPlacingBet, setIsPlacingBet] = useState<boolean>(false);
   const [isCashingOut, setIsCashingOut] = useState<boolean>(false);

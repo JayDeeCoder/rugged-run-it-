@@ -1,11 +1,14 @@
 // useEmbeddedWallet.ts
 import { useState, useEffect, useCallback } from 'react';
-import { useWallets, usePrivy, ConnectedWallet } from '@privy-io/react-auth';
+import { usePrivy } from '@privy-io/react-auth';
+import { useSolanaWallets } from '@privy-io/react-auth/solana';
 import { Connection, PublicKey, LAMPORTS_PER_SOL, Commitment, Transaction, SystemProgram } from '@solana/web3.js';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../utils/walletUtils';
 import { toast } from 'react-hot-toast';
 
-interface ExtendedConnectedWallet extends ConnectedWallet {
+interface ExtendedConnectedWallet {
+  address: string;
+  walletClientType: string;
   signTransaction?: (transaction: any) => Promise<any>;
   signAndSendTransaction?: (options: any) => Promise<any>;
 }
@@ -19,7 +22,7 @@ export interface WalletData {
 }
 
 export const useEmbeddedWallet = () => {
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   const { authenticated, createWallet, ready } = usePrivy();
   const [isCreating, setIsCreating] = useState(false);
   const [balance, setBalance] = useState<string>("0");
@@ -27,9 +30,9 @@ export const useEmbeddedWallet = () => {
   const [isLoadingWallets, setIsLoadingWallets] = useState(true);
 
   // Find only Solana embedded wallets
+  // Since useSolanaWallets() returns only Solana wallets, we don't need to check chainId
   const embeddedWallet = wallets.find(wallet => 
-    wallet.walletClientType === 'privy' && 
-    wallet.chainId === 'solana'
+    wallet.walletClientType === 'privy'
   ) as ExtendedConnectedWallet | undefined;
 
   // Update loading state when wallets are loaded

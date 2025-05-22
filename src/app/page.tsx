@@ -6,13 +6,12 @@ import Layout from '../components/layout/Layout';
 import dynamic from 'next/dynamic';
 import ChatBox from '../components/chat/ChatBox';
 import MobileChat from '../components/chat/MobileChat';
-import { mockLeaderboardEntries, mockMultipliers } from '../data/MockData';
+import { mockLeaderboardEntries } from '../data/MockData';
 import { usePrivy } from '@privy-io/react-auth';
 import useWindowSize from '../hooks/useWindowSize';
 
 // Dynamically import components that might cause issues on SSR
 const ChartContainer = dynamic(() => import('../components/trading/ChartContainer'), { ssr: false });
-const MiniCharts = dynamic(() => import('../components/trading/MiniCharts'), { ssr: false });
 const Leaderboard = dynamic(() => import('../components/leaderboard/Leaderboard'), { ssr: false });
 
 export default function Home() {
@@ -143,15 +142,7 @@ export default function Home() {
               </div>
             )}
             
-            {/* Mini Charts - constrained width */}
-            <div className={`
-              w-full overflow-x-hidden
-              ${authenticated ? '' : 'opacity-50 pointer-events-none'}
-            `}>
-              <MiniCharts data={mockMultipliers} />
-            </div>
-            
-            {/* Main Chart Container - responsive height and proper constraints */}
+            {/* Main Chart Container - now includes MiniCharts with real data */}
             <div className={`
               flex-1 w-full min-w-0 overflow-x-hidden
               ${authenticated ? '' : 'opacity-50 pointer-events-none'}

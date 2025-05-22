@@ -2,7 +2,7 @@
 import { FC, useState, useEffect, useRef, useContext } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { UserContext } from '../../context/UserContext';
 import useOutsideClick from '../../hooks/useOutsideClick';
@@ -12,7 +12,7 @@ import { safeCreatePublicKey, isValidSolanaAddress } from '../../utils/walletUti
 
 const Navbar: FC = () => {
   const { authenticated, login, logout, user } = usePrivy();
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   const { currentUser, experience, userLevel, crates, hasCustomUsername, setUsername } = useContext(UserContext);
 
   const [walletBalance, setWalletBalance] = useState<number>(0);

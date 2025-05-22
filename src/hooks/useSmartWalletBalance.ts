@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useWallets } from '@privy-io/react-auth';
+import { useSolanaWallets } from '@privy-io/react-auth';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../utils/walletUtils';
 
 export const useSmartWalletBalance = (refreshInterval = 15000) => {
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   const [balance, setBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);

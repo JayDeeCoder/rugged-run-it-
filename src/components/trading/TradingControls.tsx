@@ -1,7 +1,7 @@
 // src/components/trading/TradingControls.tsx
 import { FC, useState, useEffect, useContext, useCallback } from 'react';
 import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon } from 'lucide-react';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import useLocalStorage from '../../hooks/useLocalStorage';
 import Button from '../common/Button';
 import { UserContext } from '../../context/UserContext';
@@ -49,7 +49,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   
   // Use embedded game wallet instead of regular wallet
   const { authenticated } = usePrivy();
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   const { wallet: gameWallet, walletData } = useEmbeddedGameWallet();
   
   // Check if wallet is ready using the game wallet data

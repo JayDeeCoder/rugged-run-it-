@@ -2,7 +2,7 @@
 'use client';
 
 import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
-import { useWallets, usePrivy } from '@privy-io/react-auth';
+import { useSolanaWallets, usePrivy } from '@privy-io/react-auth';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { toast } from 'react-hot-toast';
 import { isValidSolanaAddress, safeCreatePublicKey, isValidWallet, getValidWalletAddress } from '../utils/walletUtils';
@@ -50,7 +50,7 @@ const TokenContext = createContext<TokenContextType>(defaultValue);
 
 export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { authenticated } = usePrivy();
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   
   // State
   const [currentToken, setCurrentToken] = useState<TokenType>(TokenType.SOL);
@@ -62,12 +62,8 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Airdrop cooldown (24 hours)
   const airdropCooldown = 24 * 60 * 60 * 1000;
   
-  // Get embedded wallet - with better filtering and validation
+  // Get embedded wallet - since useSolanaWallets only returns Solana wallets, no need to check chainId
   const embeddedWallet = wallets.find(wallet => 
-    wallet.walletClientType === 'privy' && 
-    wallet.chainId === 'solana' &&
-    isValidWallet(wallet)
-  ) || wallets.find(wallet => 
     wallet.walletClientType === 'privy' &&
     isValidWallet(wallet)
   );

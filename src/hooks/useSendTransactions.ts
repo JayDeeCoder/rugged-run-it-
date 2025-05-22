@@ -1,9 +1,9 @@
-import { useWallets, usePrivy } from '@privy-io/react-auth';
+import { useSolanaWallets, usePrivy } from '@privy-io/react-auth';
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../utils/walletUtils';
 
 export const useSendTransaction = () => {
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   const { user } = usePrivy();
   
   // Get embedded wallet if exists

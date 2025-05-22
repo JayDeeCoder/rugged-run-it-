@@ -1,13 +1,13 @@
 'use client';
 
 import { FC } from 'react';
-import { useWallets, usePrivy } from '@privy-io/react-auth';
+import { useSolanaWallets, usePrivy } from '@privy-io/react-auth';
 import Layout from '../../components/layout/Layout';
 import Link from 'next/link';
 
 const Dashboard: FC = () => {
   // Use Privy for wallet management
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   const { authenticated } = usePrivy();
   
   // Get the first wallet (if any)

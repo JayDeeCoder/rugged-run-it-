@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useState, useContext, useEffect, ReactNode, useCallback } from 'react';
-import { useWallets, usePrivy } from '@privy-io/react-auth';
+import { useSolanaWallets, usePrivy } from '@privy-io/react-auth';
 import { useRuggedGame } from '../app/dashboard/useRuggedGame';
 import { toast } from 'react-hot-toast';
 
@@ -44,7 +44,7 @@ const GameContext = createContext<GameContextType | undefined>(undefined);
 
 // Create a provider component
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   const { authenticated } = usePrivy();
   
   // Get the active wallet

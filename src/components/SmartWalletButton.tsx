@@ -1,9 +1,9 @@
 import { FC, useState } from 'react';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 
 const SmartWalletButton: FC<{ canConnectWallet?: boolean }> = ({ canConnectWallet = true }) => {
   const { ready, authenticated, login, logout, user, createWallet } = usePrivy();
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   const [isLoading, setIsLoading] = useState(false);
   
   // Find the embedded wallet if it exists

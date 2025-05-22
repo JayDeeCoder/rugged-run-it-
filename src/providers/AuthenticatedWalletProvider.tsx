@@ -1,7 +1,7 @@
 'use client';
 
 import React, { FC, ReactNode, useEffect, useState } from 'react';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import SolanaWalletProvider from './SolanaWalletProvider';
 
 interface AuthenticatedWalletProviderProps {
@@ -10,7 +10,7 @@ interface AuthenticatedWalletProviderProps {
 
 const AuthenticatedWalletProvider: FC<AuthenticatedWalletProviderProps> = ({ children }) => {
   const { authenticated, ready, logout } = usePrivy();
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   const [canConnectWallet, setCanConnectWallet] = useState(false);
   
   // Find embedded wallet if available

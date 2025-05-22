@@ -1,5 +1,5 @@
 import { FC, useState, useEffect, useRef, useContext, useCallback } from 'react';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import CandlestickChart from './CandlestickChart';
 import TradingControls from './TradingControls';
 import SellEffects from './SellEffects';
@@ -46,7 +46,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
 
   // Use Privy hooks for authentication
   const { authenticated } = usePrivy();
-  const { wallets } = useWallets();
+  const { wallets } = useSolanaWallets();
   
   // Use embedded game wallet hook instead of Solana wallet adapter
   const { wallet: gameWallet, walletData } = useEmbeddedGameWallet();
@@ -64,6 +64,32 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       isMountedRef.current = false;
     };
   }, []);
+
+  // Load game results from localStorage on mount
+  useEffect(() => {
+    const savedResults = localStorage.getItem('gameResults');
+    if (savedResults) {
+      try {
+        const parsedResults = JSON.parse(savedResults);
+        if (Array.isArray(parsedResults)) {
+          setGameResults(parsedResults);
+        }
+      } catch (error) {
+        console.error('Failed to parse saved game results:', error);
+      }
+    }
+  }, []);
+
+  // Save game results to localStorage whenever they change
+  useEffect(() => {
+    if (gameResults.length > 0) {
+      try {
+        localStorage.setItem('gameResults', JSON.stringify(gameResults.slice(-50))); // Keep last 50 results
+      } catch (error) {
+        console.error('Failed to save game results:', error);
+      }
+    }
+  }, [gameResults]);
 
   // Fetch wallet balance
   useEffect(() => {
@@ -141,16 +167,16 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     
     console.log(`Game crashed at peak of ${peakMultiplier.toFixed(2)}x`);
     
+    // Add to game results regardless of whether player had active bet
+    const newResult: GameResult = {
+      value: peakMultiplier, // Use peak multiplier instead of final crash value
+      label: `${peakMultiplier.toFixed(2)}x`,
+      timestamp: Date.now(),
+    };
+    
+    setGameResults(prev => [newResult, ...prev.slice(0, 49)]); // Keep last 50 results
+    
     if (hasActiveGame) {
-      // Add to game results
-      const newResult: GameResult = {
-        value: peakMultiplier, // Use peak multiplier instead of final crash value
-        label: `${peakMultiplier.toFixed(2)}x`,
-        timestamp: Date.now(),
-      };
-      
-      setGameResults(prev => [newResult, ...prev.slice(0, 9)]);
-      
       // Show loss effect if player had an active bet
       if (currentBet > 0) {
         setSellSuccess(false);
@@ -247,14 +273,14 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       // Place order through context
       placeOrder(order);
       
-      // Add to game results
+      // Add to game results for successful cashouts only
       const newResult: GameResult = {
         value: currentMultiplier,
         label: `${currentMultiplier.toFixed(2)}x`,
         timestamp: Date.now(),
       };
       
-      setGameResults(prev => [newResult, ...prev.slice(0, 9)]);
+      setGameResults(prev => [newResult, ...prev.slice(0, 49)]); // Keep last 50 results
       
       // Reset game state
       if (percentage >= 100) {
@@ -358,9 +384,16 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         </div>
       </div>
 
-      {/* Mini charts showing recent game results */}
+      {/* Mini charts showing recent game results - NOW USING REAL DATA */}
       <div className="mb-2">
-        <MiniCharts data={gameResults} maxCharts={isMobile ? 5 : 10} />
+        <MiniCharts 
+          data={gameResults} 
+          maxCharts={isMobile ? 5 : 10} 
+          onNewGame={(result) => {
+            // Optional: Handle when a new game result is added
+            console.log('New game result:', result);
+          }}
+        />
       </div>
 
       {/* Mobile optimized layout - stacked on small screens, side by side on larger */}

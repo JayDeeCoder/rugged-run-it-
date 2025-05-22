@@ -3,6 +3,7 @@ import { FC, useState, useEffect, useRef, useContext } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { UserContext } from '../../context/UserContext';
 import useOutsideClick from '../../hooks/useOutsideClick';
 import { Menu, User, ChevronDown, LogOut, Wallet, BarChart2, Trophy, Settings, Edit } from 'lucide-react';
@@ -18,6 +19,7 @@ const Navbar: FC = () => {
   const [showMobileMenu, setShowMobileMenu] = useState<boolean>(false);
   const [isMounted, setIsMounted] = useState<boolean>(false);
   const [showUsernameModal, setShowUsernameModal] = useState<boolean>(false);
+  const [isLoadingBalance, setIsLoadingBalance] = useState<boolean>(false);
 
   // Get the embedded wallet if available
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
@@ -30,18 +32,35 @@ const Navbar: FC = () => {
     setIsMounted(true);
   }, []);
 
+  // Fetch real balance from Solana blockchain
   useEffect(() => {
     const fetchBalance = async () => {
       if (embeddedWallet && walletAddress) {
         try {
-          // This is a simplified version - in a real app you'd want to fetch the balance from the blockchain
-          // You can implement this using connection.getBalance from your SolanaWalletService or similar
+          setIsLoadingBalance(true);
           
-          // For now, just displaying a mock balance or you can implement actual balance fetching
-          setWalletBalance(0.123); // Replace with actual balance fetching
+          // Create Solana connection using Alchemy RPC
+          const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
+          const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '6CqgIf5nqVF9rWeernULokib0PAr6yh3';
+          
+          const connection = new Connection(rpcUrl, {
+            commitment: 'confirmed',
+            httpHeaders: {
+              'x-api-key': apiKey
+            }
+          });
+          
+          // Get actual balance from blockchain
+          const publicKey = new PublicKey(walletAddress);
+          const lamports = await connection.getBalance(publicKey);
+          const solBalance = lamports / LAMPORTS_PER_SOL;
+          
+          setWalletBalance(solBalance);
         } catch (error) {
           console.error('Failed to fetch wallet balance:', error);
           setWalletBalance(0);
+        } finally {
+          setIsLoadingBalance(false);
         }
       } else {
         setWalletBalance(0);
@@ -49,6 +68,8 @@ const Navbar: FC = () => {
     };
 
     fetchBalance();
+    
+    // Refresh balance every 15 seconds
     const intervalId = setInterval(fetchBalance, 15000);
     return () => clearInterval(intervalId);
   }, [embeddedWallet, walletAddress]);
@@ -149,7 +170,9 @@ const Navbar: FC = () => {
                   <div className="hidden md:block text-left mr-1">
                     <div className="text-xs font-medium">{getUserDisplayName()}</div>
                     {isWalletConnected && (
-                      <div className="text-xs text-gray-400">{walletBalance.toFixed(3)} SOL</div>
+                      <div className="text-xs text-gray-400">
+                        {isLoadingBalance ? 'Loading...' : `${walletBalance.toFixed(3)} SOL`}
+                      </div>
                     )}
                   </div>
                   <ChevronDown size={14} className={`transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
@@ -184,7 +207,7 @@ const Navbar: FC = () => {
                             <div className="flex justify-between items-center">
                               <span className="text-sm text-gray-400">Balance:</span>
                               <span className="text-sm font-medium text-green-400">
-                                {walletBalance.toFixed(3)} SOL
+                                {isLoadingBalance ? 'Loading...' : `${walletBalance.toFixed(3)} SOL`}
                               </span>
                             </div>
                             <button

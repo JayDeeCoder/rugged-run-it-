@@ -28,7 +28,7 @@ const defaultContext: UserContextType = {
   userLevel: 2,
   experience: 67,
   crates: 4,
-  isLoggedIn: true,
+  isLoggedIn: false, // Changed to false by default
   setUsername: () => {},
   hasCustomUsername: false,
 };
@@ -42,9 +42,11 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const userLevel = 2;
   const experience = 67;
   const crates = 4;
-  const isLoggedIn = true;
   
   const { authenticated, user } = usePrivy();
+  
+  // Update isLoggedIn based on Privy authentication state
+  const isLoggedIn = authenticated;
   
   // Initialize user when Privy authentication changes
   useEffect(() => {
@@ -61,7 +63,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         avatar: '👑',
         level: 2,
         experience: 67,
-        balance: 0.123,
+        balance: 0, // Remove hardcoded balance - this should come from blockchain
         tier: 2,
         joinedAt: new Date().toISOString(),
       };
@@ -97,7 +99,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const login = async (username: string, password: string): Promise<boolean> => {
-    // Mock login functionality
+    // Mock login functionality - this is handled by Privy
     if (username && password) {
       const user: User = {
         id: 'user-1',
@@ -106,7 +108,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         avatar: '👑',
         level: 2,
         experience: 67,
-        balance: 0.123,
+        balance: 0, // Remove hardcoded balance
         tier: 2,
         joinedAt: new Date().toISOString(),
       };
@@ -135,7 +137,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         avatar: '👤',
         level: 1,
         experience: 0,
-        balance: 0,
+        balance: 0, // Remove hardcoded balance
         tier: 1,
         joinedAt: new Date().toISOString(),
       };

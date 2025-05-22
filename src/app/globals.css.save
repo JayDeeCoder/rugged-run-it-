@@ -1,4 +1,7 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 @import url('https://fonts.googleapis.com/css2?family=DynaPuff&display=swap');
 
 @font-face {
@@ -8,10 +11,18 @@
   font-style: normal;
 }
 
+/* ===== ROOT VARIABLES ===== */
 :root {
   --foreground-rgb: 255, 255, 255;
   --background-start-rgb: 0, 0, 0;
   --background-end-rgb: 0, 0, 0;
+}
+
+/* ===== BASE STYLES ===== */
+html {
+  scroll-behavior: smooth;
+  /* Fix for iOS scroll bounce */
+  -webkit-overflow-scrolling: touch;
 }
 
 body {
@@ -22,15 +33,64 @@ body {
     rgb(var(--background-end-rgb))
   ),
   rgb(var(--background-start-rgb));
+  
+  /* Prevent horizontal scroll */
+  overflow-x: hidden;
+  /* Ensure consistent scrolling on mobile */
+  -webkit-overflow-scrolling: touch;
+  /* Prevent zoom on input focus (iOS) */
+  -webkit-text-size-adjust: 100%;
+  /* Prevent pull-to-refresh on mobile */
+  overscroll-behavior-y: contain;
 }
 
+/* Smooth scrolling for all elements */
+* {
+  scroll-behavior: smooth;
+}
+
+/* ===== TYPOGRAPHY ===== */
 .diddy-title {
   font-weight: 800;
   letter-spacing: 2px;
   text-transform: uppercase;
 }
 
-/* Custom scrollbar */
+.dynapuff-font {
+  font-family: 'DynaPuff', sans-serif !important;
+}
+
+/* ===== SCROLLBAR STYLES ===== */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
+}
+
+/* Custom scrollbar for desktop */
+@media screen and (min-width: 769px) {
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: #1f2937;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: #4b5563;
+    border-radius: 4px;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: #6b7280;
+  }
+}
+
+/* Legacy scrollbar styles */
 ::-webkit-scrollbar {
   width: 10px;
 }
@@ -48,28 +108,7 @@ body {
   background: var(--accent-blue);
 }
 
-:root {
-  --foreground-rgb: 255, 255, 255;
-  --background-start-rgb: 255, 255, 255;
-  --background-end-rgb: 255, 255, 255;
-}
-
-body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    rgb(var(--background-end-rgb))
-  ),
-  rgb(var(--background-start-rgb));
-}
-
-.diddy-title {
-  font-weight: 800;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-}
-
+/* ===== BACKGROUND IMAGES ===== */
 .hero-bg {
   background-image: url('/images/890B9693-B20D-4218-BB3E-61C8389A406E.png');
   background-size: cover;
@@ -83,6 +122,7 @@ body {
   background-position: center;
   background-repeat: no-repeat;
 }
+
 .adImage-bg {
   background-image: url('/images/Section1.png');
   background-size: cover;
@@ -90,24 +130,25 @@ body {
   background-repeat: no-repeat;
 }
 
-.comic-bg-1{
+.comic-bg-1 {
   background-image: url('/images/comic1.jpg.png');
   background-size: cover;
   background-repeat: no-repeat;
 }
 
-.comic-bg-2{
+.comic-bg-2 {
   background-image: url('/images/comic2.jpg.png');
   background-size: cover;
   background-repeat: no-repeat;
 }
 
-.comic-bg-3{
+.comic-bg-3 {
   background-image: url('/images/comic3.jpg.png');
   background-size: cover;
   background-repeat: no-repeat;
 }
 
+/* ===== ANIMATIONS ===== */
 @keyframes scroll {
   0% { transform: translateX(0%); }
   100% { transform: translateX(-50%); }
@@ -121,20 +162,31 @@ body {
   min-width: 100%;
 }
 
-button{
+@keyframes loading-shimmer {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+/* ===== INTERACTIVE ELEMENTS ===== */
+button {
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 text {
   color: rgb(34, 33, 33);
 }
 
+/* ===== CHAT STYLES ===== */
 .chat-container {
   background-color: #0d0d0f;
   color: white;
 }
 
-/* Chat message hover effect */
 .chat-message {
   transition: background-color 0.2s;
 }
@@ -143,7 +195,7 @@ text {
   background-color: rgba(255, 255, 255, 0.05);
 }
 
-/* Custom styles for user tiers */
+/* ===== USER TIER STYLES ===== */
 .user-tier-1 {
   color: #ffffff;
 }
@@ -156,15 +208,216 @@ text {
   color: #3b82f6;
 }
 
-.scrollbar-hide {
-  -ms-overflow-style: none;  /* IE and Edge */
-  scrollbar-width: none;  /* Firefox */
+/* ===== LOADING STATES ===== */
+.loading {
+  position: relative;
+  overflow: hidden;
 }
 
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;  /* Chrome, Safari and Opera */
+.loading::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.1),
+    transparent
+  );
+  animation: loading-shimmer 1.5s infinite;
 }
 
-.dynapuff-font {
-  font-family: 'DynaPuff', sans-serif !important;
+/* ===== UTILITY CLASSES ===== */
+.no-select {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+/* Fix for 100vh issues on mobile browsers */
+.full-height {
+  height: 100vh;
+  height: 100dvh; /* Use dynamic viewport height when supported */
+}
+
+/* Fix viewport height issues on mobile browsers */
+@supports (-webkit-touch-callout: none) {
+  /* Target iOS Safari specifically */
+  .min-h-screen {
+    min-height: -webkit-fill-available;
+  }
+}
+
+/* Fix for sticky elements on mobile */
+@supports (position: sticky) {
+  .sticky-mobile {
+    position: -webkit-sticky;
+    position: sticky;
+  }
+}
+
+/* ===== MOBILE OPTIMIZATIONS ===== */
+@media screen and (max-width: 768px) {
+  /* Prevent horizontal scrolling */
+  html, body {
+    overflow-x: hidden;
+    width: 100%;
+    height: 100%;
+  }
+  
+  /* Prevent zoom on input focus */
+  input[type="text"],
+  input[type="number"],
+  input[type="email"],
+  input[type="password"],
+  select,
+  textarea {
+    font-size: 16px !important;
+    -webkit-appearance: none;
+    appearance: none; /* Standard property for compatibility */
+    border-radius: 0;
+  }
+  
+  /* Improve button touch targets */
+  button,
+  input[type="button"],
+  input[type="submit"],
+  .clickable {
+    min-height: 44px;
+    min-width: 44px;
+    touch-action: manipulation;
+  }
+  
+  /* Prevent double-tap zoom */
+  * {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: rgba(34, 197, 94, 0.3);
+  }
+  
+  button {
+    -webkit-tap-highlight-color: rgba(34, 197, 94, 0.5);
+  }
+  
+  /* Improve button press feedback */
+  button:active {
+    transform: scale(0.98);
+    transition: transform 0.1s ease;
+  }
+  
+  /* Smooth scrolling for mobile */
+  .mobile-scroll {
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+  
+  /* Prevent body scrolling when modal is open */
+  .modal-open {
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+  }
+  
+  /* Optimize trading controls for mobile */
+  .trading-controls-mobile {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
+    background: rgba(13, 13, 15, 0.95);
+    backdrop-filter: blur(10px);
+    border-top: 2px solid rgba(75, 85, 99, 0.5);
+  }
+  
+  /* Ensure proper spacing for mobile content */
+  .mobile-content {
+    padding-bottom: 100px; /* Space for sticky controls */
+  }
+  
+  /* Improve text readability on mobile */
+  body {
+    font-size: 16px; /* Prevents zoom on input focus */
+  }
+  
+  /* Optimize spacing for mobile */
+  .mobile-optimized {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  /* Ensure containers don't exceed viewport */
+  .container,
+  .max-w-full {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+}
+
+/* ===== ACCESSIBILITY ===== */
+/* Focus styles for accessibility */
+button:focus,
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid #22c55e;
+  outline-offset: 2px;
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .bg-gray-800 {
+    background-color: #000000;
+    border: 1px solid #ffffff;
+  }
+  
+  .text-gray-400 {
+    color: #ffffff;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ===== DARK MODE OPTIMIZATIONS ===== */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --foreground-rgb: 255, 255, 255;
+    --background-start-rgb: 0, 0, 0;
+    --background-end-rgb: 0, 0, 0;
+  }
+}
+
+/* ===== DEVICE-SPECIFIC OPTIMIZATIONS ===== */
+/* Optimize for high-DPI screens */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  /* Sharper rendering for retina displays */
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Optimize for safe areas (iPhone X+ notch) */
+@supports (padding: max(0px)) {
+  .safe-area-padding {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+    padding-top: max(0px, env(safe-area-inset-top));
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+}
+
+/* ===== PRINT STYLES ===== */
+@media print {
+  .no-print {
+    display: none !important;
+  }
 }

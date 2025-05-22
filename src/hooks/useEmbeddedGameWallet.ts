@@ -13,6 +13,34 @@ interface GameWalletData {
   isConnected: boolean;
 }
 
+// Helper function to validate Solana address
+const isValidSolanaAddress = (address: string): boolean => {
+  try {
+    // Check if address exists and is a string
+    if (!address || typeof address !== 'string') {
+      return false;
+    }
+    
+    // Check length (Solana addresses are typically 32-44 characters)
+    if (address.length < 32 || address.length > 44) {
+      return false;
+    }
+    
+    // Check if it contains only valid base58 characters
+    const base58Regex = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/;
+    if (!base58Regex.test(address)) {
+      return false;
+    }
+    
+    // Try to create a PublicKey instance
+    new PublicKey(address);
+    return true;
+  } catch (error) {
+    console.warn('Invalid Solana address:', address, error);
+    return false;
+  }
+};
+
 export function useEmbeddedGameWallet() {
   const { authenticated } = usePrivy();
   const { wallets } = useWallets();
@@ -41,12 +69,23 @@ export function useEmbeddedGameWallet() {
       
       if (privyWallet) {
         console.log("Found Privy wallet:", privyWallet);
-        setWallet(privyWallet);
-        setWalletData({
-          address: privyWallet.address,
-          balance: '0', // Will be updated in the next effect
-          isConnected: true
-        });
+        
+        // Validate the wallet address before setting it
+        if (isValidSolanaAddress(privyWallet.address)) {
+          setWallet(privyWallet);
+          setWalletData({
+            address: privyWallet.address,
+            balance: '0', // Will be updated in the next effect
+            isConnected: true
+          });
+        } else {
+          console.error("Privy wallet has invalid Solana address:", privyWallet.address);
+          setWalletData({
+            address: '',
+            balance: '0',
+            isConnected: false
+          });
+        }
       } else {
         console.warn("No Privy wallet found among available wallets");
       }
@@ -70,7 +109,7 @@ export function useEmbeddedGameWallet() {
   // Fetch wallet balance using your Alchemy RPC URL
   useEffect(() => {
     const fetchBalance = async () => {
-      if (wallet && wallet.address) {
+      if (wallet && wallet.address && isValidSolanaAddress(wallet.address)) {
         try {
           console.log("Fetching balance for", wallet.address, "using Alchemy RPC");
           
@@ -88,11 +127,14 @@ export function useEmbeddedGameWallet() {
           }));
         } catch (error) {
           console.error("Failed to fetch wallet balance:", error);
+          // Don't update balance on error to preserve last known value
         }
+      } else if (wallet && wallet.address) {
+        console.error("Cannot fetch balance - invalid wallet address:", wallet.address);
       }
     };
 
-    if (wallet?.address) {
+    if (wallet?.address && isValidSolanaAddress(wallet.address)) {
       fetchBalance();
       const intervalId = setInterval(fetchBalance, 15000);
       return () => clearInterval(intervalId);
@@ -101,7 +143,10 @@ export function useEmbeddedGameWallet() {
 
   // Function to manually refresh balance
   const refreshBalance = async () => {
-    if (!wallet || !wallet.address) return;
+    if (!wallet || !wallet.address || !isValidSolanaAddress(wallet.address)) {
+      console.error('Cannot refresh balance - invalid wallet or address');
+      return;
+    }
     
     try {
       // Use your Alchemy RPC URL for balance refresh

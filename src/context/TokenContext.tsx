@@ -1,3 +1,4 @@
+// src/context/TokenContext.tsx
 'use client';
 
 import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
@@ -46,6 +47,34 @@ const defaultValue: TokenContextType = {
 
 const TokenContext = createContext<TokenContextType>(defaultValue);
 
+// Helper function to validate Solana address
+const isValidSolanaAddress = (address: string): boolean => {
+  try {
+    // Check if address exists and is a string
+    if (!address || typeof address !== 'string') {
+      return false;
+    }
+    
+    // Check length (Solana addresses are typically 32-44 characters)
+    if (address.length < 32 || address.length > 44) {
+      return false;
+    }
+    
+    // Check if it contains only valid base58 characters
+    const base58Regex = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/;
+    if (!base58Regex.test(address)) {
+      return false;
+    }
+    
+    // Try to create a PublicKey instance
+    new PublicKey(address);
+    return true;
+  } catch (error) {
+    console.warn('Invalid Solana address:', address, error);
+    return false;
+  }
+};
+
 export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { authenticated } = usePrivy();
   const { wallets } = useWallets();
@@ -60,8 +89,11 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Airdrop cooldown (24 hours)
   const airdropCooldown = 24 * 60 * 60 * 1000;
   
-  // Get embedded wallet
-  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
+  // Get embedded wallet - with better filtering
+  const embeddedWallet = wallets.find(wallet => 
+    wallet.walletClientType === 'privy' && 
+    wallet.chainId === 'solana'
+  ) || wallets.find(wallet => wallet.walletClientType === 'privy');
   
   // Solana connection
   const connection = new Connection(
@@ -76,7 +108,7 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   
   // Load airdrop timestamp from localStorage
   useEffect(() => {
-    if (embeddedWallet) {
+    if (embeddedWallet && isValidSolanaAddress(embeddedWallet.address)) {
       const saved = localStorage.getItem(`airdrop_${embeddedWallet.address}`);
       if (saved) {
         setLastAirdropTime(parseInt(saved));
@@ -86,7 +118,7 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   
   // Save airdrop timestamp to localStorage
   const saveAirdropTime = (timestamp: number) => {
-    if (embeddedWallet) {
+    if (embeddedWallet && isValidSolanaAddress(embeddedWallet.address)) {
       localStorage.setItem(`airdrop_${embeddedWallet.address}`, timestamp.toString());
       setLastAirdropTime(timestamp);
     }
@@ -95,9 +127,19 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   // Check if airdrop is available
   const isAirdropAvailable = !lastAirdropTime || (Date.now() - lastAirdropTime) >= airdropCooldown;
   
-  // Refresh balances
+  // Refresh balances with proper error handling
   const refreshBalances = async () => {
-    if (!authenticated || !embeddedWallet) return;
+    if (!authenticated || !embeddedWallet) {
+      console.log('Not authenticated or no wallet available');
+      return;
+    }
+    
+    // Validate the wallet address before proceeding
+    if (!isValidSolanaAddress(embeddedWallet.address)) {
+      console.error('Invalid wallet address:', embeddedWallet.address);
+      // Don't throw an error, just log and return
+      return;
+    }
     
     try {
       // Get SOL balance
@@ -113,22 +155,30 @@ export const TokenProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       }
     } catch (error) {
       console.error('Failed to refresh balances:', error);
+      // Don't update balances on error to preserve last known values
     }
   };
   
   // Initial balance fetch
   useEffect(() => {
-    refreshBalances();
-    
-    // Set up interval to refresh balances
-    const interval = setInterval(refreshBalances, 30000);
-    return () => clearInterval(interval);
+    if (authenticated && embeddedWallet && isValidSolanaAddress(embeddedWallet.address)) {
+      refreshBalances();
+      
+      // Set up interval to refresh balances
+      const interval = setInterval(refreshBalances, 30000);
+      return () => clearInterval(interval);
+    }
   }, [authenticated, embeddedWallet]);
   
   // Airdrop function
   const airdropToken = async (token: TokenType, amount: number): Promise<boolean> => {
     if (!authenticated || !embeddedWallet) {
       toast.error('Please login first');
+      return false;
+    }
+    
+    if (!isValidSolanaAddress(embeddedWallet.address)) {
+      toast.error('Invalid wallet address');
       return false;
     }
     

@@ -1,7 +1,7 @@
 // src/app/page.tsx
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/layout/Layout';
 import dynamic from 'next/dynamic';
 import ChatBox from '../components/chat/ChatBox';
@@ -21,8 +21,10 @@ export default function Home() {
   const { authenticated, login } = usePrivy();
   const { width, height } = useWindowSize();
   
-  // Better mobile detection that accounts for tablets
-  const isMobile = width ? width < 768 : false;
+  // More granular screen size detection
+  const isExtraSmall = width ? width < 375 : false;  // iPhone SE and smaller
+  const isSmall = width ? width < 640 : false;       // Most phones
+  const isMobile = width ? width < 768 : false;      // Mobile devices
   const isTablet = width ? width >= 768 && width < 1024 : false;
   const isDesktop = width ? width >= 1024 : false;
 
@@ -31,27 +33,37 @@ export default function Home() {
     setIsMounted(true);
   }, []);
 
-  // Scroll handler that works with the main window scroll
+  // Scroll handler with better mobile optimization
   const handleScroll = useCallback(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !isMounted) return;
     
     const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    const scrollThreshold = isMobile ? 200 : 300; // Lower threshold for mobile
+    const windowHeight = window.innerHeight;
+    const threshold = isSmall ? windowHeight * 0.3 : windowHeight * 0.5;
     
-    setIsLeaderboardVisible(scrollTop > scrollThreshold);
-  }, [isMobile]);
+    setIsLeaderboardVisible(scrollTop > threshold);
+  }, [isSmall, isMounted]);
 
-  // Set up window scroll listener
+  // Set up window scroll listener with debouncing
   useEffect(() => {
     if (!isMounted) return;
 
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    
-    // Initial check
-    handleScroll();
+    let ticking = false;
+    const scrollHandler = () => {
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          handleScroll();
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+
+    window.addEventListener('scroll', scrollHandler, { passive: true });
+    handleScroll(); // Initial check
 
     return () => {
-      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('scroll', scrollHandler);
     };
   }, [handleScroll, isMounted]);
 
@@ -59,7 +71,7 @@ export default function Home() {
     login();
   };
 
-  // Show loading state while hydrating to prevent layout shift
+  // Show loading state while hydrating
   if (!isMounted) {
     return (
       <Layout>
@@ -72,56 +84,85 @@ export default function Home() {
 
   return (
     <Layout>
-      {/* Main container - uses min-h-screen for better mobile compatibility */}
-      <div className="flex flex-col min-h-screen bg-[#0B0E16]">
+      {/* Main container with proper overflow handling */}
+      <div className="w-full min-h-screen bg-[#0B0E16] overflow-x-hidden">
         
-        {/* Content wrapper - no nested scroll containers */}
-        <div className="flex flex-col lg:flex-row flex-1">
+        {/* Content wrapper - single column on mobile, side-by-side on desktop */}
+        <div className="flex flex-col lg:flex-row min-h-screen">
           
-          {/* Desktop Chat Sidebar - hidden on mobile/tablet */}
+          {/* Desktop Chat Sidebar - completely hidden on mobile/tablet */}
           {isDesktop && (
-            <div className="w-1/4 xl:w-1/5 border-r border-gray-800">
-              <div className="sticky top-0 h-screen">
+            <div className="w-1/4 xl:w-1/5 border-r border-gray-800 flex-shrink-0">
+              <div className="sticky top-0 h-screen overflow-hidden">
                 <ChatBox />
               </div>
             </div>
           )}
           
-          {/* Mobile Chat - only on mobile */}
+          {/* Mobile Chat - floating overlay, doesn't affect layout */}
           {isMobile && <MobileChat />}
           
-          {/* Main Content Area - full width on mobile, remaining space on desktop */}
-          <div className="flex-1 flex flex-col w-full">
+          {/* Main Content Area - full width with proper constraints */}
+          <div className="flex-1 flex flex-col w-full min-w-0 overflow-x-hidden">
             
-            {/* Login Prompt - responsive padding */}
+            {/* Login Prompt - fully responsive */}
             {!authenticated && (
-              <div className="bg-gray-900 mx-2 sm:mx-4 my-2 sm:my-4 p-4 sm:p-6 lg:p-8 rounded-lg text-center">
-                <h2 className="text-xl sm:text-2xl font-bold mb-2 sm:mb-4 text-white">
+              <div className={`
+                bg-gray-900 rounded-lg text-center
+                ${isExtraSmall ? 'mx-1 my-2 p-3' : 
+                  isSmall ? 'mx-2 my-3 p-4' : 
+                  'mx-4 my-4 p-6 lg:p-8'}
+              `}>
+                <h2 className={`
+                  font-bold mb-3 text-white
+                  ${isExtraSmall ? 'text-lg' : 
+                    isSmall ? 'text-xl' : 
+                    'text-2xl'}
+                `}>
                   Login to Start Trading
                 </h2>
-                <p className="text-gray-400 mb-4 sm:mb-6 text-sm sm:text-base">
+                <p className={`
+                  text-gray-400 mb-4
+                  ${isExtraSmall ? 'text-xs' : 
+                    isSmall ? 'text-sm' : 
+                    'text-base'}
+                `}>
                   Connect your wallet to access all trading features and participate in the game.
                 </p>
                 <button
                   onClick={handleLoginClick}
-                  className="bg-green-600 hover:bg-green-700 text-white px-4 sm:px-6 py-2 sm:py-3 rounded-lg font-bold transition-colors text-sm sm:text-base"
+                  className={`
+                    bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold transition-colors
+                    ${isExtraSmall ? 'px-3 py-2 text-sm' : 
+                      isSmall ? 'px-4 py-2 text-sm' : 
+                      'px-6 py-3 text-base'}
+                  `}
                 >
                   Login to Continue
                 </button>
               </div>
             )}
             
-            {/* Mini Charts - responsive layout */}
-            <div className={`${authenticated ? '' : 'opacity-50 pointer-events-none'} w-full`}>
+            {/* Mini Charts - constrained width */}
+            <div className={`
+              w-full overflow-x-hidden
+              ${authenticated ? '' : 'opacity-50 pointer-events-none'}
+            `}>
               <MiniCharts data={mockMultipliers} />
             </div>
             
-            {/* Main Chart Container - responsive height and padding */}
-            <div className={`${authenticated ? '' : 'opacity-50 pointer-events-none'} flex-1 px-2 sm:px-0`}>
-              <ChartContainer useMobileHeight={isMobile} />
+            {/* Main Chart Container - responsive height and proper constraints */}
+            <div className={`
+              flex-1 w-full min-w-0 overflow-x-hidden
+              ${authenticated ? '' : 'opacity-50 pointer-events-none'}
+              ${isExtraSmall ? 'px-1' : isSmall ? 'px-2' : 'px-4 lg:px-0'}
+            `}>
+              <div className="w-full max-w-full">
+                <ChartContainer useMobileHeight={isMobile} />
+              </div>
             </div>
             
-            {/* Scroll Indicator - only show on desktop when leaderboard is not visible */}
+            {/* Scroll Indicator - only on desktop */}
             {isDesktop && !isLeaderboardVisible && (
               <div className="text-center py-4 text-gray-400 transition-opacity duration-300 animate-bounce">
                 <div className="flex flex-col items-center">
@@ -131,20 +172,27 @@ export default function Home() {
               </div>
             )}
 
-            {/* Leaderboard Section - responsive spacing and visibility */}
+            {/* Leaderboard Section - fully responsive */}
             <div className={`
-              w-full
-              ${isMobile ? 'mt-4' : 'mt-8 lg:mt-12'} 
-              mb-4 sm:mb-8 
-              px-2 
+              w-full max-w-full overflow-x-hidden
+              ${isExtraSmall ? 'mt-2 mb-2 px-1' : 
+                isSmall ? 'mt-4 mb-4 px-2' : 
+                isMobile ? 'mt-6 mb-6 px-2' : 
+                'mt-12 mb-8 px-4'}
               transition-opacity duration-300 
               ${(isLeaderboardVisible || isMobile || isTablet) ? 'opacity-100' : 'opacity-0'}
             `}>
-              <Leaderboard entries={mockLeaderboardEntries} />
+              <div className="w-full max-w-full">
+                <Leaderboard entries={mockLeaderboardEntries} />
+              </div>
             </div>
             
-            {/* Bottom spacing for mobile scroll */}
-            <div className="h-4 sm:h-8" />
+            {/* Bottom spacing for complete scroll */}
+            <div className={`
+              ${isExtraSmall ? 'h-4' : 
+                isSmall ? 'h-8' : 
+                'h-12'}
+            `} />
           </div>
         </div>
       </div>

@@ -421,3 +421,262 @@ textarea:focus {
     display: none !important;
   }
 }
+
+/* Enhanced mobile optimizations - add to src/app/globals.css */
+
+/* Base reset for proper mobile behavior */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  /* Prevent horizontal scroll at all costs */
+  overflow-x: hidden;
+  width: 100%;
+}
+
+body {
+  /* Strict horizontal overflow prevention */
+  overflow-x: hidden !important;
+  width: 100vw;
+  max-width: 100vw;
+  
+  /* Ensure consistent scrolling on mobile */
+  -webkit-overflow-scrolling: touch;
+  
+  /* Prevent zoom on input focus (iOS) */
+  -webkit-text-size-adjust: 100%;
+  
+  /* Prevent pull-to-refresh bounce */
+  overscroll-behavior-y: contain;
+  
+  /* Fix font size for better mobile experience */
+  font-size: 16px;
+}
+
+/* Container constraints for all screen sizes */
+.container,
+.max-w-full,
+.w-full {
+  max-width: 100vw !important;
+  overflow-x: hidden;
+}
+
+/* Fix viewport height issues on mobile browsers */
+.min-h-screen {
+  min-height: 100vh;
+  min-height: 100dvh; /* Dynamic viewport height when supported */
+}
+
+@supports (-webkit-touch-callout: none) {
+  /* iOS Safari specific fixes */
+  .min-h-screen {
+    min-height: -webkit-fill-available;
+  }
+}
+
+/* Extra small screens (iPhone SE, older Android) */
+@media (max-width: 374px) {
+  /* Ensure all content fits */
+  * {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  
+  /* Reduce padding on very small screens */
+  .container {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+  
+  /* Make buttons more touch-friendly */
+  button {
+    min-height: 44px;
+    min-width: 44px;
+    font-size: 14px;
+  }
+  
+  /* Reduce text size if needed */
+  .text-base {
+    font-size: 14px;
+  }
+  
+  .text-lg {
+    font-size: 16px;
+  }
+  
+  .text-xl {
+    font-size: 18px;
+  }
+}
+
+/* Small screens (most phones) */
+@media (max-width: 639px) {
+  /* Ensure touch targets are accessible */
+  button, 
+  input[type="button"], 
+  input[type="submit"], 
+  .clickable {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Optimize spacing */
+  .mobile-optimized {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  /* Fix any potential overflow issues */
+  .chart-container,
+  .trading-controls,
+  .leaderboard {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  
+  /* Better button feedback */
+  button:active {
+    transform: scale(0.98);
+    transition: transform 0.1s ease;
+  }
+  
+  /* Prevent text selection on UI elements */
+  .no-select {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+  }
+}
+
+/* Medium screens (tablets) */
+@media (min-width: 640px) and (max-width: 1023px) {
+  /* Tablet-specific optimizations */
+  .container {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}
+
+/* Specific fixes for common overflow culprits */
+.candlestick-chart,
+.trading-chart,
+.mini-charts {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Table/grid responsiveness */
+.leaderboard-table,
+.trading-table {
+  width: 100%;
+  table-layout: fixed;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Input field optimizations */
+input[type="text"],
+input[type="number"],
+input[type="email"] {
+  max-width: 100%;
+  font-size: 16px; /* Prevents zoom on iOS */
+  -webkit-appearance: none;
+  appearance: none; /* Standard property for compatibility */
+  border-radius: 0; /* Fixes iOS styling issues */
+}
+
+/* Flexbox overflow fixes */
+.flex {
+  min-width: 0; /* Allows flex items to shrink below content size */
+}
+
+.flex-1 {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Grid overflow fixes */
+.grid {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+/* Image responsiveness */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* SVG responsiveness */
+svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Safe area support for modern phones */
+@supports (padding: max(0px)) {
+  .safe-area-padding {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+    padding-top: max(0px, env(safe-area-inset-top));
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Scrollbar hiding for better mobile experience */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Performance optimizations */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Debug helper - uncomment to see overflow issues */
+/*
+* {
+  outline: 1px solid red !important;
+}
+*/
+
+/* Specific component fixes */
+.chart-container {
+  width: 100%;
+  max-width: 100vw;
+  overflow: hidden;
+}
+
+.trading-controls {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+.mobile-chat {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+/* Animation performance */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

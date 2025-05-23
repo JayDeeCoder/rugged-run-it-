@@ -8,18 +8,19 @@ WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
+COPY tsconfig.json ./
 
-# Install ALL dependencies first
+# Install ALL dependencies (including devDependencies needed for build)
 RUN npm ci
 
 # Copy source code
 COPY . .
 
 # Build the TypeScript code
-RUN npm run build || npx tsc --target ES2022 --module commonjs --outDir dist --rootDir . *.ts
+RUN npm run build
 
-# Remove dev dependencies after build (optional)
-RUN npm prune --production
+# Now remove dev dependencies to keep image smaller (optional)
+RUN npm ci --only=production
 
 # Expose port
 EXPOSE 3001

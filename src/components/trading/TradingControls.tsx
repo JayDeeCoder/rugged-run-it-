@@ -54,10 +54,27 @@ const TradingControls: FC<TradingControlsProps> = ({
   // Real game server connection
   const { currentGame, isConnected, placeBet, cashOut } = useGameSocket(walletAddress, userId || undefined);
   
-  // Token context - simplified for crash game
+  // Token context and wallet balance
   const [currentToken, setCurrentToken] = useState<TokenType>(TokenType.SOL);
-  const [solBalance, setSolBalance] = useState<number>(propWalletBalance);
+  const [solBalance, setSolBalance] = useState<number>(0);
   const [ruggedBalance, setRuggedBalance] = useState<number>(1000); // Default RUGGED balance
+  
+  // Update wallet balance from real wallet data
+  useEffect(() => {
+    if (embeddedWallet && authenticated) {
+      // Get real SOL balance from wallet
+      const updateBalance = async () => {
+        try {
+          // You can implement actual balance fetching here
+          // For now, use the prop or a default
+          setSolBalance(propWalletBalance || 0.1); // Default small balance for testing
+        } catch (error) {
+          console.warn('Could not fetch wallet balance:', error);
+        }
+      };
+      updateBalance();
+    }
+  }, [embeddedWallet, authenticated, propWalletBalance]);
   
   // Check if wallet is ready
   const isWalletReady = authenticated && walletAddress !== '';
@@ -313,6 +330,115 @@ const TradingControls: FC<TradingControlsProps> = ({
 
   // Get the active balance
   const activeBalance = currentToken === TokenType.SOL ? solBalance : ruggedBalance;
+
+  // Mobile simplified UI
+  if (isMobile) {
+    return (
+      <div className="bg-[#0d0d0f] text-white p-3 border border-gray-800 rounded-lg">
+        {/* Connection Status */}
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-gray-400 text-sm">Status:</span>
+          <span className={`px-2 py-1 rounded text-xs ${isConnected ? 'bg-green-600' : 'bg-red-600'}`}>
+            {isConnected ? 'Connected' : 'Disconnected'}
+          </span>
+        </div>
+
+        {/* Game Info */}
+        {activeCurrentGame && (
+          <div className="bg-gray-800 p-2 rounded-md mb-3">
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400 text-sm">Game #{activeCurrentGame.gameNumber}</span>
+              <span className="text-yellow-400 font-bold text-lg">{activeCurrentGame.multiplier.toFixed(2)}x</span>
+            </div>
+          </div>
+        )}
+
+        {/* Balance */}
+        <div className="bg-gray-800 p-2 rounded-md mb-3">
+          <div className="text-center">
+            <div className="text-xs text-gray-400">Balance</div>
+            <div className="text-sm font-bold text-blue-400">
+              {formatBalance(activeBalance, currentToken)} {currentToken}
+            </div>
+          </div>
+        </div>
+
+        {/* Bet Amount Input */}
+        <div className="mb-3">
+          <input
+            type="text"
+            value={amount}
+            onChange={handleAmountChange}
+            className="w-full bg-gray-800 text-white px-3 py-2 rounded-md focus:outline-none text-center"
+            placeholder="Enter bet amount"
+            disabled={!activeIsGameActive || hasActiveBet}
+          />
+        </div>
+
+        {/* Quick amounts for mobile */}
+        <div className="grid grid-cols-4 gap-2 mb-3">
+          {quickAmounts.map((amt) => (
+            <button
+              key={amt}
+              onClick={() => setQuickAmount(amt)}
+              className={`px-2 py-1 text-xs rounded-md ${
+                parseFloat(amount) === amt
+                  ? 'bg-green-600 text-white'
+                  : 'bg-gray-700 text-gray-300'
+              }`}
+              disabled={!activeIsGameActive || hasActiveBet}
+            >
+              {amt.toString()}
+            </button>
+          ))}
+        </div>
+
+        {/* Main Action Button */}
+        {!hasActiveBet ? (
+          <button
+            onClick={handleBuy}
+            disabled={isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !activeIsGameActive}
+            className={`w-full py-3 rounded-md font-bold text-lg ${
+              isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !activeIsGameActive
+                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-green-600 hover:bg-green-700 text-white'
+            }`}
+          >
+            {isPlacingBet ? 'Placing Bet...' : 'Place Bet'}
+          </button>
+        ) : (
+          <div>
+            {/* Potential win display */}
+            <div className="bg-blue-900 bg-opacity-30 p-2 rounded-md mb-2 text-center">
+              <div className="text-xs text-blue-400">Potential Win</div>
+              <div className="text-lg font-bold text-blue-300">
+                {(parseFloat(amount) * activeCurrentMultiplier).toFixed(3)} SOL
+              </div>
+            </div>
+            
+            <button
+              onClick={handleSell}
+              disabled={isCashingOut || !isConnected || !activeIsGameActive}
+              className={`w-full py-3 rounded-md font-bold text-lg ${
+                isCashingOut || !isConnected || !activeIsGameActive
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  : 'bg-yellow-600 hover:bg-yellow-700 text-white'
+              }`}
+            >
+              {isCashingOut ? 'Cashing Out...' : `Cash Out (${activeCurrentMultiplier.toFixed(2)}x)`}
+            </button>
+          </div>
+        )}
+
+        {/* Warning messages for mobile */}
+        {!isWalletReady && (
+          <div className="text-yellow-500 text-xs text-center mt-2">
+            Login to play
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="bg-[#0d0d0f] text-white grid grid-cols-1 gap-3 p-4 relative border border-gray-800 rounded-lg">

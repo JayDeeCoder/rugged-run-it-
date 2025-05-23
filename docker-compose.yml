@@ -2,13 +2,15 @@
 services:
   # Game server
   game-server:
-    build: ./game-server  # ✅ Correct path  # or whatever your game server directory is called
-    container_name: game-server
-    environment:
-      - NODE_ENV=production
-    networks:
-      - app-network
-    restart: unless-stopped
+  build: ./game-server
+  container_name: game-server
+  environment:
+    - NODE_ENV=production
+    - SUPABASE_URL=${SUPABASE_URL}
+    - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+  networks:
+    - app-network
+  restart: unless-stopped
 
   # Chat server - fix the path case
   chat-server:

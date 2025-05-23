@@ -1,4 +1,4 @@
-// production-game-server.ts
+// production-game-server.ts - Updated with synchronization fixes
 import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
@@ -109,6 +109,7 @@ interface CashOutData {
 // Game state
 let currentGame: GameState | null = null;
 let gameHistory: GameState[] = [];
+let gameStartLock = false; // FIX: Prevent multiple games from starting
 
 // Game configuration
 const GAME_CONFIG = {
@@ -141,9 +142,97 @@ function generateGameDuration(crashPoint: number): number {
     return baseTime + (maxTime - baseTime) * factor;
 }
 
-// Game logic
+// FIX: Enhanced game loop with better synchronization
+async function runGameLoop(duration: number): Promise<void> {
+    if (!currentGame) return;
+
+    const startTime = Date.now();
+    const endTime = startTime + duration;
+    let lastUpdate = startTime;
+    let lastChartUpdate = startTime;
+
+    console.log(`Starting game loop for Game ${currentGame.gameNumber} - Duration: ${duration}ms`);
+
+    const gameLoop = setInterval(() => {
+        if (!currentGame || currentGame.status !== 'active') {
+            clearInterval(gameLoop);
+            return;
+        }
+
+        const now = Date.now();
+        const elapsed = now - startTime;
+        const progress = Math.min(elapsed / duration, 1); // Ensure progress never exceeds 1
+
+        if (progress >= 1 || now >= endTime) {
+            // Game crashed
+            crashGame();
+            clearInterval(gameLoop);
+            return;
+        }
+
+        // FIX: More consistent multiplier calculation with Math.round
+        const multiplier = 1.0 + (currentGame.maxMultiplier - 1.0) * Math.pow(progress, 0.5);
+        currentGame.currentMultiplier = Math.round(multiplier * 100) / 100;
+
+        // FIX: Enhanced broadcast with game number validation and server time
+        io.emit('multiplierUpdate', {
+            gameId: currentGame.id,
+            gameNumber: currentGame.gameNumber, // Add for client validation
+            multiplier: currentGame.currentMultiplier,
+            timestamp: now,
+            serverTime: now, // Add server timestamp for sync
+            progress: progress // Add progress for client validation
+        });
+
+        // Generate chart data every second
+        if (now - lastChartUpdate >= 1000) {
+            const chartPoint: ChartPoint = {
+                timestamp: now,
+                open: currentGame.chartData.length > 0 ? currentGame.chartData[currentGame.chartData.length - 1].close : 1.0,
+                high: currentGame.currentMultiplier * (1 + Math.random() * 0.01),
+                low: currentGame.currentMultiplier * (1 - Math.random() * 0.01),
+                close: currentGame.currentMultiplier,
+                volume: currentGame.totalBets
+            };
+
+            currentGame.chartData.push(chartPoint);
+            lastChartUpdate = now;
+
+            // Save chart data to database (optional, don't crash if it fails)
+            saveChartData(chartPoint).catch(err => console.warn('Chart data save failed:', err.message));
+        }
+
+    }, GAME_CONFIG.UPDATE_INTERVAL);
+}
+
+// FIX: Enhanced startNewGame with game start locks
 async function startNewGame(): Promise<void> {
+    // FIX: Prevent multiple games from starting simultaneously
+    if (gameStartLock) {
+        console.log('Game start already in progress, skipping...');
+        return;
+    }
+
+    gameStartLock = true;
+
     try {
+        // FIX: Check if there's already an active game in database
+        try {
+            const { data: existingGame } = await supabaseService
+                .from('games')
+                .select('*')
+                .eq('status', 'active')
+                .single();
+
+            if (existingGame) {
+                console.log('Found existing active game, not starting new one');
+                gameStartLock = false;
+                return;
+            }
+        } catch (error) {
+            // No existing game found, proceed
+        }
+
         const seed = generateProvablyFairSeed();
         const gameNumber = gameHistory.length + 1;
         const crashPoint = calculateCrashPoint(seed, gameNumber);
@@ -158,7 +247,8 @@ async function startNewGame(): Promise<void> {
                     game_number: gameNumber,
                     seed: seed,
                     crash_multiplier: crashPoint,
-                    status: 'active'
+                    status: 'active',
+                    start_time: new Date().toISOString()
                 })
                 .select()
                 .single();
@@ -188,13 +278,16 @@ async function startNewGame(): Promise<void> {
             activeBets: new Map()
         };
 
-        console.log(`Game ${gameNumber} started - Crash point: ${crashPoint}x`);
+        console.log(`Game ${gameNumber} started - Crash point: ${crashPoint}x at ${new Date().toISOString()}`);
 
-        // Broadcast game start
+        // FIX: Enhanced broadcast with comprehensive game start data
         io.emit('gameStarted', {
             gameId: currentGame.id,
             gameNumber,
-            startTime: currentGame.startTime
+            startTime: currentGame.startTime,
+            serverTime: Date.now(), // Add server time for sync
+            seed: currentGame.seed,
+            maxMultiplier: crashPoint
         });
 
         // Start game loop
@@ -204,74 +297,23 @@ async function startNewGame(): Promise<void> {
         console.error('Error starting new game:', error);
         // Retry after 10 seconds instead of crashing the server
         setTimeout(() => {
+            gameStartLock = false;
             startNewGame();
         }, 10000);
+    } finally {
+        gameStartLock = false;
     }
 }
 
-async function runGameLoop(duration: number): Promise<void> {
-    if (!currentGame) return;
-
-    const startTime = Date.now();
-    const endTime = startTime + duration;
-    let lastUpdate = startTime;
-
-    const gameLoop = setInterval(() => {
-        if (!currentGame || currentGame.status !== 'active') {
-            clearInterval(gameLoop);
-            return;
-        }
-
-        const now = Date.now();
-        const elapsed = now - startTime;
-        const progress = elapsed / duration;
-
-        if (now >= endTime || progress >= 1) {
-            // Game crashed
-            crashGame();
-            clearInterval(gameLoop);
-            return;
-        }
-
-        // Calculate current multiplier based on progress
-        const multiplier = 1.0 + (currentGame.maxMultiplier - 1.0) * Math.pow(progress, 0.5);
-        currentGame.currentMultiplier = Math.floor(multiplier * 100) / 100;
-
-        // Generate chart data every second
-        if (now - lastUpdate >= 1000) {
-            const chartPoint: ChartPoint = {
-                timestamp: now,
-                open: currentGame.chartData.length > 0 ? currentGame.chartData[currentGame.chartData.length - 1].close : 1.0,
-                high: currentGame.currentMultiplier * (1 + Math.random() * 0.01),
-                low: currentGame.currentMultiplier * (1 - Math.random() * 0.01),
-                close: currentGame.currentMultiplier,
-                volume: currentGame.totalBets
-            };
-
-            currentGame.chartData.push(chartPoint);
-            lastUpdate = now;
-
-            // Save chart data to database (optional, don't crash if it fails)
-            saveChartData(chartPoint).catch(err => console.warn('Chart data save failed:', err.message));
-        }
-
-        // Broadcast multiplier update
-        io.emit('multiplierUpdate', {
-            gameId: currentGame.id,
-            multiplier: currentGame.currentMultiplier,
-            timestamp: now
-        });
-
-    }, GAME_CONFIG.UPDATE_INTERVAL);
-}
-
+// FIX: Enhanced crashGame with better state management
 async function crashGame(): Promise<void> {
     if (!currentGame) return;
 
+    const crashTime = Date.now();
     currentGame.status = 'crashed';
     const crashMultiplier = currentGame.currentMultiplier;
 
-    console.log(`Game ${currentGame.gameNumber} crashed at ${crashMultiplier}x`);
+    console.log(`Game ${currentGame.gameNumber} crashed at ${crashMultiplier}x at ${new Date(crashTime).toISOString()}`);
 
     // Process all active bets
     for (const [walletAddress, bet] of currentGame.activeBets) {
@@ -287,7 +329,7 @@ async function crashGame(): Promise<void> {
             await supabaseService
                 .from('games')
                 .update({
-                    end_time: new Date().toISOString(),
+                    end_time: new Date(crashTime).toISOString(),
                     crash_multiplier: crashMultiplier,
                     max_multiplier: currentGame.maxMultiplier,
                     status: 'crashed',
@@ -300,11 +342,16 @@ async function crashGame(): Promise<void> {
         console.warn('Game update failed:', error);
     }
 
-    // Broadcast crash
+    // FIX: Enhanced crash broadcast with all necessary data
     io.emit('gameCrashed', {
         gameId: currentGame.id,
+        gameNumber: currentGame.gameNumber,
         crashMultiplier,
-        timestamp: Date.now()
+        serverTime: crashTime,
+        timestamp: crashTime,
+        finalMultiplier: crashMultiplier,
+        totalBets: currentGame.totalBets,
+        totalPlayers: currentGame.totalPlayers
     });
 
     // Add to history
@@ -317,6 +364,13 @@ async function crashGame(): Promise<void> {
     updateLeaderboard().catch(err => console.warn('Leaderboard update failed:', err.message));
 
     currentGame = null;
+
+    // FIX: Add waiting period broadcast
+    io.emit('gameWaiting', {
+        message: 'Next game starting in 5 seconds...',
+        countdown: 5000,
+        serverTime: Date.now()
+    });
 
     // Start next game after 5 seconds
     setTimeout(() => {
@@ -547,11 +601,14 @@ async function updateLeaderboard(): Promise<void> {
     }
 }
 
-// Socket.io event handlers
+// FIX: Enhanced Socket.io event handlers with complete synchronization
 io.on('connection', (socket: Socket) => {
     console.log('Client connected:', socket.id);
 
-    if (currentGame) {
+    // FIX: Send complete current game state immediately on connection
+    if (currentGame && currentGame.status === 'active') {
+        const currentServerTime = Date.now();
+        
         socket.emit('gameState', {
             gameId: currentGame.id,
             gameNumber: currentGame.gameNumber,
@@ -559,16 +616,54 @@ io.on('connection', (socket: Socket) => {
             status: currentGame.status,
             totalBets: currentGame.totalBets,
             totalPlayers: currentGame.totalPlayers,
-            startTime: currentGame.startTime
+            startTime: currentGame.startTime,
+            maxMultiplier: currentGame.maxMultiplier,
+            serverTime: currentServerTime, // Current server time for sync
+            chartData: currentGame.chartData.slice(-60), // Last 60 data points
+            seed: currentGame.seed // For client verification
+        });
+
+        // FIX: Send immediate multiplier update for new clients
+        socket.emit('multiplierUpdate', {
+            gameId: currentGame.id,
+            gameNumber: currentGame.gameNumber,
+            multiplier: currentGame.currentMultiplier,
+            timestamp: currentServerTime,
+            serverTime: currentServerTime,
+            progress: (currentServerTime - currentGame.startTime) / generateGameDuration(currentGame.maxMultiplier)
         });
     }
 
+    // Send game history
     socket.emit('gameHistory', gameHistory.slice(-10));
+
+    // FIX: Add game sync validation
+    socket.on('requestGameSync', () => {
+        if (currentGame) {
+            socket.emit('gameSync', {
+                gameId: currentGame.id,
+                gameNumber: currentGame.gameNumber,
+                multiplier: currentGame.currentMultiplier,
+                serverTime: Date.now(),
+                status: currentGame.status
+            });
+        }
+    });
 
     socket.on('placeBet', async (data: PlaceBetData) => {
         const { walletAddress, betAmount, userId } = data;
         const success = await placeBet(walletAddress, betAmount, userId);
-        socket.emit('betResult', { success, walletAddress, betAmount });
+        
+        // FIX: Send updated game state after bet placement
+        socket.emit('betResult', { 
+            success, 
+            walletAddress, 
+            betAmount,
+            gameState: currentGame ? {
+                totalBets: currentGame.totalBets,
+                totalPlayers: currentGame.totalPlayers
+            } : null
+        });
     });
 
     socket.on('cashOut', async (data: CashOutData) => {
@@ -582,13 +677,36 @@ io.on('connection', (socket: Socket) => {
     });
 });
 
+// FIX: Add periodic sync broadcast to catch any drift
+setInterval(() => {
+    if (currentGame && currentGame.status === 'active') {
+        io.emit('serverSync', {
+            gameId: currentGame.id,
+            gameNumber: currentGame.gameNumber,
+            multiplier: currentGame.currentMultiplier,
+            serverTime: Date.now(),
+            status: currentGame.status,
+            totalBets: currentGame.totalBets,
+            totalPlayers: currentGame.totalPlayers
+        });
+    }
+}, 5000); // Every 5 seconds
+
 // REST API endpoints
 app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'healthy', 
         timestamp: Date.now(),
-        currentGame: currentGame ? currentGame.gameNumber : null,
-        mode: currentGame?.id.startsWith('memory-') ? 'memory' : 'database'
+        serverTime: new Date().toISOString(),
+        currentGame: currentGame ? {
+            gameNumber: currentGame.gameNumber,
+            multiplier: currentGame.currentMultiplier,
+            status: currentGame.status,
+            startTime: currentGame.startTime,
+            totalPlayers: currentGame.totalPlayers
+        } : null,
+        mode: currentGame?.id.startsWith('memory-') ? 'memory' : 'database',
+        uptime: process.uptime()
     });
 });
 
@@ -645,6 +763,7 @@ app.get("*", (req, res, next) => {
 // Start server
 server.listen(PORT, () => {
     console.log(`Game server running on port ${PORT}`);
+    console.log(`Health check: http://localhost:${PORT}/api/health`);
     startNewGame(); // Start first game
 });
 

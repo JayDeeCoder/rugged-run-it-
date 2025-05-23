@@ -1,20 +1,19 @@
-# Remove the version line as it's obsolete
 services:
   # Game server
   game-server:
-  build: ./game-server
-  container_name: game-server
-  environment:
-    - NODE_ENV=production
-    - SUPABASE_URL=${SUPABASE_URL}
-    - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-  networks:
-    - app-network
-  restart: unless-stopped
+    build: ./game-server
+    container_name: game-server
+    environment:
+      - NODE_ENV=production
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+    networks:
+      - app-network
+    restart: unless-stopped
 
-  # Chat server - fix the path case
+  # Chat server
   chat-server:
-    build: ./Server  # Capital S to match your directory
+    build: ./Server
     container_name: chat-Server
     environment:
       - NODE_ENV=production
@@ -25,7 +24,7 @@ services:
       - app-network
     restart: unless-stopped
 
-  # Redis (if you need it)
+  # Redis
   redis:
     image: redis:alpine
     container_name: redis

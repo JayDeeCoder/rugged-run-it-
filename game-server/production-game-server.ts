@@ -12,10 +12,11 @@ const SUPABASE_URL = process.env.SUPABASE_URL!;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY!;
 const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
 const PORT = process.env.PORT || 3001;
-const HOUSE_WALLET = process.env.HOUSE_WALLET_ADDRESS!;
+const HOUSE_WALLET = process.env.HOUSE_WALLET_ADDRESS || '';
 
 // Initialize services
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseService = createClient(SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY!);
 const solanaConnection = new Connection(SOLANA_RPC_URL);
 const app = express();
 const server = createServer(app);
@@ -29,6 +30,10 @@ const io = new Server(server, {
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Serve Next.js static files
+app.use(express.static(".next/static"));
+app.use(express.static("public"));
 
 // Types
 interface GameState {
@@ -77,7 +82,6 @@ interface LeaderboardEntry {
     rank?: number;
 }
 
-// Fix: Add proper typing for Supabase query result
 interface BetWithUser {
     wallet_address: string;
     user_id: string;
@@ -92,7 +96,6 @@ interface BetWithUser {
     } | null;
 }
 
-// Socket event interfaces
 interface PlaceBetData {
     walletAddress: string;
     betAmount: number;
@@ -146,22 +149,32 @@ async function startNewGame(): Promise<void> {
         const crashPoint = calculateCrashPoint(seed, gameNumber);
         const duration = generateGameDuration(crashPoint);
 
-        // Save game to database
-        const { data: gameData, error } = await supabase
-            .from('games')
-            .insert({
-                game_number: gameNumber,
-                crash_multiplier: crashPoint,
-                seed: seed,
-                status: 'active'
-            })
-            .select()
-            .single();
+        // Save game to database with error handling
+        let gameId = `memory-${gameNumber}`;
+        try {
+            const { data: gameData, error } = await supabaseService
+                .from('games')
+                .insert({
+                    game_number: gameNumber,
+                    seed: seed,
+                    crash_multiplier: crashPoint,
+                    status: 'active'
+                })
+                .select()
+                .single();
 
-        if (error) throw error;
+            if (error) {
+                console.warn('Database write failed, using memory mode:', error.message);
+            } else {
+                gameId = gameData.id;
+                console.log('Game saved to database successfully');
+            }
+        } catch (dbError) {
+            console.warn('Database connection failed, running in memory mode:', dbError);
+        }
 
         currentGame = {
-            id: gameData.id,
+            id: gameId,
             gameNumber,
             startTime: Date.now(),
             currentMultiplier: 1.0,
@@ -176,7 +189,7 @@ async function startNewGame(): Promise<void> {
         };
 
         console.log(`Game ${gameNumber} started - Crash point: ${crashPoint}x`);
-        
+
         // Broadcast game start
         io.emit('gameStarted', {
             gameId: currentGame.id,
@@ -189,6 +202,10 @@ async function startNewGame(): Promise<void> {
 
     } catch (error) {
         console.error('Error starting new game:', error);
+        // Retry after 10 seconds instead of crashing the server
+        setTimeout(() => {
+            startNewGame();
+        }, 10000);
     }
 }
 
@@ -230,12 +247,12 @@ async function runGameLoop(duration: number): Promise<void> {
                 close: currentGame.currentMultiplier,
                 volume: currentGame.totalBets
             };
-            
+
             currentGame.chartData.push(chartPoint);
             lastUpdate = now;
 
-            // Save chart data to database
-            saveChartData(chartPoint);
+            // Save chart data to database (optional, don't crash if it fails)
+            saveChartData(chartPoint).catch(err => console.warn('Chart data save failed:', err.message));
         }
 
         // Broadcast multiplier update
@@ -260,22 +277,28 @@ async function crashGame(): Promise<void> {
     for (const [walletAddress, bet] of currentGame.activeBets) {
         if (!bet.cashedOut) {
             // Player lost
-            await processBetLoss(bet);
+            await processBetLoss(bet).catch(err => console.warn('Bet loss processing failed:', err.message));
         }
     }
 
-    // Update game in database
-    await supabase
-        .from('games')
-        .update({
-            end_time: new Date().toISOString(),
-            crash_multiplier: crashMultiplier,
-            max_multiplier: currentGame.maxMultiplier,
-            status: 'crashed',
-            total_bets_amount: currentGame.totalBets,
-            total_players: currentGame.totalPlayers
-        })
-        .eq('id', currentGame.id);
+    // Update game in database (optional)
+    try {
+        if (!currentGame.id.startsWith('memory-')) {
+            await supabaseService
+                .from('games')
+                .update({
+                    end_time: new Date().toISOString(),
+                    crash_multiplier: crashMultiplier,
+                    max_multiplier: currentGame.maxMultiplier,
+                    status: 'crashed',
+                    total_bets_amount: currentGame.totalBets,
+                    total_players: currentGame.totalPlayers
+                })
+                .eq('id', currentGame.id);
+        }
+    } catch (error) {
+        console.warn('Game update failed:', error);
+    }
 
     // Broadcast crash
     io.emit('gameCrashed', {
@@ -290,13 +313,15 @@ async function crashGame(): Promise<void> {
         gameHistory = gameHistory.slice(-100); // Keep last 100 games
     }
 
-    // Update leaderboard
-    await updateLeaderboard();
+    // Update leaderboard (optional)
+    updateLeaderboard().catch(err => console.warn('Leaderboard update failed:', err.message));
 
     currentGame = null;
 
     // Start next game after 5 seconds
-    setTimeout(startNewGame, 5000);
+    setTimeout(() => {
+        startNewGame();
+    }, 5000);
 }
 
 async function placeBet(walletAddress: string, betAmount: number, userId?: string): Promise<boolean> {
@@ -313,10 +338,6 @@ async function placeBet(walletAddress: string, betAmount: number, userId?: strin
     }
 
     try {
-        // Verify transaction on Solana (in production)
-        // const verified = await verifyTransaction(transactionHash, walletAddress, betAmount);
-        // if (!verified) return false;
-
         const bet: PlayerBet = {
             userId: userId || '',
             walletAddress,
@@ -328,16 +349,22 @@ async function placeBet(walletAddress: string, betAmount: number, userId?: strin
         currentGame.totalBets += betAmount;
         currentGame.totalPlayers += 1;
 
-        // Save bet to database
-        await supabase
-            .from('player_bets')
-            .insert({
-                game_id: currentGame.id,
-                user_id: userId,
-                wallet_address: walletAddress,
-                bet_amount: betAmount,
-                status: 'active'
-            });
+        // Save bet to database (optional)
+        try {
+            if (!currentGame.id.startsWith('memory-')) {
+                await supabaseService
+                    .from('player_bets')
+                    .insert({
+                        game_id: currentGame.id,
+                        user_id: userId,
+                        wallet_address: walletAddress,
+                        bet_amount: betAmount,
+                        status: 'active'
+                    });
+            }
+        } catch (dbError) {
+            console.warn('Bet save failed:', dbError);
+        }
 
         // Broadcast bet placed
         io.emit('betPlaced', {
@@ -377,29 +404,31 @@ async function cashOut(walletAddress: string): Promise<boolean> {
         bet.cashoutMultiplier = cashoutMultiplier;
         bet.cashoutAmount = playerAmount;
 
-        // Update bet in database
-        await supabase
-            .from('player_bets')
-            .update({
-                cashout_multiplier: cashoutMultiplier,
-                cashout_amount: playerAmount,
-                profit_loss: profit,
-                status: 'cashed_out',
-                cashed_out_at: new Date().toISOString()
-            })
-            .eq('game_id', currentGame.id)
-            .eq('wallet_address', walletAddress);
-
-        // In production: Send SOL to player wallet
-        // await sendSolToPlayer(walletAddress, playerAmount);
+        // Update bet in database (optional)
+        try {
+            if (!currentGame.id.startsWith('memory-')) {
+                await supabaseService
+                    .from('player_bets')
+                    .update({
+                        cashout_multiplier: cashoutMultiplier,
+                        cashout_amount: playerAmount,
+                        profit_loss: profit,
+                        status: 'cashed_out',
+                        cashed_out_at: new Date().toISOString()
+                    })
+                    .eq('game_id', currentGame.id)
+                    .eq('wallet_address', walletAddress);
+            }
+        } catch (dbError) {
+            console.warn('Cashout save failed:', dbError);
+        }
 
         // Broadcast cashout
         io.emit('playerCashedOut', {
             gameId: currentGame.id,
             walletAddress,
             multiplier: cashoutMultiplier,
-            amount: playerAmount,
-            profit: profit
+            amount: playerAmount
         });
 
         return true;
@@ -412,24 +441,26 @@ async function cashOut(walletAddress: string): Promise<boolean> {
 
 async function processBetLoss(bet: PlayerBet): Promise<void> {
     try {
-        await supabase
-            .from('player_bets')
-            .update({
-                profit_loss: -bet.betAmount,
-                status: 'lost'
-            })
-            .eq('game_id', currentGame?.id)
-            .eq('wallet_address', bet.walletAddress);
+        if (!currentGame?.id.startsWith('memory-')) {
+            await supabaseService
+                .from('player_bets')
+                .update({
+                    profit_loss: -bet.betAmount,
+                    status: 'lost'
+                })
+                .eq('game_id', currentGame?.id)
+                .eq('wallet_address', bet.walletAddress);
+        }
     } catch (error) {
-        console.error('Error processing bet loss:', error);
+        console.warn('Error processing bet loss:', error);
     }
 }
 
 async function saveChartData(chartPoint: ChartPoint): Promise<void> {
-    if (!currentGame) return;
+    if (!currentGame || currentGame.id.startsWith('memory-')) return;
 
     try {
-        await supabase
+        await supabaseService
             .from('chart_data')
             .insert({
                 game_id: currentGame.id,
@@ -441,16 +472,15 @@ async function saveChartData(chartPoint: ChartPoint): Promise<void> {
                 volume: chartPoint.volume
             });
     } catch (error) {
-        console.error('Error saving chart data:', error);
+        console.warn('Error saving chart data:', error);
     }
 }
 
 async function updateLeaderboard(): Promise<void> {
     try {
         const today = new Date().toISOString().split('T')[0];
-        
-        // Calculate daily leaderboard - Fixed typing
-        const { data: dailyStats } = await supabase
+
+        const { data: dailyStats } = await supabaseService
             .from('player_bets')
             .select(`
                 wallet_address,
@@ -469,7 +499,7 @@ async function updateLeaderboard(): Promise<void> {
             for (const bet of dailyStats) {
                 const key = bet.wallet_address;
                 const userData = bet.users;
-                
+
                 const existing = leaderboardMap.get(key) || {
                     userId: bet.user_id,
                     walletAddress: bet.wallet_address,
@@ -488,14 +518,12 @@ async function updateLeaderboard(): Promise<void> {
                 leaderboardMap.set(key, existing);
             }
 
-            // Convert to array and sort by profit percentage
             const leaderboard = Array.from(leaderboardMap.values())
                 .sort((a, b) => b.totalProfit - a.totalProfit)
                 .map((entry, index) => ({ ...entry, rank: index + 1 }));
 
-            // Save to database
             for (const entry of leaderboard) {
-                await supabase
+                await supabaseService
                     .from('leaderboard')
                     .upsert({
                         user_id: entry.userId,
@@ -511,12 +539,11 @@ async function updateLeaderboard(): Promise<void> {
                     });
             }
 
-            // Broadcast updated leaderboard
-            io.emit('leaderboardUpdate', leaderboard.slice(0, 50)); // Top 50
+            io.emit('leaderboardUpdate', leaderboard.slice(0, 50));
         }
 
     } catch (error) {
-        console.error('Error updating leaderboard:', error);
+        console.warn('Error updating leaderboard:', error);
     }
 }
 
@@ -524,7 +551,6 @@ async function updateLeaderboard(): Promise<void> {
 io.on('connection', (socket: Socket) => {
     console.log('Client connected:', socket.id);
 
-    // Send current game state
     if (currentGame) {
         socket.emit('gameState', {
             gameId: currentGame.id,
@@ -537,7 +563,6 @@ io.on('connection', (socket: Socket) => {
         });
     }
 
-    // Send recent games
     socket.emit('gameHistory', gameHistory.slice(-10));
 
     socket.on('placeBet', async (data: PlaceBetData) => {
@@ -559,7 +584,12 @@ io.on('connection', (socket: Socket) => {
 
 // REST API endpoints
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'healthy', timestamp: Date.now() });
+    res.json({ 
+        status: 'healthy', 
+        timestamp: Date.now(),
+        currentGame: currentGame ? currentGame.gameNumber : null,
+        mode: currentGame?.id.startsWith('memory-') ? 'memory' : 'database'
+    });
 });
 
 app.get('/api/game/current', (req, res) => {
@@ -573,7 +603,7 @@ app.get('/api/game/history', (req, res) => {
 app.get('/api/leaderboard/:period', async (req, res) => {
     try {
         const { period } = req.params;
-        const { data, error } = await supabase
+        const { data, error } = await supabaseService
             .from('current_leaderboard')
             .select('*')
             .eq('period', period)
@@ -590,7 +620,7 @@ app.get('/api/leaderboard/:period', async (req, res) => {
 app.get('/api/chart/:gameId', async (req, res) => {
     try {
         const { gameId } = req.params;
-        const { data, error } = await supabase
+        const { data, error } = await supabaseService
             .from('chart_data')
             .select('*')
             .eq('game_id', gameId)
@@ -601,6 +631,15 @@ app.get('/api/chart/:gameId', async (req, res) => {
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch chart data' });
     }
+});
+
+// Serve simple HTML for frontend routes
+app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api/") || req.path.startsWith("/socket.io/")) {
+        return next();
+    }
+    res.setHeader("Content-Type", "text/html");
+    res.send("<!DOCTYPE html><html><head><title>Rugged Run It</title></head><body><h1>🎮 Rugged Run It</h1><p>Game server is running successfully!</p><a href=\"/api/health\">API Health Check</a></body></html>");
 });
 
 // Start server

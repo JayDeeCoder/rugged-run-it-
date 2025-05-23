@@ -7,17 +7,19 @@ RUN apk add --no-cache curl
 WORKDIR /app
 
 # Copy package files
-COPY package.json ./
+COPY package*.json ./
 
-# Install dependencies
-RUN npm install --only=production
+# Install ALL dependencies first
+RUN npm ci
 
 # Copy source code
 COPY . .
 
-# Install TypeScript globally and build
-RUN npm install -g typescript
-RUN npx tsc --target ES2022 --module commonjs --outDir dist --rootDir . *.ts || echo "Build completed"
+# Build the TypeScript code
+RUN npm run build || npx tsc --target ES2022 --module commonjs --outDir dist --rootDir . *.ts
+
+# Remove dev dependencies after build (optional)
+RUN npm prune --production
 
 # Expose port
 EXPOSE 3002

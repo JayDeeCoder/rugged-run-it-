@@ -6,10 +6,10 @@ RUN apk add --no-cache curl
 # Create app directory
 WORKDIR /app
 
-# Copy package files (include package-lock.json for consistent installs)
+# Copy package files
 COPY package*.json ./
 
-# Install ALL dependencies first (needed for build process)
+# Install ALL dependencies first
 RUN npm ci
 
 # Copy source code
@@ -18,7 +18,7 @@ COPY . .
 # Build the TypeScript code
 RUN npm run build || npx tsc --target ES2022 --module commonjs --outDir dist --rootDir . *.ts
 
-# Remove dev dependencies after build (optional optimization)
+# Remove dev dependencies after build (optional)
 RUN npm prune --production
 
 # Expose port

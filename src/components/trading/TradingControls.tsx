@@ -4,56 +4,63 @@ import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon } 
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import useLocalStorage from '../../hooks/useLocalStorage';
 import Button from '../common/Button';
-import { UserContext } from '../../context/UserContext';
-import { TradeContext } from '../../context/TradeContext';
-import { addPlayerBet } from '../../utils/gameDataGenerator';
-import { useTokenContext, TokenType } from '../../context/TokenContext';
-import { useEmbeddedGameWallet } from '../../hooks/useEmbeddedGameWallet';
+import { useGameSocket } from '../../hooks/useGameSocket';
+import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 
 // Import from barrel file instead of direct imports
 import { AirdropModal, DepositModal, WithdrawModal } from './index';
 
+// Define TokenType locally if not available
+export enum TokenType {
+  SOL = 'SOL',
+  RUGGED = 'RUGGED'
+}
+
 interface TradingControlsProps {
-  onBuy: (amount: number) => void;
-  onSell: (percentage: number) => void;
+  onBuy?: (amount: number) => void;
+  onSell?: (percentage: number) => void;
   isPlacingBet?: boolean;
   isCashingOut?: boolean;
   hasActiveGame?: boolean;
-  walletBalance: number;
-  holdings: number;
-  currentMultiplier: number;
-  isGameActive: boolean;
+  walletBalance?: number;
+  holdings?: number;
+  currentMultiplier?: number;
+  isGameActive?: boolean;
   isMobile?: boolean;
 }
 
 const TradingControls: FC<TradingControlsProps> = ({ 
   onBuy, 
   onSell, 
-  isPlacingBet = false, 
-  isCashingOut = false,
-  hasActiveGame = false,
-  walletBalance = 0,
-  holdings = 0,
-  currentMultiplier = 1.0,
-  isGameActive = true,
+  isPlacingBet: propIsPlacingBet = false, 
+  isCashingOut: propIsCashingOut = false,
+  hasActiveGame: propHasActiveGame = false,
+  walletBalance: propWalletBalance = 0,
+  holdings: propHoldings = 0,
+  currentMultiplier: propCurrentMultiplier = 1.0,
+  isGameActive: propIsGameActive = true,
   isMobile = false
 }) => {
-  // Get token context
-  const { 
-    currentToken, 
-    setCurrentToken, 
-    solBalance, 
-    ruggedBalance 
-  } = useTokenContext();
-  
-  // Use embedded game wallet instead of regular wallet
-  const { authenticated } = usePrivy();
+  // Authentication and wallet setup
+  const { authenticated, user } = usePrivy();
   const { wallets } = useSolanaWallets();
-  const { wallet: gameWallet, walletData } = useEmbeddedGameWallet();
+  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
+  const walletAddress = embeddedWallet?.address || '';
   
-  // Check if wallet is ready using the game wallet data
-  const isWalletReady = authenticated && gameWallet !== undefined;
+  // State for user ID
+  const [userId, setUserId] = useState<string | null>(null);
+  
+  // Real game server connection
+  const { currentGame, isConnected, placeBet, cashOut } = useGameSocket(walletAddress, userId || undefined);
+  
+  // Token context - simplified for crash game
+  const [currentToken, setCurrentToken] = useState<TokenType>(TokenType.SOL);
+  const [solBalance, setSolBalance] = useState<number>(propWalletBalance);
+  const [ruggedBalance, setRuggedBalance] = useState<number>(1000); // Default RUGGED balance
+  
+  // Check if wallet is ready
+  const isWalletReady = authenticated && walletAddress !== '';
 
   // Use localStorage to remember user's preferred amount
   const [savedAmount, setSavedAmount] = useLocalStorage<string>('default-bet-amount', '0.01');
@@ -65,14 +72,40 @@ const TradingControls: FC<TradingControlsProps> = ({
   const [showAirdropModal, setShowAirdropModal] = useState<boolean>(false);
   const [showDepositModal, setShowDepositModal] = useState<boolean>(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState<boolean>(false);
-  // Use localStorage for auto cashout settings to persist preferences
+  
+  // Auto cashout settings
   const [autoCashoutEnabled, setAutoCashoutEnabled] = useLocalStorage<boolean>('auto-cashout-enabled', true);
   const [autoCashoutValue, setAutoCashoutValue] = useLocalStorage<string>('auto-cashout-value', '2.0');
   const [showAutoCashout, setShowAutoCashout] = useState<boolean>(false);
   
-  // Get context information (for backward compatibility)
-  const { currentUser, isAuthenticated } = useContext(UserContext);
-  const { placeOrder } = useContext(TradeContext);
+  // Real game state from server
+  const [isPlacingBet, setIsPlacingBet] = useState<boolean>(false);
+  const [isCashingOut, setIsCashingOut] = useState<boolean>(false);
+  const [hasActiveBet, setHasActiveBet] = useState<boolean>(false);
+  
+  // Use real game data when available, fall back to props
+  const activeCurrentGame = currentGame;
+  const activeIsGameActive = activeCurrentGame?.status === 'active' || propIsGameActive;
+  const activeCurrentMultiplier = activeCurrentGame?.multiplier || propCurrentMultiplier;
+  const activeHasActiveGame = hasActiveBet || propHasActiveGame;
+  const activeHoldings = propHoldings; // This would come from bet tracking
+
+  // Get or create user when wallet connects
+  useEffect(() => {
+    if (authenticated && walletAddress) {
+      const initUser = async () => {
+        try {
+          const userData = await UserAPI.getUserOrCreate(walletAddress);
+          if (userData) {
+            setUserId(userData.id);
+          }
+        } catch (error) {
+          console.warn('Could not get user data:', error);
+        }
+      };
+      initUser();
+    }
+  }, [authenticated, walletAddress]);
 
   // Update local amount state when saved amount changes
   useEffect(() => {
@@ -85,24 +118,43 @@ const TradingControls: FC<TradingControlsProps> = ({
   };
 
   // Handle automatic cashout with useCallback to prevent dependency issues
-  const handleCashout = useCallback(() => {
-    onSell(100);
-  }, [onSell]);
+  const handleCashout = useCallback(async () => {
+    if (!authenticated || !walletAddress || !isConnected || !hasActiveBet) {
+      return;
+    }
+
+    setIsCashingOut(true);
+    try {
+      const success = await cashOut(walletAddress);
+      if (success) {
+        setHasActiveBet(false);
+        toast.success('Cashed out successfully!');
+        if (onSell) onSell(100);
+      } else {
+        toast.error('Failed to cash out');
+      }
+    } catch (error) {
+      console.error('Error cashing out:', error);
+      toast.error('Failed to cash out');
+    } finally {
+      setIsCashingOut(false);
+    }
+  }, [authenticated, walletAddress, isConnected, hasActiveBet, cashOut, onSell]);
 
   // Auto cashout effect - using useEffect with the correct dependencies
   useEffect(() => {
     // Only trigger auto cashout when all conditions are met
     if (
-      hasActiveGame && 
-      isGameActive && 
+      activeHasActiveGame && 
+      activeIsGameActive && 
       autoCashoutEnabled && 
       parseFloat(autoCashoutValue) > 0 &&
-      currentMultiplier >= parseFloat(autoCashoutValue)
+      activeCurrentMultiplier >= parseFloat(autoCashoutValue)
     ) {
-      console.log('Auto cashout triggered at', currentMultiplier, 'x');
+      console.log('Auto cashout triggered at', activeCurrentMultiplier, 'x');
       handleCashout();
     }
-  }, [currentMultiplier, autoCashoutEnabled, autoCashoutValue, hasActiveGame, isGameActive, handleCashout]);
+  }, [activeCurrentMultiplier, autoCashoutEnabled, autoCashoutValue, activeHasActiveGame, activeIsGameActive, handleCashout]);
 
   // Handle amount change
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -134,9 +186,9 @@ const TradingControls: FC<TradingControlsProps> = ({
       setSellAmount(value);
       
       // Update the percentage based on the entered amount (if game is active)
-      if (value !== '' && hasActiveGame && holdings > 0) {
+      if (value !== '' && activeHasActiveGame && activeHoldings > 0) {
         const parsedValue = parseFloat(value);
-        const maxCashout = holdings; // Assuming holdings represents what can be cashed out
+        const maxCashout = activeHoldings; // Assuming holdings represents what can be cashed out
         if (!isNaN(parsedValue) && maxCashout > 0) {
           const calculatedPercentage = Math.min((parsedValue / maxCashout) * 100, 100);
           setSellPercentage(Math.round(calculatedPercentage));
@@ -179,46 +231,74 @@ const TradingControls: FC<TradingControlsProps> = ({
     setSellPercentage(percentage);
     
     // Update sell amount based on percentage
-    if (hasActiveGame && holdings > 0) {
-      const calculatedAmount = (holdings * percentage / 100).toFixed(
+    if (activeHasActiveGame && activeHoldings > 0) {
+      const calculatedAmount = (activeHoldings * percentage / 100).toFixed(
         currentToken === TokenType.SOL ? 6 : 0
       );
       setSellAmount(calculatedAmount);
     }
   };
 
-  // Handle buy button click - updated to use the embedded wallet
-  const handleBuy = () => {
+  // Handle buy button click - Real server integration
+  const handleBuy = async () => {
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum) || amountNum <= 0) {
-      console.log('Invalid amount');
+      toast.error('Invalid amount');
       return;
     }
     
-    // Check for embedded wallet first
-    if (!isWalletReady) {
+    // Check for wallet readiness
+    if (!isWalletReady || !isConnected) {
       toast.error('Please login to play');
       return;
     }
     
-    // Show effect
-    setIsSuccess(true);
-    setShowEffect(true);
-    setTimeout(() => setShowEffect(false), 1000);
-    
-    // Call the buy function
-    onBuy(amountNum);
+    // Check if game is active
+    if (!activeIsGameActive) {
+      toast.error('Game is not active');
+      return;
+    }
+
+    // Check balance
+    if (amountNum > activeBalance) {
+      toast.error('Insufficient balance');
+      return;
+    }
+
+    setIsPlacingBet(true);
+    try {
+      const success = await placeBet(walletAddress, amountNum, userId || undefined);
+      if (success) {
+        setHasActiveBet(true);
+        toast.success(`Bet placed: ${amountNum} SOL`);
+        
+        // Show effect
+        setIsSuccess(true);
+        setShowEffect(true);
+        setTimeout(() => setShowEffect(false), 1000);
+        
+        // Call the buy function if provided
+        if (onBuy) onBuy(amountNum);
+      } else {
+        toast.error('Failed to place bet');
+      }
+    } catch (error) {
+      console.error('Error placing bet:', error);
+      toast.error('Failed to place bet');
+    } finally {
+      setIsPlacingBet(false);
+    }
   };
 
-  // Handle sell button click
-  const handleSell = () => {
+  // Handle sell button click - Real server integration
+  const handleSell = async () => {
     if (isNaN(sellPercentage) || sellPercentage <= 0) {
-      console.log('Invalid percentage');
+      toast.error('Invalid percentage');
       return;
     }
     
-    // Call the sell function
-    onSell(sellPercentage);
+    // For crash games, we typically cash out 100%
+    await handleCashout();
   };
 
   // Format token balance with appropriate precision
@@ -231,13 +311,37 @@ const TradingControls: FC<TradingControlsProps> = ({
     }
   };
 
-  // Get the active balance based on wallet data
-  const activeBalance = currentToken === TokenType.SOL ? 
-    (walletData.isConnected ? parseFloat(walletData.balance) : solBalance) : 
-    ruggedBalance;
+  // Get the active balance
+  const activeBalance = currentToken === TokenType.SOL ? solBalance : ruggedBalance;
 
   return (
     <div className="bg-[#0d0d0f] text-white grid grid-cols-1 gap-3 p-4 relative border border-gray-800 rounded-lg">
+      {/* Connection Status */}
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-gray-400">Connection:</span>
+        <span className={`px-2 py-1 rounded text-xs ${isConnected ? 'bg-green-600' : 'bg-red-600'}`}>
+          {isConnected ? 'Connected' : 'Disconnected'}
+        </span>
+      </div>
+
+      {/* Game Info */}
+      {activeCurrentGame && (
+        <div className="bg-gray-800 p-3 rounded-md mb-4">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-gray-400">Game #{activeCurrentGame.gameNumber}</span>
+            <span className="text-yellow-400 font-bold">{activeCurrentGame.multiplier.toFixed(2)}x</span>
+          </div>
+          <div className="flex justify-between items-center text-sm">
+            <span className="text-gray-400">Total Bets:</span>
+            <span className="text-white">{activeCurrentGame.totalBets.toFixed(3)} SOL</span>
+          </div>
+          <div className="flex justify-between items-center text-sm">
+            <span className="text-gray-400">Players:</span>
+            <span className="text-white">{activeCurrentGame.totalPlayers}</span>
+          </div>
+        </div>
+      )}
+
       {/* Token Switcher */}
       <div className="flex items-center justify-between bg-gray-800 hover:bg-gray-700 transition-colors rounded-lg p-2 cursor-pointer mb-2">
         <div 
@@ -385,7 +489,7 @@ const TradingControls: FC<TradingControlsProps> = ({
                   onChange={handleAutoCashoutValueChange}
                   className="flex-1 bg-gray-700 text-white px-3 py-1 rounded-l-md focus:outline-none"
                   placeholder="2.00"
-                  disabled={!autoCashoutEnabled || !isGameActive}
+                  disabled={!autoCashoutEnabled || !activeIsGameActive}
                 />
                 <span className="bg-gray-600 text-gray-300 px-3 py-1 rounded-r-md">x</span>
               </div>
@@ -401,7 +505,7 @@ const TradingControls: FC<TradingControlsProps> = ({
                       ? 'bg-green-600 text-white'
                       : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   }`}
-                  disabled={!autoCashoutEnabled || !isGameActive}
+                  disabled={!autoCashoutEnabled || !activeIsGameActive}
                 >
                   {value.toFixed(1)}x
                 </button>
@@ -427,19 +531,19 @@ const TradingControls: FC<TradingControlsProps> = ({
               onChange={handleAmountChange}
               className="flex-1 bg-gray-800 text-white px-3 py-1 rounded-l-md focus:outline-none"
               placeholder="0.00"
-              disabled={!isGameActive}
+              disabled={!activeIsGameActive || hasActiveBet}
             />
             <button
               onClick={() => setQuickAmount(activeBalance * 0.5)}
               className="bg-gray-700 text-gray-300 px-2 text-xs border-l border-gray-900"
-              disabled={!isGameActive}
+              disabled={!activeIsGameActive || hasActiveBet}
             >
               Half
             </button>
             <button
               onClick={() => setQuickAmount(activeBalance)}
               className="bg-gray-700 text-gray-300 px-2 text-xs rounded-r-md"
-              disabled={!isGameActive}
+              disabled={!activeIsGameActive || hasActiveBet}
             >
               Max
             </button>
@@ -457,7 +561,7 @@ const TradingControls: FC<TradingControlsProps> = ({
                   ? 'bg-green-600 text-white'
                   : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
               }`}
-              disabled={!isGameActive}
+              disabled={!activeIsGameActive || hasActiveBet}
             >
               {amt.toString()} {currentToken}
             </button>
@@ -465,150 +569,64 @@ const TradingControls: FC<TradingControlsProps> = ({
         </div>
         
         {/* Buy Button */}
-        <button
-          onClick={handleBuy}
-          disabled={isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !isGameActive || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0}
-          className={`w-full py-2 rounded-md font-bold mb-2 flex items-center justify-center ${
-            isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !isGameActive || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0
-              ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-              : 'bg-green-600 hover:bg-green-700 text-white'
-          }`}
-        >
-          {isPlacingBet ? (
-            <>
-              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
-              Placing Bet...
-            </>
-          ) : (
-            <>
-              <Coins className="mr-2 h-5 w-5" />
-              Place Bet
-            </>
-          )}
-        </button>
+        {!hasActiveBet ? (
+          <button
+            onClick={handleBuy}
+            disabled={isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !activeIsGameActive || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0}
+            className={`w-full py-2 rounded-md font-bold mb-2 flex items-center justify-center ${
+              isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !activeIsGameActive || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0
+                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-green-600 hover:bg-green-700 text-white'
+            }`}
+          >
+            {isPlacingBet ? (
+              <>
+                <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                Placing Bet...
+              </>
+            ) : (
+              <>
+                <Coins className="mr-2 h-5 w-5" />
+                Place Bet
+              </>
+            )}
+          </button>
+        ) : (
+          <button
+            onClick={handleSell}
+            disabled={isCashingOut || !isConnected || !activeIsGameActive}
+            className={`w-full py-2 rounded-md font-bold mb-2 flex items-center justify-center ${
+              isCashingOut || !isConnected || !activeIsGameActive
+                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-yellow-600 hover:bg-yellow-700 text-white'
+            }`}
+          >
+            {isCashingOut ? (
+              <>
+                <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                Cashing Out...
+              </>
+            ) : (
+              <>
+                <Sparkles className="mr-2 h-5 w-5" />
+                Cash Out ({activeCurrentMultiplier.toFixed(2)}x)
+              </>
+            )}
+          </button>
+        )}
       </div>
       
-      {/* CASHOUT SECTION */}
-      <div className="border-t border-gray-800 pt-3">
-        <h3 className="text-sm font-bold text-gray-400 mb-2">CASH OUT</h3>
-        
-        {/* Sell Amount Input */}
-        <div className="mb-2">
-          <label className="block text-gray-400 text-xs mb-1">
-            Cash Out Amount ({currentToken})
-          </label>
-          <div className="flex">
-            <input
-              type="text"
-              value={sellAmount}
-              onChange={handleSellAmountChange}
-              className="flex-1 bg-gray-800 text-white px-3 py-1 rounded-l-md focus:outline-none"
-              placeholder="0.00"
-              disabled={!hasActiveGame || !isGameActive}
-            />
-            <button
-              onClick={() => handleSetSellPercentage(50)}
-              className="bg-gray-700 text-gray-300 px-2 text-xs border-l border-gray-900"
-              disabled={!hasActiveGame || !isGameActive}
-            >
-              Half
-            </button>
-            <button
-              onClick={() => handleSetSellPercentage(100)}
-              className="bg-gray-700 text-gray-300 px-2 text-xs rounded-r-md"
-              disabled={!hasActiveGame || !isGameActive}
-            >
-              Max
-            </button>
-          </div>
-        </div>
-        
-        {/* Sell Percentage Options */}
-        <div className="mb-3">
-          <label className="block text-gray-400 text-xs mb-1">
-            Cash Out Percentage
-          </label>
-          <div className="grid grid-cols-4 gap-2">
-            <button
-              onClick={() => handleSetSellPercentage(25)}
-              className={`px-2 py-1 text-xs rounded-md ${
-                sellPercentage === 25
-                  ? 'bg-yellow-600 text-white'
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-              disabled={!hasActiveGame || !isGameActive}
-            >
-              25%
-            </button>
-            <button
-              onClick={() => handleSetSellPercentage(50)}
-              className={`px-2 py-1 text-xs rounded-md ${
-                sellPercentage === 50
-                  ? 'bg-yellow-600 text-white'
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-              disabled={!hasActiveGame || !isGameActive}
-            >
-              50%
-            </button>
-            <button
-              onClick={() => handleSetSellPercentage(75)}
-              className={`px-2 py-1 text-xs rounded-md ${
-                sellPercentage === 75
-                  ? 'bg-yellow-600 text-white'
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-              disabled={!hasActiveGame || !isGameActive}
-            >
-              75%
-            </button>
-            <button
-              onClick={() => handleSetSellPercentage(100)}
-              className={`px-2 py-1 text-xs rounded-md ${
-                sellPercentage === 100
-                  ? 'bg-yellow-600 text-white'
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-              disabled={!hasActiveGame || !isGameActive}
-            >
-              100%
-            </button>
-          </div>
-        </div>
-        
-        {/* Potential profit display */}
-        {hasActiveGame && (
-          <div className="bg-gray-800 p-2 rounded-md text-center mb-3">
-            <span className="text-xs text-gray-400">Potential profit at current multiplier:</span>
-            <div className="text-lg font-bold text-yellow-400">
-              +{((holdings * sellPercentage / 100) * (currentMultiplier - 1)).toFixed(currentToken === TokenType.SOL ? 3 : 0)} {currentToken}
+      {/* Active Bet Display */}
+      {hasActiveBet && (
+        <div className="bg-blue-900 bg-opacity-30 p-3 rounded-md mb-2">
+          <div className="text-center">
+            <div className="text-sm text-blue-400">Potential Win</div>
+            <div className="text-lg font-bold text-blue-300">
+              {(parseFloat(amount) * activeCurrentMultiplier).toFixed(3)} SOL
             </div>
           </div>
-        )}
-        
-        {/* Sell Button */}
-        <button
-          onClick={handleSell}
-          disabled={isCashingOut || !isWalletReady || holdings <= 0 || !hasActiveGame || !isGameActive || sellPercentage <= 0}
-          className={`w-full py-2 rounded-md font-bold flex items-center justify-center ${
-            isCashingOut || !isWalletReady || holdings <= 0 || !hasActiveGame || !isGameActive || sellPercentage <= 0
-              ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-              : 'bg-yellow-600 hover:bg-yellow-700 text-white'
-          }`}
-        >
-          {isCashingOut ? (
-            <>
-              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
-              Cashing Out...
-            </>
-          ) : (
-            <>
-              <Sparkles className="mr-2 h-5 w-5" />
-              Cash Out
-            </>
-          )}
-        </button>
-      </div>
+        </div>
+      )}
       
       {/* Warning messages */}
       <div className="mt-1">
@@ -620,6 +638,14 @@ const TradingControls: FC<TradingControlsProps> = ({
           </div>
         )}
         
+        {/* Connection warning */}
+        {isWalletReady && !isConnected && (
+          <div className="text-red-500 text-xs flex items-center">
+            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
+            <span>Connecting to game server...</span>
+          </div>
+        )}
+        
         {/* Insufficient funds warning */}
         {isWalletReady && parseFloat(amount) > activeBalance && (
           <div className="text-red-500 text-xs flex items-center">
@@ -628,16 +654,8 @@ const TradingControls: FC<TradingControlsProps> = ({
           </div>
         )}
         
-        {/* No holdings warning */}
-        {isWalletReady && holdings <= 0 && hasActiveGame && (
-          <div className="text-yellow-500 text-xs flex items-center">
-            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
-            <span>No holdings to sell</span>
-          </div>
-        )}
-        
         {/* Game paused warning */}
-        {!isGameActive && (
+        {!activeIsGameActive && (
           <div className="text-red-500 text-xs flex items-center">
             <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
             <span>Game paused. Waiting for next round.</span>
@@ -655,16 +673,14 @@ const TradingControls: FC<TradingControlsProps> = ({
         isOpen={showDepositModal}
         onClose={() => setShowDepositModal(false)}
         currentToken={currentToken}
-        walletAddress={walletData.address || ''}
+        walletAddress={walletAddress}
       />
       
       <WithdrawModal 
         isOpen={showWithdrawModal}
         onClose={() => setShowWithdrawModal(false)}
         currentToken={currentToken}
-        balance={currentToken === TokenType.SOL ? 
-          (walletData.isConnected ? parseFloat(walletData.balance) : solBalance) : 
-          ruggedBalance}
+        balance={activeBalance}
       />
     </div>
   );

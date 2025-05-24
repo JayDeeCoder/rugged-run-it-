@@ -12,4 +12,4 @@ startCommand = "npm start"
 
 [services.variables]
 NODE_ENV = "production"
-PORT = "3001"
+PORT = "3002"

@@ -27,11 +27,11 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   const [gameResults, setGameResults] = useState<GameResult[]>([]);
   const [isPlacingBet, setIsPlacingBet] = useState<boolean>(false);
   const [isCashingOut, setIsCashingOut] = useState<boolean>(false);
+  const [countdownSeconds, setCountdownSeconds] = useState<number>(0);
   
-  // Local bet tracking since server doesn't provide userGameState
+  // Local bet tracking (since server doesn't provide userGameState yet)
   const [userBet, setUserBet] = useState<number>(0);
   const [betPlacedAt, setBetPlacedAt] = useState<number | null>(null);
-  const [countdownSeconds, setCountdownSeconds] = useState<number>(0);
   
   // Create a reference to the chart container
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -50,7 +50,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   const walletAddress = embeddedWallet?.address || '';
   
-  // Connect to real game server with current implementation
+  // Connect to real game server (current implementation)
   const { currentGame, isConnected, placeBet, cashOut } = useGameSocket(walletAddress, currentUser?.id);
 
   const isMobile = width ? width < 768 : false;
@@ -132,7 +132,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     }
   }, [trades]);
 
-  // Handle real game state changes with current GameState interface
+  // Handle real game state changes (current implementation)
   useEffect(() => {
     if (!currentGame || !isMountedRef.current) return;
 
@@ -181,11 +181,23 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     }
   }, [countdownSeconds]);
 
-  // Handle effect completion
+  // ✨ Handle effect completion - RESTORED
   const handleEffectComplete = () => {
     if (isMountedRef.current) {
       setTriggerSellEffect(false);
     }
+  };
+
+  // ✨ Handle multiplier updates from chart - RESTORED  
+  const handleMultiplierUpdate = (multiplier: number) => {
+    // This will be called by the CandlestickChart for visual effects
+    // The real multiplier comes from the server via currentGame.multiplier
+  };
+
+  // ✨ Handle game crash for visual effects - RESTORED
+  const handleGameCrash = (crashMultiplier: number) => {
+    // This handles the visual crash effects from the chart
+    console.log(`Visual crash effect triggered at ${crashMultiplier.toFixed(2)}x`);
   };
 
   // Handle placing a bet using current server API
@@ -275,7 +287,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         
         setGameResults(prev => [newResult, ...prev.slice(0, 49)]);
         
-        // Show win effect
+        // ✨ Show win effect - RESTORED
         setSellSuccess(true);
         setTriggerSellEffect(true);
         
@@ -412,14 +424,23 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
           className={`${isMobile ? '' : 'md:col-span-3'} relative flex flex-col`}
           style={{ height: `${getChartHeight()}px` }}
         >
+          {/* ✨ RESTORED: All the original props for visual effects */}
           <CandlestickChart 
-            onMultiplierUpdate={() => {}} // Multiplier comes from real server now
-            onGameCrash={() => {}} // Handled by real server events
+            onMultiplierUpdate={handleMultiplierUpdate}
+            triggerSellEffect={triggerSellEffect}
+            onEffectComplete={handleEffectComplete}
+            onGameCrash={handleGameCrash}
             currentBet={userBet}
             betPlacedAt={betPlacedAt ?? undefined}
             height={getChartHeight()}
+            useMobileHeight={useMobileHeight}
+            // Pass real server data to sync visual effects
+            serverMultiplier={currentMultiplier}
+            serverGameStatus={gameStatus}
+            isServerConnected={isConnected}
           />
 
+          {/* ✨ RESTORED: SellEffects component */}
           {triggerSellEffect && (
             <SellEffects 
               isWin={sellSuccess} 

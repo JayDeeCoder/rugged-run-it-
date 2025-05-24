@@ -1,30 +1,29 @@
 import { FC, useEffect, useState, useMemo, useCallback, useContext, useRef } from 'react';
-import { useGameSocket } from '../../hooks/useGameSocket';
-import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
+import { Candle } from '../../types/trade';
+import {
+  createInitialTradingState,
+  generateCandle,
+} from '../../utils/gameDataGenerator';
 import { UserContext } from '../../context/UserContext';
-
-// Simplified Candle interface for real server data
-interface Candle {
-  timestamp: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
 
 interface CandlestickChartProps {
   height?: number;
   currency?: string;
   maxCandles?: number;
   onMultiplierUpdate?: (multiplier: number) => void;
+  triggerSellEffect?: boolean;
+  onEffectComplete?: () => void;
   onGameCrash?: (crashMultiplier: number) => void;
   currentBet?: number;
   betPlacedAt?: number;
   useMobileHeight?: boolean;
+  // ✨ NEW: Real server data props
+  serverMultiplier?: number;
+  serverGameStatus?: 'waiting' | 'active' | 'crashed';
+  isServerConnected?: boolean;
 }
 
-// Helper function for chart scaling
+// Helper functions for chart scaling and rendering
 const calculateYScale = (candles: Candle[], currentMultiplier: number) => {
   if (candles.length === 0) {
     return { min: 0.5, max: Math.max(currentMultiplier * 1.2, 2.0) };
@@ -38,14 +37,43 @@ const calculateYScale = (candles: Candle[], currentMultiplier: number) => {
   const maxValue = Math.max(...allValues);
   const minValue = Math.min(...allValues);
   
-  const padding = 0.2;
-  const max = maxValue * (1 + padding);
-  const min = Math.max(minValue * (1 - padding), 0.5);
+  // Smart scaling to keep older candlesticks visible
+  let min, max;
+  
+  if (maxValue <= 10) {
+    // Low multipliers: use standard scaling
+    const padding = 0.2;
+    max = maxValue * (1 + padding);
+    min = Math.max(minValue * (1 - padding), 0.5);
+  } else if (maxValue <= 50) {
+    // Medium-high multipliers: use progressive scaling
+    // Ensure minimum range covers at least first few multipliers
+    const minRange = Math.max(minValue * 0.7, 0.8);
+    const maxRange = maxValue * 1.15;
+    
+    // Keep at least 25% of chart for lower values
+    const chartRatio = 0.25;
+    const adjustedMin = Math.max(minRange, maxRange * chartRatio / 4);
+    
+    min = adjustedMin;
+    max = maxRange;
+  } else {
+    // Very high multipliers: logarithmic-style scaling
+    // Always reserve bottom 30% of chart for 1x-10x range
+    const baseRange = 10; // Always show up to 10x clearly
+    const chartReserveRatio = 0.3;
+    
+    // Calculate what 30% of max should be to fit baseRange
+    const scaledMax = baseRange / chartReserveRatio;
+    
+    min = 0.8;
+    max = Math.max(scaledMax, maxValue * 1.1);
+  }
   
   return { min, max };
 };
 
-// SVG Chart Component
+// SVG-based candle renderer component
 const CandlestickSVG: FC<{
   candles: Candle[], 
   width: number, 
@@ -64,7 +92,7 @@ const CandlestickSVG: FC<{
     return Math.min(Math.max(scaledY, padding), height - padding);
   }, [height, minValue, maxValue]);
   
-  // Dynamic candle width
+  // Dynamic candle width based on number of candles
   const chartMargin = 60;
   const availableWidth = width - chartMargin;
   const candleCount = Math.max(candles.length, 1);
@@ -134,24 +162,77 @@ const CandlestickSVG: FC<{
         </>
       )}
       
-      {/* Y-axis labels */}
-      {[0.2, 0.4, 0.6, 0.8, 1].map((ratio, i) => {
-        const yPos = height * ratio;
-        const priceValue = minValue + (maxValue - minValue) * (1 - ratio);
-        return (
-          <text 
-            key={`price-${i}`}
-            x={5} 
-            y={yPos - 5} 
-            fontSize={10} 
-            fill="rgba(255, 255, 255, 0.6)"
-          >
-            {priceValue.toFixed(2)}x
-          </text>
-        );
+      {/* Y-axis labels with dynamic scaling */}
+      {(() => {
+        const labelCount = 8; // More labels for better reference
+        const labels = [];
+        
+        for (let i = 0; i <= labelCount; i++) {
+          const ratio = i / labelCount;
+          const yPos = height * ratio;
+          const priceValue = minValue + (maxValue - minValue) * (1 - ratio);
+          
+          // Color code labels based on value ranges
+          let labelColor = 'rgba(255, 255, 255, 0.6)';
+          let labelWeight = 'normal';
+          
+          if (priceValue <= 1.1 && priceValue >= 0.9) {
+            labelColor = '#FFFFFF'; // White for 1x range
+            labelWeight = 'bold';
+          } else if (priceValue >= 2 && priceValue <= 10) {
+            labelColor = '#22D3EE'; // Cyan for early multipliers
+          } else if (priceValue > 10) {
+            labelColor = '#F97316'; // Orange for high multipliers
+          }
+          
+          labels.push(
+            <text 
+              key={`price-${i}`}
+              x={5} 
+              y={yPos + 4} 
+              fontSize={10} 
+              fontWeight={labelWeight}
+              fill={labelColor}
+            >
+              {priceValue >= 10 ? priceValue.toFixed(0) : priceValue.toFixed(2)}x
+            </text>
+          );
+        }
+        
+        return labels;
+      })()}
+      
+      {/* Special markers for key multiplier levels */}
+      {[2, 5, 10, 20, 50].map((multiplier) => {
+        if (multiplier >= minValue && multiplier <= maxValue) {
+          const yPos = height - ((multiplier - minValue) / (maxValue - minValue)) * height;
+          return (
+            <g key={`marker-${multiplier}`}>
+              <line 
+                x1={0} 
+                y1={yPos} 
+                x2={width} 
+                y2={yPos} 
+                stroke={multiplier <= 10 ? "rgba(34, 211, 238, 0.3)" : "rgba(249, 115, 22, 0.3)"} 
+                strokeWidth={1}
+                strokeDasharray="2,4"
+              />
+              <text 
+                x={width - 35} 
+                y={yPos - 3} 
+                fontSize={9} 
+                fontWeight="bold"
+                fill={multiplier <= 10 ? "#22D3EE" : "#F97316"}
+              >
+                {multiplier}x
+              </text>
+            </g>
+          );
+        }
+        return null;
       })}
       
-      {/* Candles - simplified representation of multiplier progression */}
+      {/* Candles */}
       {candles.map((candle, i) => {
         const x = startX + i * (candleWidth + spacing);
         const open = scaleY(candle.open);
@@ -159,8 +240,7 @@ const CandlestickSVG: FC<{
         const high = scaleY(candle.high);
         const low = scaleY(candle.low);
         
-        const isUp = candle.close > candle.open;
-        const fill = isUp ? '#4AFA9A' : '#E33F64';
+        const fill = candle.close > candle.open ? '#4AFA9A' : '#E33F64';
         
         return (
           <g key={`candle-${i}`}>
@@ -213,48 +293,53 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
   currency = 'SOL',
   maxCandles = 15,
   onMultiplierUpdate,
+  onEffectComplete,
   onGameCrash,
   currentBet = 0,
   betPlacedAt,
-  useMobileHeight = false
+  useMobileHeight = false,
+  // ✨ NEW: Server data props
+  serverMultiplier = 1.0,
+  serverGameStatus = 'waiting',
+  isServerConnected = false
 }) => {
-  // Refs and state
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [containerWidth, setContainerWidth] = useState<number>(0);
-  const [candleData, setCandleData] = useState<Candle[]>([]);
-  const [lastGameNumber, setLastGameNumber] = useState<number>(0);
-  const [milestoneEffects, setMilestoneEffects] = useState({
-    showEffect: false,
-    text: '',
-    color: '#FACC15'
-  });
-  const [lastMilestone, setLastMilestone] = useState<number>(0);
+  const gameStateRef = useRef(createInitialTradingState());
   
-  // Hooks
-  const { authenticated } = usePrivy();
-  const { wallets } = useSolanaWallets();
-  const { currentUser } = useContext(UserContext);
-  
-  // Get wallet address for game socket
-  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
-  const walletAddress = embeddedWallet?.address || '';
-  
-  // Connect to real game server
-  const { currentGame, isConnected } = useGameSocket(walletAddress, currentUser?.id);
-  
+  // Calculate chart height based on device
   const chartHeight = useMobileHeight ? 300 : height;
   
-  // Current multiplier from real server
-  const currentMultiplier = currentGame?.multiplier || 1.0;
-  const gameStatus = currentGame?.status || 'waiting';
+  const [containerWidth, setContainerWidth] = useState<number>(0);
+  const [candleData, setCandleData] = useState<Candle[]>([]);
+  const [lastServerMultiplier, setLastServerMultiplier] = useState<number>(1.0);
   
-  // Calculate Y-axis scale
+  // ✨ RESTORED: Visual effect states
+  const [isShaking, setIsShaking] = useState(false);
+  const [shakeIntensity, setShakeIntensity] = useState(0);
+  const [showExplosion, setShowExplosion] = useState(false);
+  const [explosionColor, setExplosionColor] = useState('rgba(251, 191, 36, 0.6)');
+  const [milestoneText, setMilestoneText] = useState('');
+  const [milestoneTextColor, setMilestoneTextColor] = useState('#FACC15');
+  const [milestoneOpacity, setMilestoneOpacity] = useState(0);
+  const [dangerLevel, setDangerLevel] = useState(0);
+  const [safeLevel, setSafeLevel] = useState(0);
+  const [showRugEffect, setShowRugEffect] = useState(false);
+  const [peakMultiplier, setPeakMultiplier] = useState<number>(1.0);
+
+  // ✨ RESTORED: Milestone tracking
+  const lastMilestoneRef = useRef<number>(0);
+  const milestones = useMemo(() => [2, 3, 5, 10, 15, 20, 25, 50, 75, 100], []);
+  
+  // User context
+  const { currentUser } = useContext(UserContext);
+  
+  // Calculate Y-axis scale range based on candle data
   const yScale = useMemo(() => 
-    calculateYScale(candleData, currentMultiplier), 
-    [candleData, currentMultiplier]
+    calculateYScale(candleData, serverMultiplier), 
+    [candleData, serverMultiplier]
   );
   
-  // Measure container width
+  // Measure container width for responsive SVG
   useEffect(() => {
     if (containerRef.current) {
       const resizeObserver = new ResizeObserver(entries => {
@@ -267,160 +352,208 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
       return () => resizeObserver.disconnect();
     }
   }, []);
-  
-  // Create candle data from multiplier progression
-  useEffect(() => {
-    if (!currentGame) return;
-    
-    // Reset candles when new game starts
-    if (currentGame.gameNumber !== lastGameNumber) {
-      setCandleData([]);
-      setLastMilestone(0);
-      setLastGameNumber(currentGame.gameNumber);
-      return;
+
+  // ✨ RESTORED: Visual effects based on server multiplier
+  const checkForEffects = useCallback((price: number) => {
+    // Set danger level when price is below 1.0
+    if (price < 1.0) {
+      const dangerPercent = Math.round(((1.0 - price) / 0.8) * 100);
+      setDangerLevel(Math.min(dangerPercent, 100));
+      setSafeLevel(0);
+    } else {
+      // Set safe level when price is above 1.0
+      const safePercent = Math.min(Math.round((price - 1.0) * 10), 50);
+      setSafeLevel(safePercent);
+      setDangerLevel(0);
     }
     
-    // Only add candles when game is active and multiplier is progressing
-    if (gameStatus === 'active' && currentMultiplier > 1.0) {
-      const now = Date.now();
-      
-      setCandleData(prev => {
-        // Create a new candle every few seconds or when significant price movement occurs
-        const shouldCreateNewCandle = prev.length === 0 || 
-          (now - prev[prev.length - 1].timestamp > 2000) || // Every 2 seconds
-          (Math.abs(currentMultiplier - prev[prev.length - 1].close) > 0.1); // Significant movement
-        
-        if (shouldCreateNewCandle) {
-          const lastClose = prev.length > 0 ? prev[prev.length - 1].close : 1.0;
-          
-          // Create realistic candle data based on multiplier progression
-          const volatility = 0.02; // Small volatility for realistic look
-          const basePrice = lastClose;
-          const targetPrice = currentMultiplier;
-          
-          // Simple price interpolation with small random variations
-          const open = basePrice;
-          const close = targetPrice;
-          const high = Math.max(open, close) * (1 + Math.random() * volatility);
-          const low = Math.min(open, close) * (1 - Math.random() * volatility);
-          
-          const newCandle: Candle = {
-            timestamp: now,
-            open,
-            high,
-            low,
-            close,
-            volume: currentGame.totalBets || 0
-          };
-          
-          const updated = [...prev, newCandle];
-          
-          // Keep only recent candles for display
-          if (updated.length > maxCandles) {
-            return updated.slice(-maxCandles);
-          }
-          
-          return updated;
-        }
-        
-        // Update the last candle's close price to current multiplier
-        if (prev.length > 0) {
-          const updated = [...prev];
-          const lastCandle = { ...updated[updated.length - 1] };
-          lastCandle.close = currentMultiplier;
-          lastCandle.high = Math.max(lastCandle.high, currentMultiplier);
-          lastCandle.low = Math.min(lastCandle.low, currentMultiplier);
-          updated[updated.length - 1] = lastCandle;
-          return updated;
-        }
-        
-        return prev;
-      });
-    }
-  }, [currentGame, currentMultiplier, gameStatus, lastGameNumber, maxCandles]);
-  
-  // Handle milestone effects
-  useEffect(() => {
-    const milestones = [2, 3, 5, 10, 15, 20, 25, 50, 75, 100];
-    
+    // Check for milestone effects
     for (const milestone of milestones) {
-      if (currentMultiplier >= milestone && lastMilestone < milestone) {
-        setLastMilestone(milestone);
+      if (price >= milestone && lastMilestoneRef.current < milestone) {
+        lastMilestoneRef.current = milestone;
+        let intensity, color, textColor, shakeDuration;
         
-        // Set effect based on milestone
-        let color = '#FACC15'; // Default yellow
-        if (milestone >= 50) color = '#D946EF'; // Purple for very high
-        else if (milestone >= 20) color = '#EF4444'; // Red for high
-        else if (milestone >= 10) color = '#F97316'; // Orange for medium-high
-        else if (milestone >= 5) color = '#FACC15'; // Yellow for medium
-        else if (milestone >= 2) color = '#4ADE80'; // Green for low
+        if (milestone <= 2) {
+          intensity = 2;
+          color = 'rgba(74, 222, 128, 0.6)';
+          textColor = '#4ADE80';
+          shakeDuration = 500;
+        } else if (milestone <= 3) {
+          intensity = 4;
+          color = 'rgba(34, 211, 238, 0.6)';
+          textColor = '#22D3EE';
+          shakeDuration = 600;
+        } else if (milestone <= 5) {
+          intensity = 5;
+          color = 'rgba(251, 191, 36, 0.6)';
+          textColor = '#FACC15';
+          shakeDuration = 700;
+        } else if (milestone <= 10) {
+          intensity = 7;
+          color = 'rgba(249, 115, 22, 0.6)';
+          textColor = '#F97316';
+          shakeDuration = 800;
+        } else if (milestone <= 20) {
+          intensity = 8;
+          color = 'rgba(239, 68, 68, 0.6)';
+          textColor = '#EF4444';
+          shakeDuration = 900;
+        } else {
+          intensity = 10;
+          color = 'rgba(217, 70, 239, 0.6)';
+          textColor = '#D946EF';
+          shakeDuration = 1000;
+        }
         
-        setMilestoneEffects({
-          showEffect: true,
-          text: `${milestone}X!`,
-          color
-        });
+        setShakeIntensity(intensity);
+        setExplosionColor(color);
+        setMilestoneTextColor(textColor);
         
-        // Hide effect after delay
+        setIsShaking(true);
+        setTimeout(() => setIsShaking(false), shakeDuration);
+        
+        setMilestoneText(`${milestone}X !!`);
+        setShowExplosion(true);
+        setMilestoneOpacity(1);
+        
         setTimeout(() => {
-          setMilestoneEffects(prev => ({ ...prev, showEffect: false }));
-        }, 2000);
+          setMilestoneOpacity(0);
+          setTimeout(() => {
+            setShowExplosion(false);
+          }, 1000);
+        }, 1500);
         
         break;
       }
     }
     
-    // Reset milestone if multiplier drops significantly
-    if (currentMultiplier < lastMilestone * 0.8) {
-      setLastMilestone(Math.floor(currentMultiplier));
+    // Reset milestone if price drops significantly
+    if (price < lastMilestoneRef.current * 0.8) {
+      lastMilestoneRef.current = Math.floor(price);
     }
-  }, [currentMultiplier, lastMilestone]);
-  
-  // Notify parent of multiplier updates
+  }, [milestones]);
+
+  // ✨ RESTORED: Rug effect animation
+  const triggerRugEffect = useCallback((rugPrice: number) => {
+    setShakeIntensity(10);
+    setIsShaking(true);
+    
+    setExplosionColor('rgba(239, 68, 68, 0.8)');
+    setMilestoneTextColor('#EF4444');
+    setMilestoneText(`RUGGED @ ${peakMultiplier.toFixed(2)}X!`);
+    setShowExplosion(true);
+    setMilestoneOpacity(1);
+    setShowRugEffect(true);
+    
+    if (onGameCrash) {
+      onGameCrash(peakMultiplier);
+    }
+    
+    setTimeout(() => {
+      setIsShaking(false);
+    }, 2000);
+    
+    setTimeout(() => {
+      setMilestoneOpacity(0);
+      setTimeout(() => {
+        setShowExplosion(false);
+        setShowRugEffect(false);
+      }, 1000);
+    }, 3000);
+  }, [onGameCrash, peakMultiplier]);
+
+  // ✨ NEW: Sync with real server data
   useEffect(() => {
-    if (onMultiplierUpdate) {
-      onMultiplierUpdate(currentMultiplier);
+    if (!isServerConnected) return;
+
+    // Track peak multiplier
+    if (serverMultiplier > peakMultiplier && serverGameStatus === 'active') {
+      setPeakMultiplier(serverMultiplier);
     }
-  }, [currentMultiplier, onMultiplierUpdate]);
-  
-  // Handle game crash
-  useEffect(() => {
-    if (gameStatus === 'crashed' && onGameCrash) {
-      onGameCrash(currentMultiplier);
+
+    // Handle game crash from server
+    if (serverGameStatus === 'crashed' && lastServerMultiplier !== serverMultiplier) {
+      triggerRugEffect(serverMultiplier);
+      // Reset for next game
+      setPeakMultiplier(1.0);
+      lastMilestoneRef.current = 0;
     }
-  }, [gameStatus, currentMultiplier, onGameCrash]);
-  
+
+    // Generate visual candles based on server multiplier changes
+    if (serverGameStatus === 'active' && serverMultiplier !== lastServerMultiplier) {
+      const { candle } = generateCandle(gameStateRef.current);
+      
+      // Override candle close with real server multiplier
+      candle.close = serverMultiplier;
+      candle.high = Math.max(candle.high, serverMultiplier);
+      candle.low = Math.min(candle.low, serverMultiplier);
+      
+      setCandleData(prev => {
+        const updatedCandles = [...prev, candle];
+        
+        // ✨ IMPROVED: Keep more historical data for better chart context
+        // Instead of fixed maxCandles, use dynamic management
+        const maxHistoricalCandles = Math.max(maxCandles * 2, 30); // Keep at least 30 candles
+        
+        if (updatedCandles.length > maxHistoricalCandles) {
+          // Remove older candles but keep some early ones for context
+          const keepEarly = Math.floor(maxHistoricalCandles * 0.2); // Keep 20% of early candles
+          const keepRecent = maxHistoricalCandles - keepEarly;
+          
+          const earlyCandles = updatedCandles.slice(0, keepEarly);
+          const recentCandles = updatedCandles.slice(-keepRecent);
+          
+          return [...earlyCandles, ...recentCandles];
+        }
+        return updatedCandles;
+      });
+
+      // Check for visual effects
+      checkForEffects(serverMultiplier);
+      
+      // Update parent
+      if (onMultiplierUpdate) {
+        onMultiplierUpdate(serverMultiplier);
+      }
+    }
+
+    // Reset for new game
+    if (serverGameStatus === 'active' && lastServerMultiplier > serverMultiplier) {
+      setCandleData([]);
+      lastMilestoneRef.current = 0;
+      setPeakMultiplier(1.0);
+    }
+
+    setLastServerMultiplier(serverMultiplier);
+  }, [serverMultiplier, serverGameStatus, isServerConnected, lastServerMultiplier, checkForEffects, onMultiplierUpdate, triggerRugEffect, maxCandles]);
+
   return (
     <div 
       ref={containerRef}
       className="w-full relative bg-black border border-gray-800 rounded-lg overflow-hidden" 
-      style={{ height: `${chartHeight}px` }}
+      style={{ 
+        height: `${chartHeight}px`,
+        animation: isShaking ? `shake-${shakeIntensity} 0.5s cubic-bezier(.36,.07,.19,.97) both` : 'none'
+      }}
     >
       {/* Current price indicator */}
       <div className={`absolute top-2 left-2 px-2 py-1 rounded text-sm font-bold z-10 ${
-        gameStatus === 'crashed' ? 'bg-red-500 text-white' : 'bg-yellow-500 text-black'
+        serverGameStatus === 'crashed' ? 'bg-red-500 text-white' : 'bg-yellow-500 text-black'
       }`}>
-        {currentMultiplier.toFixed(2)}x {currency}
+        {serverMultiplier.toFixed(2)}x {currency}
       </div>
       
       {/* Connection status */}
       <div className={`absolute top-2 right-2 px-2 py-1 rounded text-sm font-bold z-10 ${
-        !isConnected ? 'bg-red-500 text-white' :
-        gameStatus === 'active' ? 'bg-green-500 text-white' : 
-        gameStatus === 'crashed' ? 'bg-red-500 text-white animate-pulse' :
+        !isServerConnected ? 'bg-red-500 text-white' :
+        serverGameStatus === 'active' ? 'bg-green-500 text-white' : 
+        serverGameStatus === 'crashed' ? 'bg-red-500 text-white animate-pulse' :
         'bg-yellow-500 text-black'
       }`}>
-        {!isConnected ? 'OFFLINE' :
-         gameStatus === 'active' ? 'ACTIVE' : 
-         gameStatus === 'crashed' ? 'CRASHED' : 'WAITING'}
+        {!isServerConnected ? 'OFFLINE' :
+         serverGameStatus === 'active' ? 'ACTIVE' : 
+         serverGameStatus === 'crashed' ? 'CRASHED' : 'WAITING'}
       </div>
-      
-      {/* Game info */}
-      {currentGame && (
-        <div className="absolute top-10 left-2 text-xs text-gray-400 z-10">
-          Game #{currentGame.gameNumber} • {currentGame.totalPlayers} players
-        </div>
-      )}
       
       {/* Active bet indicator */}
       {currentBet > 0 && (
@@ -429,55 +562,161 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
         </div>
       )}
       
+      {/* ✨ RESTORED: Danger overlay (red gradient) */}
+      {dangerLevel > 0 && (
+        <div 
+          className="absolute inset-0 pointer-events-none z-20"
+          style={{ 
+            background: `linear-gradient(transparent, rgba(220, 38, 38, ${dangerLevel/200}))`,
+            transition: 'opacity 0.5s ease'
+          }}
+        />
+      )}
+      
+      {/* ✨ RESTORED: Safe overlay (green gradient) */}
+      {safeLevel > 0 && (
+        <div 
+          className="absolute inset-0 pointer-events-none z-20"
+          style={{ 
+            background: `linear-gradient(transparent, rgba(16, 185, 129, ${safeLevel/200}))`,
+            transition: 'opacity 0.5s ease'
+          }}
+        />
+      )}
+      
       {/* Chart area */}
       <div className="absolute inset-0 pt-16 pb-4 px-4">
-        {containerWidth > 0 && isConnected ? (
+        {containerWidth > 0 && isServerConnected ? (
           <CandlestickSVG 
             candles={candleData} 
             width={containerWidth - 8} 
             height={chartHeight - 80} 
             minValue={yScale.min} 
             maxValue={yScale.max}
-            currentPrice={currentMultiplier}
+            currentPrice={serverMultiplier}
             betPlacedAt={currentBet > 0 ? betPlacedAt : undefined}
-            gameStatus={gameStatus}
+            gameStatus={serverGameStatus}
           />
         ) : (
           <div className="flex items-center justify-center h-full">
             <div className="text-gray-500 text-center">
               <div className="text-lg mb-2">
-                {!isConnected ? 'Connecting to game server...' : 'Waiting for game data...'}
-              </div>
-              <div className="text-sm">
-                {!authenticated && 'Login to participate in games'}
+                {!isServerConnected ? 'Connecting to game server...' : 'Waiting for game data...'}
               </div>
             </div>
           </div>
         )}
       </div>
       
-      {/* Milestone effect */}
-      {milestoneEffects.showEffect && (
+      {/* ✨ RESTORED: Explosion effect and milestone text */}
+      {showExplosion && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
-          <div 
-            className="text-6xl font-bold animate-pulse"
-            style={{ 
-              color: milestoneEffects.color,
-              textShadow: `0 0 20px ${milestoneEffects.color}`,
-              animation: 'milestone-pop 2s ease-out forwards'
-            }}
-          >
-            {milestoneEffects.text}
+          <div className="relative">
+            <div className="absolute -inset-12 animate-pulse" style={{ 
+              background: `radial-gradient(circle, ${explosionColor} 0%, transparent 70%)`,
+              animation: 'pulse 1s cubic-bezier(0,0,0.2,1) infinite',
+              transform: 'scale(1)'
+            }} />
+            
+            <div 
+              className="text-6xl font-dynapuff font-extrabold"
+              style={{ 
+                color: milestoneTextColor,
+                opacity: milestoneOpacity,
+                transition: 'opacity 1s ease',
+                textShadow: `0 0 10px ${explosionColor}, 0 0 20px ${explosionColor}`
+              }}
+            >
+              {milestoneText}
+            </div>
           </div>
         </div>
       )}
       
-      {/* Simple CSS animations */}
+      {/* ✨ RESTORED: Rug Effect animation */}
+      {showRugEffect && (
+        <div className="absolute inset-0 pointer-events-none z-40">
+          <div className="absolute inset-0" style={{
+            background: 'radial-gradient(circle, rgba(255,0,0,0.4) 0%, transparent 70%)',
+            animation: 'rug-pulse 0.8s ease-in-out infinite'
+          }} />
+          
+          {/* Particles falling from top */}
+          <div className="absolute top-0 w-full h-full overflow-hidden">
+            {Array.from({ length: 50 }).map((_, i) => {
+              const size = Math.random() * 12 + 5;
+              const opacity = Math.random() * 0.7 + 0.3;
+              const delay = Math.random() * 2;
+              const duration = Math.random() * 2 + 1;
+              const leftPos = Math.random() * 100;
+              
+              return (
+                <div 
+                  key={i}
+                  className="absolute"
+                  style={{
+                    width: `${size}px`,
+                    height: `${size}px`,
+                    backgroundColor: i % 3 === 0 ? '#FF0000' : i % 3 === 1 ? '#FF5500' : '#FF0000',
+                    borderRadius: '50%',
+                    left: `${leftPos}%`,
+                    top: '-20px',
+                    opacity,
+                    animation: `fall-down ${duration}s linear forwards`,
+                    animationDelay: `${delay}s`,
+                  }}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+      
+      {/* ✨ RESTORED: CSS for animations */}
       <style jsx>{`
-        @keyframes milestone-pop {
-          0% { transform: scale(0.5); opacity: 0; }
-          50% { transform: scale(1.2); opacity: 1; }
-          100% { transform: scale(1); opacity: 0; }
+        @keyframes shake-2 {
+          0%, 100% { transform: translateX(0); }
+          10%, 30%, 50%, 70%, 90% { transform: translateX(-2px); }
+          20%, 40%, 60%, 80% { transform: translateX(2px); }
+        }
+        @keyframes shake-4 {
+          0%, 100% { transform: translateX(0); }
+          10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
+          20%, 40%, 60%, 80% { transform: translateX(3px); }
+        }
+        @keyframes shake-5 {
+          0%, 100% { transform: translateX(0); }
+          10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+          20%, 40%, 60%, 80% { transform: translateX(4px); }
+        }
+        @keyframes shake-7 {
+          0%, 100% { transform: translateX(0); }
+          10%, 30%, 50%, 70%, 90% { transform: translateX(-6px); }
+          20%, 40%, 60%, 80% { transform: translateX(6px); }
+        }
+        @keyframes shake-8 {
+          0%, 100% { transform: translateX(0); }
+          10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); }
+          20%, 40%, 60%, 80% { transform: translateX(8px); }
+        }
+        @keyframes shake-10 {
+          0%, 100% { transform: translateX(0); }
+          10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+          20%, 40%, 60%, 80% { transform: translateX(10px); }
+        }
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.1); opacity: 0.8; }
+        }
+        
+        @keyframes fall-down {
+          0% { transform: translateY(0); }
+          100% { transform: translateY(100vh); }
+        }
+        
+        @keyframes rug-pulse {
+          0%, 100% { opacity: 0.6; }
+          50% { opacity: 1; }
         }
       `}</style>
     </div>

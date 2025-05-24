@@ -40,7 +40,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
     // Enhanced connection with automatic reconnection
     useEffect(() => {
-        const serverUrl = 'wss://a78c-3-16-49-236.ngrok-free.app';
+        const serverUrl = 'wss://NEW-URL-HERE.ngrok-free.app';
         console.log('🔍 Using hardcoded URL:', serverUrl);
         
         // 🔍 DEBUG: Let's see what's happening

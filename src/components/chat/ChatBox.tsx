@@ -1,5 +1,4 @@
 // src/components/chat/ChatBox.tsx
-// src/components/chat/ChatBox.tsx
 import { FC, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import ChatMessage from './ChatMessage';
@@ -12,13 +11,13 @@ const ChatBox: FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const { authenticated, login } = usePrivy();
-  
+
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages]);
-  
+
   const handleSendMessage = (text: string) => {
     if (text.trim() && authenticated) {
       sendMessage(text);
@@ -28,14 +27,14 @@ const ChatBox: FC = () => {
   const handleLoginClick = () => {
     login();
   };
-  
+
   return (
-    <div className="flex flex-col font-dynapuff h-screen bg-[#0d0d0f] border-r border-b border-gray-800">
+    <div className="flex flex-col font-dynapuff max-h-[600px] h-[600px] bg-[#0d0d0f] border-r border-b border-gray-800">
       {/* Header */}
-      <div className="flex justify-between p-3 border-b border-gray-800 bg-[#0d0d0f]">
+      <div className="flex justify-between p-3 border-b border-gray-800 bg-[#0d0d0f] flex-shrink-0">
         <h2 className="text-sm text-white font-medium flex items-center">
           <span className={`h-2 w-2 ${isConnected ? 'bg-green-500' : 'bg-red-500'} rounded-full mr-2`}></span>
-          {`GLOBAL (${activeUsers > 0 ? activeUsers : '—'})`}
+          GLOBAL ({activeUsers > 0 ? activeUsers : '—'})
         </h2>
         <div className="flex space-x-3">
           <a href="https://discord.com/" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300">
@@ -64,14 +63,14 @@ const ChatBox: FC = () => {
           </a>
         </div>
       </div>
-      
+
       {/* Chat messages */}
       <div 
         ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto scrollbar-hide"
+        className="flex-1 overflow-y-auto scrollbar-hide min-h-0 max-h-[480px]"
         style={{
           scrollbarWidth: 'none', 
-          msOverflowStyle: 'none', 
+          msOverflowStyle: 'none',
         }}
       >
         {!authenticated ? (
@@ -103,9 +102,9 @@ const ChatBox: FC = () => {
           </div>
         )}
       </div>
-      
-      {/* Chat input */}
-      <div className="border-t border-gray-800 bg-[#0d0d0f] p-2">
+
+      {/* Chat input - Always visible at bottom */}
+      <div className="border-t border-gray-800 bg-[#0d0d0f] p-2 flex-shrink-0">
         <ChatInput onSendMessage={handleSendMessage} />
       </div>
     </div>

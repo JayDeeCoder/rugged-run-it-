@@ -8,6 +8,7 @@ import MiniCharts from './MiniCharts';
 import useWindowSize from '../../hooks/useWindowSize';
 import { TradeContext } from '../../context/TradeContext';
 import { UserContext } from '../../context/UserContext';
+import { useGameSocket } from '../../hooks/useGameSocket';
 import { toast } from 'react-hot-toast';
 import type { Order } from '../../types/trade';
 import { GameResult } from '../../types/trade';
@@ -21,25 +22,16 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   const { width } = useWindowSize();
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [holdings, setHoldings] = useState<number>(0);
-  const [currentMultiplier, setCurrentMultiplier] = useState<number>(1.0);
   const [triggerSellEffect, setTriggerSellEffect] = useState<boolean>(false);
   const [sellSuccess, setSellSuccess] = useState<boolean>(false);
-  const [showCountdown, setShowCountdown] = useState<boolean>(false);
-  const [countdownSeconds, setCountdownSeconds] = useState<number>(10);
-  const [lastCrashMultiplier, setLastCrashMultiplier] = useState<number | null>(null);
-  const [isGameActive, setIsGameActive] = useState<boolean>(true);
-  const [hasActiveGame, setHasActiveGame] = useState<boolean>(false);
-  const [currentBet, setCurrentBet] = useState<number>(0);
   const [gameResults, setGameResults] = useState<GameResult[]>([]);
   const [isPlacingBet, setIsPlacingBet] = useState<boolean>(false);
   const [isCashingOut, setIsCashingOut] = useState<boolean>(false);
-  const [gameId, setGameId] = useState<number>(0); // Track current game number
-  const [gameStatus, setGameStatus] = useState<'waiting' | 'active' | 'cooldown' | 'crashed'>('waiting');
-
-  // Game history stats
-  const [highestMultiplier, setHighestMultiplier] = useState<number>(0);
-  const [averageMultiplier, setAverageMultiplier] = useState<number>(0);
-  const [roundsPlayed, setRoundsPlayed] = useState<number>(0);
+  
+  // Local bet tracking since server doesn't provide userGameState
+  const [userBet, setUserBet] = useState<number>(0);
+  const [betPlacedAt, setBetPlacedAt] = useState<number | null>(null);
+  const [countdownSeconds, setCountdownSeconds] = useState<number>(0);
   
   // Create a reference to the chart container
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -48,11 +40,18 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   const { authenticated } = usePrivy();
   const { wallets } = useSolanaWallets();
   
-  // Use embedded game wallet hook instead of Solana wallet adapter
+  // Use embedded game wallet hook
   const { wallet: gameWallet, walletData } = useEmbeddedGameWallet();
 
   const { trades, currentPrice, balance: gameBalance, placeOrder } = useContext(TradeContext);
   const { isAuthenticated, currentUser } = useContext(UserContext);
+
+  // Get wallet address for game socket
+  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
+  const walletAddress = embeddedWallet?.address || '';
+  
+  // Connect to real game server with current implementation
+  const { currentGame, isConnected, placeBet, cashOut } = useGameSocket(walletAddress, currentUser?.id);
 
   const isMobile = width ? width < 768 : false;
 
@@ -133,26 +132,54 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     }
   }, [trades]);
 
-  // Calculate game statistics whenever game results change
+  // Handle real game state changes with current GameState interface
   useEffect(() => {
-    if (gameResults.length > 0) {
-      const total = gameResults.reduce((sum, result) => sum + result.value, 0);
-      const avg = total / gameResults.length;
-      const max = Math.max(...gameResults.map(result => result.value));
-      
-      if (isMountedRef.current) {
-        setAverageMultiplier(avg);
-        setHighestMultiplier(max);
-      }
-    }
-  }, [gameResults]);
+    if (!currentGame || !isMountedRef.current) return;
 
-  // Handle multiplier updates from chart
-  const handleMultiplierUpdate = (multiplier: number) => {
-    if (isMountedRef.current) {
-      setCurrentMultiplier(multiplier);
+    // Handle game crash with current multiplier (no crashedAt property)
+    if (currentGame.status === 'crashed') {
+      const crashMultiplier = currentGame.multiplier;
+      
+      // Add to real game results
+      const newResult: GameResult = {
+        value: crashMultiplier,
+        label: `${crashMultiplier.toFixed(2)}x`,
+        timestamp: Date.now(),
+      };
+      
+      setGameResults(prev => [newResult, ...prev.slice(0, 49)]);
+      
+      // Handle user's bet result with local state
+      if (userBet > 0) {
+        // Since no userGameState, assume they lost if game crashed
+        setSellSuccess(false);
+        setTriggerSellEffect(true);
+        toast.error(`Crashed at ${crashMultiplier.toFixed(2)}x! Lost ${userBet.toFixed(3)} SOL`);
+        
+        // Reset user bet
+        setUserBet(0);
+        setBetPlacedAt(null);
+      }
+      
+      // Start countdown for next game (simple 10 second countdown)
+      setCountdownSeconds(10);
     }
-  };
+
+    // Reset countdown when game starts
+    if (currentGame.status === 'active') {
+      setCountdownSeconds(0);
+    }
+  }, [currentGame, userBet]);
+
+  // Handle countdown timer
+  useEffect(() => {
+    if (countdownSeconds > 0) {
+      const timer = setTimeout(() => {
+        setCountdownSeconds(prev => prev - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [countdownSeconds]);
 
   // Handle effect completion
   const handleEffectComplete = () => {
@@ -161,85 +188,39 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     }
   };
 
-  // Handle game crash - when the chart crashes
-  const handleGameCrash = useCallback((peakMultiplier: number) => {
-    if (!isMountedRef.current) return;
-    
-    console.log(`Game crashed at peak of ${peakMultiplier.toFixed(2)}x`);
-    
-    // Add to game results regardless of whether player had active bet
-    const newResult: GameResult = {
-      value: peakMultiplier, // Use peak multiplier instead of final crash value
-      label: `${peakMultiplier.toFixed(2)}x`,
-      timestamp: Date.now(),
-    };
-    
-    setGameResults(prev => [newResult, ...prev.slice(0, 49)]); // Keep last 50 results
-    
-    if (hasActiveGame) {
-      // Show loss effect if player had an active bet
-      if (currentBet > 0) {
-        setSellSuccess(false);
-        setTriggerSellEffect(true);
-        toast.error(`Crashed at ${peakMultiplier.toFixed(2)}x! Lost ${currentBet.toFixed(3)} SOL`);
-      }
-      
-      // Reset game state
-      setHasActiveGame(false);
-      setCurrentBet(0);
-    }
-    
-    // Update game status and start cooldown
-    setGameStatus('crashed');
-    setIsGameActive(false);
-    setLastCrashMultiplier(peakMultiplier); // Store peak value
-    setShowCountdown(true);
-    setCountdownSeconds(10); // 10 second cooldown before next game
-    setRoundsPlayed(prev => prev + 1);
-  }, [hasActiveGame, currentBet]);
-
-  // Handle countdown completion - start new game
-  const handleCountdownComplete = useCallback(() => {
-    if (!isMountedRef.current) return;
-    
-    console.log("Countdown complete - starting new game round at 1.0x multiplier");
-    
-    // Reset the game state for a new round
-    setShowCountdown(false);
-    setIsGameActive(true);
-    setGameStatus('active');
-    setGameId(prev => prev + 1); // Increment game ID
-    setCurrentMultiplier(1.0); // Ensure we start exactly at 1.0x
-    
-    toast.success("New round started!");
-  }, []);
-
-  // Handle placing a bet
+  // Handle placing a bet using current server API
   const handleBuy = useCallback(async (amount: number) => {
-    if (amount <= 0 || amount > walletBalance || !isGameActive || !isMountedRef.current) {
+    if (amount <= 0 || amount > walletBalance || !currentGame || currentGame.status !== 'active' || !isMountedRef.current) {
+      toast.error('Cannot place bet right now');
       return;
     }
 
     setIsPlacingBet(true);
     
     try {
-      console.log(`Buying ${amount} SOL at ${currentMultiplier}x in game #${gameId}`);
+      console.log(`Placing real bet: ${amount} SOL in game #${currentGame.gameNumber}`);
 
-      // Create order
-      const order: Order = {
-        side: 'buy',
-        amount,
-        timestamp: new Date().toISOString(),
-      };
+      // Place bet on real server
+      const success = await placeBet(walletAddress, amount, currentUser?.id);
+      
+      if (success) {
+        // Create order for local tracking
+        const order: Order = {
+          side: 'buy',
+          amount,
+          timestamp: new Date().toISOString(),
+        };
 
-      // Place order through context
-      placeOrder(order);
-      
-      // Set active game and current bet
-      setHasActiveGame(true);
-      setCurrentBet(amount);
-      
-      toast.success(`Bet placed: ${amount} SOL`);
+        placeOrder(order);
+        
+        // Track bet locally
+        setUserBet(amount);
+        setBetPlacedAt(currentGame.multiplier);
+        
+        toast.success(`Bet placed: ${amount} SOL`);
+      } else {
+        toast.error('Failed to place bet on server');
+      }
     } catch (error) {
       console.error('Failed to place bet:', error);
       toast.error('Failed to place bet');
@@ -248,56 +229,65 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         setIsPlacingBet(false);
       }
     }
-  }, [walletBalance, isGameActive, currentMultiplier, placeOrder, gameId]);
+  }, [walletBalance, currentGame, placeBet, walletAddress, currentUser?.id, placeOrder]);
 
-  // Handle selling (cashing out)
+  // Handle selling (full cashout only with current API)
   const handleSell = useCallback(async (percentage: number) => {
-    if (!hasActiveGame || !isGameActive || currentBet <= 0 || !isMountedRef.current) {
+    if (userBet <= 0 || !currentGame || currentGame.status !== 'active' || !isMountedRef.current) {
+      toast.error('No active bet to cash out');
+      return;
+    }
+
+    // Only allow 100% cashout with current API
+    if (percentage < 100) {
+      toast.error('Partial cashouts not supported yet');
       return;
     }
 
     setIsCashingOut(true);
     
     try {
-      // Calculate amount to sell based on percentage
-      const amountToSell = (currentBet * percentage) / 100;
-      console.log(`Selling ${amountToSell} SOL (${percentage}%) at multiplier ${currentMultiplier}x`);
+      const currentMultiplier = currentGame.multiplier;
+      console.log(`Cashing out 100% at multiplier ${currentMultiplier}x`);
 
-      // Create sell order
-      const order: Order = {
-        side: 'sell',
-        amount: amountToSell * currentMultiplier, // Sell at current multiplier value
-        timestamp: new Date().toISOString(),
-      };
+      // Cash out on real server (current API only takes walletAddress)
+      const success = await cashOut(walletAddress);
+      
+      if (success) {
+        // Calculate full cashout amount
+        const cashoutAmount = userBet * currentMultiplier;
+        
+        // Create sell order for local tracking
+        const order: Order = {
+          side: 'sell',
+          amount: cashoutAmount,
+          timestamp: new Date().toISOString(),
+        };
 
-      // Place order through context
-      placeOrder(order);
-      
-      // Add to game results for successful cashouts only
-      const newResult: GameResult = {
-        value: currentMultiplier,
-        label: `${currentMultiplier.toFixed(2)}x`,
-        timestamp: Date.now(),
-      };
-      
-      setGameResults(prev => [newResult, ...prev.slice(0, 49)]); // Keep last 50 results
-      
-      // Reset game state
-      if (percentage >= 100) {
-        setHasActiveGame(false);
-        setCurrentBet(0);
+        placeOrder(order);
+        
+        // Add to game results for successful cashouts
+        const newResult: GameResult = {
+          value: currentMultiplier,
+          label: `${currentMultiplier.toFixed(2)}x`,
+          timestamp: Date.now(),
+        };
+        
+        setGameResults(prev => [newResult, ...prev.slice(0, 49)]);
+        
+        // Show win effect
+        setSellSuccess(true);
+        setTriggerSellEffect(true);
+        
+        // Reset user bet since we cashed out 100%
+        setUserBet(0);
+        setBetPlacedAt(null);
+        
+        const profit = userBet * (currentMultiplier - 1);
+        toast.success(`Cashed out: +${profit.toFixed(3)} SOL`);
       } else {
-        // Partial sell
-        setCurrentBet(currentBet * (1 - percentage / 100));
+        toast.error('Failed to cash out on server');
       }
-      
-      // Show win effect - ONLY when user explicitly cashes out
-      setSellSuccess(true);
-      setTriggerSellEffect(true);
-      
-      // Create toast notification
-      const profit = amountToSell * (currentMultiplier - 1);
-      toast.success(`Cashed out: +${profit.toFixed(3)} SOL`);
     } catch (error) {
       console.error('Failed to cash out:', error);
       toast.error('Failed to cash out');
@@ -306,18 +296,15 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         setIsCashingOut(false);
       }
     }
-  }, [hasActiveGame, isGameActive, currentBet, currentMultiplier, placeOrder]);
+  }, [userBet, currentGame, cashOut, walletAddress, placeOrder]);
 
-  // Calculate game statistics
+  // Calculate game statistics from real results
   const calculateGameStats = useCallback(() => {
     if (gameResults.length === 0) {
       return { average: "0.00", highest: "0.00" };
     }
     
-    // Calculate average
     const avg = gameResults.reduce((sum, item) => sum + item.value, 0) / gameResults.length;
-    
-    // Find highest value
     const max = Math.max(...gameResults.map(item => item.value));
     
     return { 
@@ -336,6 +323,14 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     return isMobile ? 350 : 500;
   };
 
+  // Real game data with current implementation
+  const currentMultiplier = currentGame?.multiplier || 1.0;
+  const gameStatus = currentGame?.status || 'waiting';
+  const gameId = currentGame?.gameNumber || 0;
+  const isGameActive = gameStatus === 'active';
+  const hasActiveGame = userBet > 0;
+  const showCountdown = gameStatus === 'crashed' && countdownSeconds > 0;
+
   return (
     <div className="p-2 flex flex-col">
       {/* Game Identification and Status - condensed for mobile */}
@@ -343,18 +338,21 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         <div className="flex items-center">
           <span className="text-gray-400 text-xs md:text-sm mr-1">Round #</span>
           <span className="font-bold text-white">{gameId}</span>
+          {!isConnected && <span className="ml-2 text-red-400 text-xs">(OFFLINE)</span>}
         </div>
         
         <div className="flex items-center">
           <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
+            !isConnected ? 'bg-red-600 text-white' :
             gameStatus === 'active' ? 'bg-green-600 text-white' : 
             gameStatus === 'crashed' ? 'bg-red-600 text-white' :
-            gameStatus === 'cooldown' ? 'bg-yellow-600 text-white' :
+            gameStatus === 'waiting' ? 'bg-yellow-600 text-white' :
             'bg-gray-600 text-white'
           }`}>
-            {gameStatus === 'active' ? 'ACTIVE' : 
+            {!isConnected ? 'OFFLINE' :
+             gameStatus === 'active' ? 'ACTIVE' : 
              gameStatus === 'crashed' ? 'CRASHED' : 
-             'COOLDOWN'}
+             gameStatus === 'waiting' ? 'WAITING' : 'UNKNOWN'}
           </span>
         </div>
         
@@ -372,25 +370,34 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         </div>
         <div className="px-2 py-1">
           <span className="text-gray-400">Bet:</span>
-          <span className={`ml-1 font-bold ${currentBet > 0 ? 'text-blue-400' : 'text-gray-400'}`}>
-            {currentBet > 0 ? currentBet.toFixed(3) : '0.000'}
+          <span className={`ml-1 font-bold ${userBet > 0 ? 'text-blue-400' : 'text-gray-400'}`}>
+            {userBet > 0 ? userBet.toFixed(3) : '0.000'}
           </span>
         </div>
         <div className="px-2 py-1">
           <span className="text-gray-400">Potential:</span>
-          <span className={`ml-1 font-bold ${currentBet > 0 ? 'text-yellow-400' : 'text-gray-400'}`}>
-            {currentBet > 0 ? (currentBet * (currentMultiplier - 1)).toFixed(3) : '0.000'}
+          <span className={`ml-1 font-bold ${userBet > 0 ? 'text-yellow-400' : 'text-gray-400'}`}>
+            {userBet > 0 ? (userBet * (currentMultiplier - 1)).toFixed(3) : '0.000'}
           </span>
         </div>
       </div>
 
-      {/* Mini charts showing recent game results - NOW USING REAL DATA */}
+      {/* Real game info */}
+      {currentGame && (
+        <div className="bg-[#0d0d0f] p-2 mb-2 rounded-lg border border-gray-800 text-xs text-gray-400">
+          <div className="flex justify-between">
+            <span>Players: {currentGame.totalPlayers || 0}</span>
+            <span>Total Bets: {(currentGame.totalBets || 0).toFixed(3)} SOL</span>
+          </div>
+        </div>
+      )}
+
+      {/* Mini charts showing recent game results - REAL DATA */}
       <div className="mb-2">
         <MiniCharts 
           data={gameResults} 
           maxCharts={isMobile ? 5 : 10} 
           onNewGame={(result) => {
-            // Optional: Handle when a new game result is added
             console.log('New game result:', result);
           }}
         />
@@ -406,12 +413,10 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
           style={{ height: `${getChartHeight()}px` }}
         >
           <CandlestickChart 
-            initialPrice={1.0}
-            onMultiplierUpdate={handleMultiplierUpdate}
-            triggerSellEffect={triggerSellEffect}
-            onEffectComplete={handleEffectComplete}
-            onGameCrash={handleGameCrash}
-            currentBet={currentBet}
+            onMultiplierUpdate={() => {}} // Multiplier comes from real server now
+            onGameCrash={() => {}} // Handled by real server events
+            currentBet={userBet}
+            betPlacedAt={betPlacedAt ?? undefined}
             height={getChartHeight()}
           />
 
@@ -424,13 +429,13 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
             />
           )}
           
-          {/* Countdown overlay with improved transparency */}
+          {/* Simple countdown overlay */}
           {showCountdown && (
             <div className="absolute inset-0 flex items-center justify-center z-50 bg-gradient-to-b from-black/60 to-black/70 backdrop-blur-sm">
               <GameCountdown 
                 seconds={countdownSeconds} 
-                onComplete={handleCountdownComplete}
-                lastCrashMultiplier={lastCrashMultiplier}
+                onComplete={() => {}} // Server handles game start
+                lastCrashMultiplier={gameResults[0]?.value || null}
               />
             </div>
           )}
@@ -453,7 +458,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         </div>
       </div>
 
-      {/* Game Statistics - simplified for mobile */}
+      {/* Game Statistics - from real results */}
       <div className="mt-4 bg-[#0d0d0f] p-3 rounded-lg border border-gray-800">
         <div className="grid grid-cols-3 gap-4">
           <div className="text-center">
@@ -466,7 +471,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
           </div>
           <div className="text-center">
             <div className="text-xs md:text-sm text-gray-400">Rounds</div>
-            <div className="text-base md:text-lg font-bold text-blue-400">{roundsPlayed}</div>
+            <div className="text-base md:text-lg font-bold text-blue-400">{gameResults.length}</div>
           </div>
         </div>
       </div>

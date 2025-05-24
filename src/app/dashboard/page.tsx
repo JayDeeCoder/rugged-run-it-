@@ -3,6 +3,7 @@
 import { FC, useState, useEffect, useContext } from 'react';
 import { useSolanaWallets, usePrivy } from '@privy-io/react-auth';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { createClient } from '@supabase/supabase-js';
 import Layout from '../../components/layout/Layout';
 import Link from 'next/link';
 import { UserContext } from '../../context/UserContext';
@@ -16,6 +17,12 @@ const Dashboard: FC = () => {
   
   // User context
   const { currentUser, experience, userLevel, crates } = useContext(UserContext);
+  
+  // Initialize Supabase client
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
   
   // State
   const [walletBalance, setWalletBalance] = useState<number>(0);
@@ -84,48 +91,144 @@ const Dashboard: FC = () => {
     fetchBalance();
   }, [isValidWallet, walletAddress]);
 
-  // Fetch user stats (you can replace this with actual API calls)
+  // Fetch user stats from Supabase
   useEffect(() => {
     const fetchUserStats = async () => {
-      if (!isValidWallet || !currentUser) {
+      if (!isValidWallet || !walletAddress) {
+        setUserStats({
+          totalWagered: 0,
+          totalPayouts: 0,
+          gamesPlayed: 0,
+          profitLoss: 0
+        });
         return;
       }
 
       try {
         setIsLoadingStats(true);
         
-        // TODO: Replace with actual API call to your backend
-        // const response = await fetch(`/api/user/${currentUser.id}/stats`);
-        // const stats = await response.json();
-        
-        // For now, using placeholder data
-        // You can integrate with your game server API here
-        const mockStats = {
-          totalWagered: 12.5,
-          totalPayouts: 15.8,
-          gamesPlayed: 47,
-          profitLoss: 3.3
-        };
-        
-        setUserStats(mockStats);
+        // Query player_bets table for this wallet
+        const { data: bets, error } = await supabase
+          .from('player_bets')
+          .select('bet_amount, profit_loss, cashout_amount, cashout_multiplier, status')
+          .eq('wallet_address', walletAddress);
+
+        if (error) {
+          console.error('Supabase query error:', error);
+          throw error;
+        }
+
+        // Calculate statistics from bet data
+        let totalWagered = 0;
+        let totalPayouts = 0;
+        let gamesPlayed = 0;
+        let profitLoss = 0;
+
+        if (bets && bets.length > 0) {
+          bets.forEach(bet => {
+            // Count all bets as games played
+            gamesPlayed++;
+            
+            // Sum all bet amounts
+            totalWagered += bet.bet_amount || 0;
+            
+            // Sum payouts (only for cashed out bets)
+            if (bet.status === 'cashed_out' && bet.cashout_amount) {
+              totalPayouts += bet.cashout_amount;
+            }
+            
+            // Sum profit/loss (negative for losses, positive for wins)
+            profitLoss += bet.profit_loss || 0;
+          });
+        }
+
+        setUserStats({
+          totalWagered: Number(totalWagered.toFixed(6)),
+          totalPayouts: Number(totalPayouts.toFixed(6)),
+          gamesPlayed,
+          profitLoss: Number(profitLoss.toFixed(6))
+        });
         
       } catch (error) {
         console.error('Failed to fetch user stats:', error);
+        // Set zeros on error
+        setUserStats({
+          totalWagered: 0,
+          totalPayouts: 0,
+          gamesPlayed: 0,
+          profitLoss: 0
+        });
       } finally {
         setIsLoadingStats(false);
       }
     };
 
     fetchUserStats();
-  }, [isValidWallet, currentUser]);
+  }, [isValidWallet, walletAddress, supabase]);
 
   // Refresh data function
-  const refreshData = () => {
-    if (isValidWallet) {
-      setIsLoadingBalance(true);
-      setIsLoadingStats(true);
-      // Trigger re-fetch by updating a dependency
-      window.location.reload();
+  const refreshData = async () => {
+    if (!isValidWallet) return;
+    
+    setIsLoadingBalance(true);
+    setIsLoadingStats(true);
+    
+    // Force re-fetch by updating timestamps
+    const now = Date.now();
+    
+    // Trigger balance refresh
+    try {
+      const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+      const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+      
+      if (rpcUrl) {
+        const connectionConfig: any = { commitment: 'confirmed' };
+        if (apiKey) connectionConfig.httpHeaders = { 'x-api-key': apiKey };
+        
+        const connection = new Connection(rpcUrl, connectionConfig);
+        const publicKey = safeCreatePublicKey(walletAddress);
+        
+        if (publicKey) {
+          const lamports = await connection.getBalance(publicKey);
+          setWalletBalance(lamports / LAMPORTS_PER_SOL);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to refresh balance:', error);
+    } finally {
+      setIsLoadingBalance(false);
+    }
+    
+    // Trigger stats refresh
+    try {
+      const { data: bets, error } = await supabase
+        .from('player_bets')
+        .select('bet_amount, profit_loss, cashout_amount, status')
+        .eq('wallet_address', walletAddress);
+
+      if (!error && bets) {
+        let totalWagered = 0, totalPayouts = 0, gamesPlayed = 0, profitLoss = 0;
+        
+        bets.forEach(bet => {
+          gamesPlayed++;
+          totalWagered += bet.bet_amount || 0;
+          if (bet.status === 'cashed_out' && bet.cashout_amount) {
+            totalPayouts += bet.cashout_amount;
+          }
+          profitLoss += bet.profit_loss || 0;
+        });
+
+        setUserStats({
+          totalWagered: Number(totalWagered.toFixed(6)),
+          totalPayouts: Number(totalPayouts.toFixed(6)),
+          gamesPlayed,
+          profitLoss: Number(profitLoss.toFixed(6))
+        });
+      }
+    } catch (error) {
+      console.error('Failed to refresh stats:', error);
+    } finally {
+      setIsLoadingStats(false);
     }
   };
 

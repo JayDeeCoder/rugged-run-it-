@@ -1,4 +1,4 @@
-// src/app/page.tsx
+// src/app/page.tsx - Fixed version with overflow issues resolved
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -82,8 +82,8 @@ export default function Home() {
 
   return (
     <Layout>
-      {/* Main container with proper overflow handling */}
-      <div className="w-full min-h-screen bg-[#0B0E16] overflow-x-hidden">
+      {/* FIXED: Main container - REMOVED overflow-x-hidden to prevent dropdown clipping */}
+      <div className="w-full min-h-screen bg-[#0B0E16]">
         
         {/* Content wrapper - single column on mobile, side-by-side on desktop */}
         <div className="flex flex-col lg:flex-row min-h-screen">
@@ -100,8 +100,8 @@ export default function Home() {
           {/* Mobile Chat - floating overlay, doesn't affect layout */}
           {isMobile && <MobileChat />}
           
-          {/* Main Content Area - full width with proper constraints */}
-          <div className="flex-1 flex flex-col w-full min-w-0 overflow-x-hidden">
+          {/* FIXED: Main Content Area - REMOVED overflow-x-hidden and min-w-0 */}
+          <div className="flex-1 flex flex-col w-full">
             
             {/* Login Prompt - fully responsive */}
             {!authenticated && (
@@ -141,13 +141,13 @@ export default function Home() {
               </div>
             )}
             
-            {/* Main Chart Container - now includes MiniCharts with real data */}
+            {/* FIXED: Main Chart Container - REMOVED overflow constraints */}
             <div className={`
-              flex-1 w-full min-w-0 overflow-x-hidden
+              flex-1 w-full
               ${authenticated ? '' : 'opacity-50 pointer-events-none'}
               ${isExtraSmall ? 'px-1' : isSmall ? 'px-2' : 'px-4 lg:px-0'}
             `}>
-              <div className="w-full max-w-full">
+              <div className="w-full">
                 <ChartContainer useMobileHeight={isMobile} />
               </div>
             </div>
@@ -162,9 +162,9 @@ export default function Home() {
               </div>
             )}
 
-            {/* Leaderboard Section - fully responsive, no mock data */}
+            {/* FIXED: Leaderboard Section - REMOVED overflow-x-hidden */}
             <div className={`
-              w-full max-w-full overflow-x-hidden
+              w-full
               ${isExtraSmall ? 'mt-2 mb-2 px-1' : 
                 isSmall ? 'mt-4 mb-4 px-2' : 
                 isMobile ? 'mt-6 mb-6 px-2' : 
@@ -172,7 +172,7 @@ export default function Home() {
               transition-opacity duration-300 
               ${(isLeaderboardVisible || isMobile || isTablet) ? 'opacity-100' : 'opacity-0'}
             `}>
-              <div className="w-full max-w-full">
+              <div className="w-full">
                 <Leaderboard />
               </div>
             </div>

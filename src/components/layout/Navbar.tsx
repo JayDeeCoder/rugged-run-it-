@@ -1,5 +1,6 @@
-// src/components/layout/Navbar.tsx - Fixed version with dropdown z-index issues resolved
+// src/components/layout/Navbar.tsx - Using React Portal for dropdown
 import { FC, useState, useEffect, useRef, useContext } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
@@ -22,17 +23,32 @@ const Navbar: FC = () => {
   const [showUsernameModal, setShowUsernameModal] = useState<boolean>(false);
   const [isLoadingBalance, setIsLoadingBalance] = useState<boolean>(false);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; right: number } | null>(null);
 
   // Get the embedded wallet if available
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   const walletAddress = embeddedWallet?.address || '';
 
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const userButtonRef = useRef<HTMLButtonElement>(null);
   useOutsideClick(userMenuRef as React.RefObject<HTMLElement>, () => setShowUserMenu(false));
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  // Calculate dropdown position when it opens
+  useEffect(() => {
+    if (showUserMenu && userButtonRef.current && isMounted) {
+      const rect = userButtonRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + window.scrollY + 8, // 8px spacing
+        right: window.innerWidth - rect.right
+      });
+    } else {
+      setDropdownPosition(null);
+    }
+  }, [showUserMenu, isMounted]);
 
   // Fetch real balance from Solana blockchain
   useEffect(() => {
@@ -143,9 +159,126 @@ const Navbar: FC = () => {
     }
   };
 
+  // Dropdown component that renders using portal
+  const DropdownMenu = () => {
+    if (!showUserMenu || !dropdownPosition || !isMounted) return null;
+
+    return createPortal(
+      <>
+        {/* Backdrop */}
+        <div 
+          className="fixed inset-0 z-[9998] bg-transparent"
+          onClick={() => setShowUserMenu(false)}
+        />
+        
+        {/* Dropdown Menu */}
+        <div 
+          ref={userMenuRef}
+          className="fixed z-[9999] w-56 bg-gray-800 rounded-md shadow-2xl border border-gray-700 animate-in fade-in-0 zoom-in-95 duration-200"
+          style={{
+            top: `${dropdownPosition.top}px`,
+            right: `${dropdownPosition.right}px`,
+          }}
+        >
+          <div className="py-2">
+            {/* User Info */}
+            <div className="px-4 py-2 border-b border-gray-700">
+              <div className="font-medium flex items-center justify-between">
+                <span className="truncate">{getUserDisplayName()}</span>
+                <button 
+                  onClick={handleSetUsername}
+                  className="text-xs bg-gray-700 hover:bg-gray-600 p-1 rounded transition-colors"
+                  title="Change username"
+                >
+                  <Edit size={12} />
+                </button>
+              </div>
+              <div className="text-sm text-gray-400 truncate">
+                {user?.email?.address || user?.phone?.number || 'No contact info'}
+              </div>
+            </div>
+
+            {/* Wallet Info */}
+            <div className="px-4 py-2 border-b border-gray-700">
+              {isWalletConnected ? (
+                <>
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-sm text-gray-400">Wallet:</span>
+                    <span className="text-sm font-mono">
+                      {`${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-400">Balance:</span>
+                    <span className="text-sm font-medium text-green-400">
+                      {isLoadingBalance ? 'Loading...' : `${walletBalance.toFixed(3)} SOL`}
+                    </span>
+                  </div>
+                  <button
+                    onClick={disconnectWallet}
+                    className="mt-2 w-full text-sm bg-gray-700 hover:bg-gray-600 rounded px-3 py-1 text-left flex items-center transition-colors"
+                  >
+                    <Wallet size={14} className="mr-2" />
+                    Disconnect Wallet
+                  </button>
+                </>
+              ) : (
+                <div className="text-center">
+                  <div className="text-sm text-gray-400 mb-2">
+                    {embeddedWallet ? 'Invalid wallet address' : 'No wallet connected'}
+                  </div>
+                  <div className="text-xs text-gray-500 mb-2">
+                    Wallet will be created automatically with your account
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Navigation Links */}
+            <div className="py-1">
+              <Link 
+                href="/dashboard" 
+                className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors block w-full" 
+                onClick={() => setShowUserMenu(false)}
+              >
+                <BarChart2 size={14} className="mr-2" /> Dashboard
+              </Link>
+              <Link 
+                href="/leaderboard" 
+                className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors block w-full" 
+                onClick={() => setShowUserMenu(false)}
+              >
+                <Trophy size={14} className="mr-2" /> Leaderboard
+              </Link>
+              <Link 
+                href="/settings" 
+                className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors block w-full" 
+                onClick={() => setShowUserMenu(false)}
+              >
+                <Settings size={14} className="mr-2" /> Settings
+              </Link>
+            </div>
+
+            {/* Logout */}
+            <div className="border-t border-gray-700 py-1">
+              <button
+                onClick={handleLogout}
+                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-700 flex items-center text-red-400 transition-colors"
+              >
+                <LogOut size={14} className="mr-2" />
+                Log Out
+              </button>
+            </div>
+          </div>
+        </div>
+      </>,
+      document.body
+    );
+  };
+
   if (!isMounted || !ready) {
     return (
-      <header className="bg-[#0d0d0f] py-2 px-3 border-b border-gray-800 text-white relative z-50">
+      <header className="bg-[#0d0d0f] py-2 px-3 border-b border-gray-800 text-white">
         <div className="container mx-auto flex items-center justify-between">
           <Link href="/" className="flex items-center">
             <Image
@@ -168,59 +301,60 @@ const Navbar: FC = () => {
   const isWalletConnected = embeddedWallet !== undefined && isValidSolanaAddress(walletAddress);
 
   return (
-    <header className="bg-[#0d0d0f] py-2 px-3 border-b border-gray-800 text-white relative z-50">
-      <div className="container mx-auto flex items-center justify-between">
-        <div className="flex items-center">
-          <Link href="/" className="flex items-center mr-4">
-            <Image
-              src="/images/ruggedfun-logo-resize-new.png"
-              alt="RUGGED.FUN"
-              width={140}
-              height={35}
-              className="object-contain"
-              priority
-            />
-          </Link>
-
-          <nav className="hidden md:flex items-center">
-            <Link href="/dashboard" className="px-3 py-1 hover:text-gray-300 text-sm transition-colors">
-              Dashboard
+    <>
+      <header className="bg-[#0d0d0f] py-2 px-3 border-b border-gray-800 text-white relative z-40">
+        <div className="container mx-auto flex items-center justify-between">
+          <div className="flex items-center">
+            <Link href="/" className="flex items-center mr-4">
+              <Image
+                src="/images/ruggedfun-logo-resize-new.png"
+                alt="RUGGED.FUN"
+                width={140}
+                height={35}
+                className="object-contain"
+                priority
+              />
             </Link>
-            <Link href="/leaderboard" className="px-3 py-1 hover:text-gray-300 text-sm transition-colors">
-              Leaderboard
-            </Link>
-          </nav>
-        </div>
 
-        <div className="flex items-center">
-          {authenticated ? (
-            <>
-              {/* User Stats */}
-              <div className="hidden md:flex items-center mr-3">
-                {userLevel && (
-                  <div className="flex items-center bg-gray-800 rounded-full px-2 py-1 mr-2">
-                    <span className="text-xs text-gray-400 mr-1">Lv.</span>
-                    <span className="text-sm font-medium">{userLevel}</span>
+            <nav className="hidden md:flex items-center">
+              <Link href="/dashboard" className="px-3 py-1 hover:text-gray-300 text-sm transition-colors">
+                Dashboard
+              </Link>
+              <Link href="/leaderboard" className="px-3 py-1 hover:text-gray-300 text-sm transition-colors">
+                Leaderboard
+              </Link>
+            </nav>
+          </div>
+
+          <div className="flex items-center">
+            {authenticated ? (
+              <>
+                {/* User Stats */}
+                <div className="hidden md:flex items-center mr-3">
+                  {userLevel && (
+                    <div className="flex items-center bg-gray-800 rounded-full px-2 py-1 mr-2">
+                      <span className="text-xs text-gray-400 mr-1">Lv.</span>
+                      <span className="text-sm font-medium">{userLevel}</span>
+                    </div>
+                  )}
+                  <div className="hidden md:block h-2 w-20 bg-gray-800 rounded-full mr-2">
+                    <div 
+                      className="h-full bg-green-500 rounded-full transition-all duration-300" 
+                      style={{ width: `${Math.min(experience || 0, 100)}%` }}
+                    ></div>
                   </div>
-                )}
-                <div className="hidden md:block h-2 w-20 bg-gray-800 rounded-full mr-2">
-                  <div 
-                    className="h-full bg-green-500 rounded-full transition-all duration-300" 
-                    style={{ width: `${Math.min(experience || 0, 100)}%` }}
-                  ></div>
+                  {crates > 0 && (
+                    <div className="flex items-center bg-yellow-900 rounded-full px-2 py-1 mr-2">
+                      <span className="text-xs text-yellow-500 mr-1">🎁</span>
+                      <span className="text-sm font-medium text-yellow-400">{crates}</span>
+                    </div>
+                  )}
                 </div>
-                {crates > 0 && (
-                  <div className="flex items-center bg-yellow-900 rounded-full px-2 py-1 mr-2">
-                    <span className="text-xs text-yellow-500 mr-1">🎁</span>
-                    <span className="text-sm font-medium text-yellow-400">{crates}</span>
-                  </div>
-                )}
-              </div>
 
-              {/* User Menu */}
-              <div className="relative z-50" ref={userMenuRef}>
+                {/* User Menu Button */}
                 <button
-                  className="flex items-center bg-gray-800 hover:bg-gray-700 rounded-md px-2 py-1 transition-colors relative z-50"
+                  ref={userButtonRef}
+                  className="flex items-center bg-gray-800 hover:bg-gray-700 rounded-md px-2 py-1 transition-colors"
                   onClick={() => setShowUserMenu(!showUserMenu)}
                   aria-label="User menu"
                 >
@@ -235,169 +369,68 @@ const Navbar: FC = () => {
                   </div>
                   <ChevronDown size={14} className={`transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
                 </button>
-
-                {showUserMenu && (
+              </>
+            ) : (
+              <button
+                onClick={handleLogin}
+                disabled={isLoggingIn}
+                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-3 py-1 rounded-md text-sm transition-colors flex items-center"
+              >
+                {isLoggingIn ? (
                   <>
-                    {/* Backdrop to prevent clicks */}
-                    <div 
-                      className="fixed inset-0 z-40" 
-                      onClick={() => setShowUserMenu(false)}
-                    />
-                    
-                    {/* Dropdown Menu */}
-                    <div className="absolute right-0 mt-2 w-56 bg-gray-800 rounded-md shadow-xl overflow-hidden z-50 border border-gray-700 transform transition-all duration-200 ease-out">
-                      <div className="py-2">
-                        {/* User Info */}
-                        <div className="px-4 py-2 border-b border-gray-700">
-                          <div className="font-medium flex items-center justify-between">
-                            <span className="truncate">{getUserDisplayName()}</span>
-                            <button 
-                              onClick={handleSetUsername}
-                              className="text-xs bg-gray-700 hover:bg-gray-600 p-1 rounded transition-colors"
-                              title="Change username"
-                            >
-                              <Edit size={12} />
-                            </button>
-                          </div>
-                          <div className="text-sm text-gray-400 truncate">
-                            {user?.email?.address || user?.phone?.number || 'No contact info'}
-                          </div>
-                        </div>
-
-                        {/* Wallet Info */}
-                        <div className="px-4 py-2 border-b border-gray-700">
-                          {isWalletConnected ? (
-                            <>
-                              <div className="flex justify-between items-center mb-1">
-                                <span className="text-sm text-gray-400">Wallet:</span>
-                                <span className="text-sm font-mono">
-                                  {`${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`}
-                                </span>
-                              </div>
-                              <div className="flex justify-between items-center">
-                                <span className="text-sm text-gray-400">Balance:</span>
-                                <span className="text-sm font-medium text-green-400">
-                                  {isLoadingBalance ? 'Loading...' : `${walletBalance.toFixed(3)} SOL`}
-                                </span>
-                              </div>
-                              <button
-                                onClick={disconnectWallet}
-                                className="mt-2 w-full text-sm bg-gray-700 hover:bg-gray-600 rounded px-3 py-1 text-left flex items-center transition-colors"
-                              >
-                                <Wallet size={14} className="mr-2" />
-                                Disconnect Wallet
-                              </button>
-                            </>
-                          ) : (
-                            <div className="text-center">
-                              <div className="text-sm text-gray-400 mb-2">
-                                {embeddedWallet ? 'Invalid wallet address' : 'No wallet connected'}
-                              </div>
-                              <div className="text-xs text-gray-500 mb-2">
-                                Wallet will be created automatically with your account
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Navigation Links */}
-                        <div className="py-1">
-                          <Link 
-                            href="/dashboard" 
-                            className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors block w-full" 
-                            onClick={() => setShowUserMenu(false)}
-                          >
-                            <BarChart2 size={14} className="mr-2" /> Dashboard
-                          </Link>
-                          <Link 
-                            href="/leaderboard" 
-                            className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors block w-full" 
-                            onClick={() => setShowUserMenu(false)}
-                          >
-                            <Trophy size={14} className="mr-2" /> Leaderboard
-                          </Link>
-                          <Link 
-                            href="/settings" 
-                            className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors block w-full" 
-                            onClick={() => setShowUserMenu(false)}
-                          >
-                            <Settings size={14} className="mr-2" /> Settings
-                          </Link>
-                        </div>
-
-                        {/* Logout */}
-                        <div className="border-t border-gray-700 py-1">
-                          <button
-                            onClick={handleLogout}
-                            className="w-full text-left px-4 py-2 text-sm hover:bg-gray-700 flex items-center text-red-400 transition-colors"
-                          >
-                            <LogOut size={14} className="mr-2" />
-                            Log Out
-                          </button>
-                        </div>
-                      </div>
-                    </div>
+                    <div className="animate-spin h-3 w-3 border border-white border-t-transparent rounded-full mr-2"></div>
+                    Logging in...
                   </>
+                ) : (
+                  'Login'
                 )}
-              </div>
-            </>
-          ) : (
-            <button
-              onClick={handleLogin}
-              disabled={isLoggingIn}
-              className="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-3 py-1 rounded-md text-sm transition-colors flex items-center"
+              </button>
+            )}
+
+            <button 
+              className="ml-3 md:hidden" 
+              onClick={() => setShowMobileMenu(!showMobileMenu)}
+              aria-label="Mobile menu"
             >
-              {isLoggingIn ? (
-                <>
-                  <div className="animate-spin h-3 w-3 border border-white border-t-transparent rounded-full mr-2"></div>
-                  Logging in...
-                </>
-              ) : (
-                'Login'
-              )}
+              <Menu size={22} />
             </button>
-          )}
-
-          <button 
-            className="ml-3 md:hidden" 
-            onClick={() => setShowMobileMenu(!showMobileMenu)}
-            aria-label="Mobile menu"
-          >
-            <Menu size={22} />
-          </button>
+          </div>
         </div>
-      </div>
 
-      {/* Mobile Menu */}
-      {showMobileMenu && (
-        <div className="md:hidden bg-gray-800 mt-3 rounded-md p-2 relative z-40">
-          <nav className="flex flex-col">
-            <Link 
-              href="/dashboard" 
-              className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm transition-colors"
-              onClick={() => setShowMobileMenu(false)}
-            >
-              Dashboard
-            </Link>
-            <Link 
-              href="/leaderboard" 
-              className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm transition-colors"
-              onClick={() => setShowMobileMenu(false)}
-            >
-              Leaderboard
-            </Link>
-            {authenticated && (
+        {/* Mobile Menu */}
+        {showMobileMenu && (
+          <div className="md:hidden bg-gray-800 mt-3 rounded-md p-2">
+            <nav className="flex flex-col">
               <Link 
-                href="/settings" 
+                href="/dashboard" 
                 className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm transition-colors"
                 onClick={() => setShowMobileMenu(false)}
               >
-                Settings
+                Dashboard
               </Link>
-            )}
-          </nav>
-        </div>
-      )}
+              <Link 
+                href="/leaderboard" 
+                className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm transition-colors"
+                onClick={() => setShowMobileMenu(false)}
+              >
+                Leaderboard
+              </Link>
+              {authenticated && (
+                <Link 
+                  href="/settings" 
+                  className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm transition-colors"
+                  onClick={() => setShowMobileMenu(false)}
+                >
+                  Settings
+                </Link>
+              )}
+            </nav>
+          </div>
+        )}
+      </header>
+
+      {/* Portal-rendered dropdown */}
+      <DropdownMenu />
 
       {/* Username Modal */}
       <UsernameModal 
@@ -406,7 +439,7 @@ const Navbar: FC = () => {
         onSubmit={handleUsernameSubmit}
         currentUsername={currentUser?.username || ''}
       />
-    </header>
+    </>
   );
 };
 

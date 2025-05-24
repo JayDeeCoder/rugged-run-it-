@@ -680,3 +680,89 @@ svg {
     transition-duration: 0.01ms !important;
   }
 }
+.portal-dropdown {
+  position: fixed !important;
+  z-index: 9999 !important;
+  pointer-events: auto !important;
+}
+
+/* Prevent any parent elements from creating problematic stacking contexts */
+body {
+  /* Remove any transform, filter, or will-change that might create stacking contexts */
+  transform: none !important;
+  filter: none !important;
+  will-change: auto !important;
+}
+
+/* Fix for any elements that might interfere with dropdown positioning */
+.navbar-container {
+  position: relative;
+  z-index: 40;
+  /* Avoid creating new stacking contexts unless necessary */
+}
+
+/* Ensure dropdowns can escape overflow constraints */
+.dropdown-portal-root {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Animation classes for smooth dropdown transitions */
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dropdown-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.95);
+  }
+}
+
+.animate-dropdown-in {
+  animation: dropdown-in 200ms ease-out forwards;
+}
+
+.animate-dropdown-out {
+  animation: dropdown-out 150ms ease-in forwards;
+}
+
+/* Prevent layout shift issues */
+.layout-stable {
+  contain: layout style;
+}
+
+/* Debug helper - temporarily add this class to see stacking contexts */
+.debug-stacking-context {
+  outline: 2px solid red !important;
+  background: rgba(255, 0, 0, 0.1) !important;
+}
+
+/* Add these Tailwind-style classes if you need them */
+.z-dropdown {
+  z-index: 9999;
+}
+
+.z-backdrop {
+  z-index: 9998;
+}
+
+.z-modal {
+  z-index: 10000;
+}

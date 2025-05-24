@@ -145,12 +145,14 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   useEffect(() => {
     if (!currentGame || !isMountedRef.current) return;
 
-    // Reset user bet state on new game
+    // Reset user bet state on new game - COMPLETE CLEAN SLATE
     if (currentGame.gameNumber !== lastGameNumber) {
       setUserBet(0);
       setBetEntryMultiplier(1.0);
-      setUserCashedOut(false); // Reset cashout flag for new game
+      setUserCashedOut(false);
       setLastGameNumber(currentGame.gameNumber);
+      
+      console.log(`🎮 New game #${currentGame.gameNumber} - User state reset`);
     }
 
     // Handle game crash - only process real server events

@@ -609,12 +609,26 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
       }
     }
 
-    // Reset for new game - start fresh
+    // Reset for new game - COMPLETE CLEAN SLATE
     if (serverGameStatus === 'waiting' && candleData.length > 0) {
       setCandleData([]);
-      setCashoutMultiplier(undefined); // Reset cashout tracking
+      setCashoutMultiplier(undefined);
       lastMilestoneRef.current = 0;
       setPeakMultiplier(1.0);
+      
+      // ENHANCED: Reset ALL visual effects for clean slate
+      setIsShaking(false);
+      setShakeIntensity(0);
+      setShowExplosion(false);
+      setExplosionColor('rgba(251, 191, 36, 0.6)');
+      setMilestoneText('');
+      setMilestoneTextColor('#FACC15');
+      setMilestoneOpacity(0);
+      setDangerLevel(0);
+      setSafeLevel(0);
+      setShowRugEffect(false);
+      
+      console.log('🧹 Chart reset - Clean slate for new game');
     }
 
     setLastServerMultiplier(serverMultiplier);

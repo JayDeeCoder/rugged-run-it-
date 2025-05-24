@@ -29,7 +29,7 @@ const ChatBox: FC = () => {
   };
 
   return (
-    <div className="flex flex-col font-dynapuff max-h-[750px] h-[750px] bg-[#0d0d0f] border-r border-b border-gray-800">
+    <div className="flex flex-col font-dynapuff h-[70vh] max-h-[800px] min-h-[400px] bg-[#0d0d0f] border-r border-b border-gray-800">
       {/* Header */}
       <div className="flex justify-between p-3 border-b border-gray-800 bg-[#0d0d0f] flex-shrink-0">
         <h2 className="text-sm text-white font-medium flex items-center">
@@ -67,10 +67,11 @@ const ChatBox: FC = () => {
       {/* Chat messages */}
       <div 
         ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto scrollbar-hide min-h-0 max-h-[630px]"
+        className="flex-1 overflow-y-auto scrollbar-hide min-h-0"
         style={{
           scrollbarWidth: 'none', 
           msOverflowStyle: 'none',
+          maxHeight: 'calc(70vh - 120px)', // Subtract header + input heights
         }}
       >
         {!authenticated ? (

@@ -58,7 +58,7 @@ const calculateYScale = (candles: Candle[], currentMultiplier: number, isMobile:
   return { min: adjustedMin, max: adjustedMax };
 };
 
-// ENHANCED: SVG-based candle renderer with improved margins and mobile optimization
+// ENHANCED: SVG-based candle renderer with fixed margins and proper OHLC continuity
 const CandlestickSVG: FC<{
   candles: Candle[], 
   width: number, 
@@ -71,81 +71,81 @@ const CandlestickSVG: FC<{
   isMobile?: boolean
 }> = ({ candles, width, height, minValue, maxValue, currentPrice, betPlacedAt, gameStatus, isMobile = false }) => {
   
-  // ENHANCED: Improved scaling with proper margins to prevent cutoff
+  // FIXED: Improved scaling with proper margins to prevent cutoff
   const scaleY = useCallback((value: number) => {
     const clampedValue = Math.max(Math.min(value, maxValue), minValue);
-    const topMargin = isMobile ? 15 : 20;
-    const bottomMargin = isMobile ? 15 : 20;
+    const topMargin = isMobile ? 20 : 25;
+    const bottomMargin = isMobile ? 20 : 25;
     const usableHeight = height - topMargin - bottomMargin;
     
     const scaledY = topMargin + usableHeight - ((clampedValue - minValue) / (maxValue - minValue)) * usableHeight;
     return Math.min(Math.max(scaledY, topMargin), height - bottomMargin);
   }, [height, minValue, maxValue, isMobile]);
   
-  // ENHANCED: Dynamic sizing for mobile optimization
-  const chartMargin = isMobile ? 35 : 50;
-  const labelWidth = isMobile ? 30 : 40;
-  const availableWidth = width - chartMargin - labelWidth;
+  // FIXED: Proper chart margins to prevent line cutoff
+  const leftMargin = isMobile ? 45 : 55;
+  const rightMargin = isMobile ? 10 : 15;
+  const chartWidth = width - leftMargin - rightMargin;
   const candleCount = Math.max(candles.length, 1);
-  const candleWidth = Math.max(isMobile ? 2 : 3, Math.min(isMobile ? 12 : 20, availableWidth / candleCount - 1));
-  const spacing = isMobile ? 0.5 : 1;
+  const candleWidth = Math.max(isMobile ? 3 : 4, Math.min(isMobile ? 15 : 25, chartWidth / candleCount - 2));
+  const spacing = isMobile ? 1 : 2;
   
   const totalWidthNeeded = candles.length * (candleWidth + spacing);
-  const startX = labelWidth + Math.max(5, (availableWidth - totalWidthNeeded) / 2);
+  const startX = leftMargin + Math.max(0, (chartWidth - totalWidthNeeded) / 2);
   
   const baselineY = scaleY(1.0);
   
   return (
     <svg width={width} height={height} className="candlestick-svg">
-      {/* Background grid - less dense on mobile */}
+      {/* Background grid - properly contained within margins */}
       {(isMobile ? [0.25, 0.5, 0.75] : [0.2, 0.4, 0.6, 0.8]).map((ratio, i) => (
         <line 
           key={`grid-${i}`}
-          x1={labelWidth} 
+          x1={leftMargin} 
           y1={height * ratio} 
-          x2={width - 5} 
+          x2={width - rightMargin} 
           y2={height * ratio} 
           stroke="rgba(255, 255, 255, 0.05)" 
           strokeWidth={1} 
         />
       ))}
       
-      {/* ENHANCED: 1.0x baseline - always visible with proper contrast */}
+      {/* FIXED: 1.0x baseline - spans full chart width within margins */}
       <line 
-        x1={labelWidth} 
+        x1={leftMargin} 
         y1={baselineY} 
-        x2={width - 5} 
+        x2={width - rightMargin} 
         y2={baselineY} 
         stroke="#FFFFFF" 
-        strokeWidth={isMobile ? 1.5 : 2}
-        strokeDasharray={isMobile ? "3,2" : "4,3"}
+        strokeWidth={isMobile ? 2 : 2.5}
+        strokeDasharray={isMobile ? "4,3" : "5,4"}
       />
       <text 
-        x={5} 
-        y={baselineY - 3} 
-        fontSize={isMobile ? 9 : 11} 
+        x={8} 
+        y={baselineY - 4} 
+        fontSize={isMobile ? 10 : 12} 
         fontWeight="bold"
         fill="#FFFFFF"
       >
         1.00x
       </text>
       
-      {/* ENHANCED: Entry point line with better visibility */}
+      {/* FIXED: Entry point line - spans full chart width */}
       {betPlacedAt && betPlacedAt !== 1.0 && (
         <>
           <line 
-            x1={labelWidth} 
+            x1={leftMargin} 
             y1={scaleY(betPlacedAt)} 
-            x2={width - 5} 
+            x2={width - rightMargin} 
             y2={scaleY(betPlacedAt)} 
             stroke="#3B82F6"
-            strokeWidth={isMobile ? 1.5 : 2}
-            strokeDasharray={isMobile ? "4,2" : "5,3"} 
+            strokeWidth={isMobile ? 2 : 2.5}
+            strokeDasharray={isMobile ? "5,3" : "6,4"} 
           />
           <text 
-            x={5} 
-            y={scaleY(betPlacedAt) - 3} 
-            fontSize={isMobile ? 8 : 10} 
+            x={8} 
+            y={scaleY(betPlacedAt) - 4} 
+            fontSize={isMobile ? 9 : 11} 
             fontWeight="bold"
             fill="#3B82F6"
           >
@@ -154,16 +154,16 @@ const CandlestickSVG: FC<{
         </>
       )}
       
-      {/* ENHANCED: Y-axis labels with better spacing for mobile */}
+      {/* Y-axis labels with better spacing */}
       {(isMobile ? [0.2, 0.5, 0.8] : [0.15, 0.35, 0.55, 0.75, 0.95]).map((ratio, i) => {
         const yPos = height * ratio;
         const priceValue = minValue + (maxValue - minValue) * (1 - ratio);
         return (
           <text 
             key={`price-${i}`}
-            x={3} 
-            y={yPos + 3} 
-            fontSize={isMobile ? 8 : 9} 
+            x={5} 
+            y={yPos + 4} 
+            fontSize={isMobile ? 9 : 10} 
             fill="rgba(255, 255, 255, 0.6)"
             textAnchor="start"
           >
@@ -172,7 +172,7 @@ const CandlestickSVG: FC<{
         );
       })}
       
-      {/* Candles with enhanced mobile rendering and dramatic crash visualization */}
+      {/* ENHANCED: Continuous candlesticks with proper OHLC rendering */}
       {candles.map((candle, i) => {
         const x = startX + i * (candleWidth + spacing);
         const open = scaleY(candle.open);
@@ -183,26 +183,37 @@ const CandlestickSVG: FC<{
         // Enhanced crash candle detection - dramatic red for big drops
         const priceChange = candle.close - candle.open;
         const percentChange = Math.abs(priceChange) / candle.open;
-        const isCrashCandle = priceChange < 0 && percentChange > 0.5; // 50%+ drop
+        const isCrashCandle = priceChange < 0 && percentChange > 0.3; // 30%+ drop
         
+        const isUpCandle = candle.close > candle.open;
         const fill = isCrashCandle 
           ? '#DC2626' // Dark red for crash
-          : candle.close > candle.open 
-            ? '#4AFA9A' // Green for up
-            : '#E33F64'; // Regular red for down
+          : isUpCandle 
+            ? '#10B981' // Green for up
+            : '#EF4444'; // Red for down
             
-        const wickWidth = Math.max(1, candleWidth / (isMobile ? 8 : 10));
-        const bodyHeight = Math.max(Math.abs(close - open), isCrashCandle ? 3 : 1);
+        const wickWidth = Math.max(1, candleWidth / (isMobile ? 6 : 8));
+        const bodyHeight = Math.max(Math.abs(close - open), isCrashCandle ? 4 : 2);
         
         return (
           <g key={`candle-${i}`}>
-            {/* Wick */}
+            {/* Upper wick */}
             <line 
               x1={x + candleWidth/2} 
               y1={high} 
               x2={x + candleWidth/2} 
+              y2={Math.min(open, close)} 
+              stroke={isCrashCandle ? "#991B1B" : "rgba(200, 200, 200, 0.8)"}
+              strokeWidth={isCrashCandle ? Math.max(2, wickWidth * 1.5) : wickWidth}
+            />
+            
+            {/* Lower wick */}
+            <line 
+              x1={x + candleWidth/2} 
+              y1={Math.max(open, close)} 
+              x2={x + candleWidth/2} 
               y2={low} 
-              stroke={isCrashCandle ? "#991B1B" : "rgba(180, 180, 180, 0.7)"}
+              stroke={isCrashCandle ? "#991B1B" : "rgba(200, 200, 200, 0.8)"}
               strokeWidth={isCrashCandle ? Math.max(2, wickWidth * 1.5) : wickWidth}
             />
             
@@ -213,8 +224,8 @@ const CandlestickSVG: FC<{
               width={candleWidth} 
               height={bodyHeight} 
               fill={fill}
-              stroke={isCrashCandle ? "#7F1D1D" : "none"}
-              strokeWidth={isCrashCandle ? 1 : 0}
+              stroke={isCrashCandle ? "#7F1D1D" : isUpCandle ? "#059669" : "#DC2626"}
+              strokeWidth={1}
             />
             
             {/* Extra crash effect - red glow */}
@@ -226,39 +237,52 @@ const CandlestickSVG: FC<{
                 height={bodyHeight + 2} 
                 fill="none"
                 stroke="#DC2626"
+                strokeWidth={1}
+                opacity={0.7}
+              />
+            )}
+            
+            {/* Connection line to next candle for continuity visualization */}
+            {i < candles.length - 1 && (
+              <line 
+                x1={x + candleWidth} 
+                y1={close} 
+                x2={startX + (i + 1) * (candleWidth + spacing)} 
+                y2={scaleY(candles[i + 1].open)} 
+                stroke="rgba(100, 100, 100, 0.3)"
                 strokeWidth={0.5}
-                opacity={0.6}
+                strokeDasharray="1,1"
               />
             )}
           </g>
         );
       })}
       
-      {/* ENHANCED: Current price line with better mobile visibility */}
+      {/* FIXED: Current price line - spans full chart width */}
       <line 
-        x1={labelWidth} 
+        x1={leftMargin} 
         y1={scaleY(currentPrice)} 
-        x2={width - 5} 
+        x2={width - rightMargin} 
         y2={scaleY(currentPrice)} 
         stroke={gameStatus === 'crashed' ? "#EF4444" : "#fbbf24"} 
-        strokeWidth={isMobile ? 2 : 3} 
-        strokeDasharray={isMobile ? "4,2" : "5,3"} 
+        strokeWidth={isMobile ? 2.5 : 3.5} 
+        strokeDasharray={isMobile ? "5,3" : "6,4"} 
       />
       
-      {/* ENHANCED: Current price label with responsive sizing */}
-      <g transform={`translate(${Math.max(labelWidth, width - (isMobile ? 55 : 70))}, ${Math.min(scaleY(currentPrice) - (isMobile ? 12 : 15), height - (isMobile ? 25 : 35))})`}>
+      {/* Current price label with better positioning */}
+      <g transform={`translate(${Math.max(leftMargin, width - rightMargin - (isMobile ? 60 : 75))}, ${Math.min(scaleY(currentPrice) - (isMobile ? 15 : 18), height - (isMobile ? 30 : 40))})`}>
         <rect 
           x={0} 
           y={0} 
-          width={isMobile ? 50 : 65} 
-          height={isMobile ? 20 : 25} 
-          rx={isMobile ? 3 : 4} 
+          width={isMobile ? 55 : 70} 
+          height={isMobile ? 22 : 28} 
+          rx={isMobile ? 4 : 5} 
           fill={gameStatus === 'crashed' ? "#EF4444" : "#fbbf24"} 
         />
         <text 
-          x={isMobile ? 25 : 32} 
-          y={isMobile ? 14 : 17} 
-          fontSize={isMobile ? 11 : 13} 
+          x={isMobile ? 27 : 35} 
+          y={isMobile ? 15 : 19} 
+          fontSize={isMobile ? 11 : 14} 
           fontWeight="bold" 
           textAnchor="middle" 
           fill="#000"
@@ -273,7 +297,7 @@ const CandlestickSVG: FC<{
 const CandlestickChart: FC<CandlestickChartProps> = ({
   height = 400,
   currency = 'SOL',
-  maxCandles = 15,
+  maxCandles = 12, // Reduced default for better visibility
   onMultiplierUpdate,
   onEffectComplete,
   onGameCrash,
@@ -288,8 +312,9 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gameStateRef = useRef(createInitialTradingState());
   
-  // ENHANCED: Responsive height calculation with smaller mobile sizes
+  // ENHANCED: Responsive sizing with fewer candles on mobile for better visibility
   const isMobile = useMobileHeight;
+  const effectiveMaxCandles = isMobile ? 6 : maxCandles; // Much fewer on mobile
   const chartHeight = isMobile ? Math.min(height, 240) : height;
   
   const [containerWidth, setContainerWidth] = useState<number>(0);
@@ -309,7 +334,7 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
   const [showRugEffect, setShowRugEffect] = useState(false);
   const [peakMultiplier, setPeakMultiplier] = useState<number>(1.0);
 
-  // Milestone tracking - PRESERVED
+  // Milestone tracking - PRESERVED with mobile optimization
   const lastMilestoneRef = useRef<number>(0);
   const milestones = useMemo(() => isMobile ? [2, 5, 10, 20, 50] : [2, 3, 5, 10, 15, 20, 25, 50, 75, 100], [isMobile]);
   
@@ -448,7 +473,7 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
     }, isMobile ? 2000 : 3000);
   }, [onGameCrash, peakMultiplier, isMobile]);
 
-  // ENHANCED: Real server data synchronization with proper rug pull candle
+  // ENHANCED: Real server data synchronization with proper continuous OHLC candlestick building
   useEffect(() => {
     if (!isServerConnected) return;
 
@@ -457,21 +482,28 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
       setPeakMultiplier(serverMultiplier);
     }
 
-    // Handle game crash from server - CREATE RUG PULL CANDLE
+    // Handle game crash from server - CREATE FINAL RUG PULL CANDLE
     if (serverGameStatus === 'crashed' && lastServerMultiplier !== serverMultiplier) {
-      // Create dramatic red candle showing the rug pull
-      const rugCandle: Candle = {
-        timestamp: new Date().toISOString(), // Convert to string
-        open: peakMultiplier, // Open at peak
-        high: peakMultiplier, // High was the peak
-        low: Math.min(serverMultiplier, 0.1), // Low is crash point or very low
-        close: serverMultiplier, // Close at crash point
-        volume: 100 // High volume for crash
-      };
-
+      // Finalize current candle and create dramatic crash candle
       setCandleData(prev => {
-        const updatedCandles = [...prev, rugCandle];
-        const maxCandlesForScreen = isMobile ? Math.min(maxCandles, 10) : maxCandles;
+        if (prev.length === 0) return prev;
+        
+        const updatedCandles = [...prev];
+        const lastCandle = updatedCandles[updatedCandles.length - 1];
+        
+        // Finalize the last candle with crash data
+        const crashCandle: Candle = {
+          timestamp: new Date().toISOString(),
+          open: lastCandle.close, // Open at previous candle's close for continuity
+          high: Math.max(lastCandle.close, peakMultiplier), // High includes peak
+          low: Math.min(serverMultiplier, 0.1), // Low is crash point
+          close: serverMultiplier, // Close at crash point
+          volume: 100 // High volume for crash
+        };
+
+        updatedCandles[updatedCandles.length - 1] = crashCandle;
+        
+        const maxCandlesForScreen = effectiveMaxCandles;
         if (updatedCandles.length > maxCandlesForScreen) {
           return updatedCandles.slice(-maxCandlesForScreen);
         }
@@ -484,35 +516,74 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
       lastMilestoneRef.current = 0;
     }
 
-    // Generate visual candles based on server multiplier changes during active game
-    if (serverGameStatus === 'active' && Math.abs(serverMultiplier - lastServerMultiplier) > 0.01) {
-      const { candle } = generateCandle(gameStateRef.current);
-      
-      // Override candle with real server data and fix timestamp type
-      candle.timestamp = new Date().toISOString(); // Fix timestamp type
-      candle.close = serverMultiplier;
-      candle.high = Math.max(candle.high, serverMultiplier);
-      candle.low = Math.min(candle.low, serverMultiplier);
-      
+    // PROPER CONTINUOUS CANDLESTICK BUILDING during active game
+    if (serverGameStatus === 'active' && Math.abs(serverMultiplier - lastServerMultiplier) > 0.005) {
       setCandleData(prev => {
-        const updatedCandles = [...prev, candle];
-        const maxCandlesForScreen = isMobile ? Math.min(maxCandles, 10) : maxCandles;
+        const maxCandlesForScreen = effectiveMaxCandles;
+        
+        if (prev.length === 0) {
+          // First candle of the game - starts at 1.0x
+          const firstCandle: Candle = {
+            timestamp: new Date().toISOString(),
+            open: 1.0,
+            high: Math.max(1.0, serverMultiplier),
+            low: Math.min(1.0, serverMultiplier),
+            close: serverMultiplier,
+            volume: 10
+          };
+          return [firstCandle];
+        }
+
+        const updatedCandles = [...prev];
+        const currentCandle = updatedCandles[updatedCandles.length - 1];
+        const candleAge = Date.now() - new Date(currentCandle.timestamp).getTime();
+        
+        // Determine if we should create a new candle or update the current one
+        const shouldCreateNewCandle = 
+          candleAge > (isMobile ? 3000 : 2000) || // Time-based: 2-3 seconds
+          Math.abs(serverMultiplier - currentCandle.open) > (isMobile ? 1.0 : 0.8) || // Price movement threshold
+          updatedCandles.length < 3; // Always create at least 3 candles for visual
+
+        if (shouldCreateNewCandle) {
+          // Create new candle that opens at the previous candle's close (PROPER CONTINUITY)
+          const newCandle: Candle = {
+            timestamp: new Date().toISOString(),
+            open: currentCandle.close, // CRITICAL: Open at previous close for continuity
+            high: Math.max(currentCandle.close, serverMultiplier),
+            low: Math.min(currentCandle.close, serverMultiplier),
+            close: serverMultiplier,
+            volume: Math.random() * 20 + 10
+          };
+          
+          updatedCandles.push(newCandle);
+        } else {
+          // Update current candle with new price data (live candle)
+          updatedCandles[updatedCandles.length - 1] = {
+            ...currentCandle,
+            high: Math.max(currentCandle.high, serverMultiplier),
+            low: Math.min(currentCandle.low, serverMultiplier),
+            close: serverMultiplier, // Always update close to current price
+            volume: currentCandle.volume + 1
+          };
+        }
+
+        // Check for visual effects on the current price
+        checkForEffects(serverMultiplier);
+        
+        // Maintain max candles
         if (updatedCandles.length > maxCandlesForScreen) {
           return updatedCandles.slice(-maxCandlesForScreen);
         }
         return updatedCandles;
       });
 
-      // Check for visual effects
-      checkForEffects(serverMultiplier);
-      
-      // Update parent
+      // Update parent component
       if (onMultiplierUpdate) {
         onMultiplierUpdate(serverMultiplier);
       }
     }
 
-    // Reset for new game
+    // Reset for new game - start fresh
     if (serverGameStatus === 'waiting' && candleData.length > 0) {
       setCandleData([]);
       lastMilestoneRef.current = 0;
@@ -520,7 +591,7 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
     }
 
     setLastServerMultiplier(serverMultiplier);
-  }, [serverMultiplier, serverGameStatus, isServerConnected, lastServerMultiplier, checkForEffects, onMultiplierUpdate, triggerRugEffect, maxCandles, isMobile, candleData.length]);
+  }, [serverMultiplier, serverGameStatus, isServerConnected, lastServerMultiplier, checkForEffects, onMultiplierUpdate, triggerRugEffect, effectiveMaxCandles, isMobile, candleData.length]);
 
   return (
     <div 

@@ -41,11 +41,11 @@ interface TradingControlsProps {
   isMobile?: boolean;
 }
 
-// Solana connection for balance checks
-const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+// Solana connection for balance checks (using correct Alchemy RPC)
+const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
-// Enhanced wallet balance hook
+// Enhanced wallet balance hook (auto-refresh only)
 const useWalletBalance = (walletAddress: string) => {
   const [balance, setBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -78,7 +78,7 @@ const useWalletBalance = (walletAddress: string) => {
     }
   }, [walletAddress, updateBalance]);
 
-  return { balance, loading, updateBalance, lastUpdated };
+  return { balance, loading, lastUpdated };
 };
 
 // Compact Game Info Component
@@ -192,7 +192,7 @@ const CompactGameInfo: FC<{
   );
 };
 
-// Enhanced Balance Display Component with real-time updates
+// Balance Display Component (auto-refresh only)
 const BalanceDisplay: FC<{
   currentToken: TokenType;
   activeBalance: number;
@@ -204,7 +204,6 @@ const BalanceDisplay: FC<{
   showExpanded: boolean;
   onToggleExpanded: () => void;
   isLoading: boolean;
-  onRefreshBalance: () => void;
 }> = ({ 
   currentToken, 
   activeBalance, 
@@ -215,8 +214,7 @@ const BalanceDisplay: FC<{
   isMobile, 
   showExpanded, 
   onToggleExpanded,
-  isLoading,
-  onRefreshBalance
+  isLoading
 }) => {
   const formatBalance = (balance: number, token: TokenType) => {
     if (token === TokenType.SOL) {
@@ -251,15 +249,7 @@ const BalanceDisplay: FC<{
             </div>
           </div>
           <div className="flex items-center space-x-2">
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                onRefreshBalance();
-              }}
-              className="text-gray-400 hover:text-white"
-            >
-              <Wallet className="w-4 h-4" />
-            </button>
+            <Wallet className="w-4 h-4 text-gray-400" />
             <span className="text-gray-400 text-sm">{showExpanded ? '▲' : '▼'}</span>
           </div>
         </div>
@@ -342,15 +332,8 @@ const BalanceDisplay: FC<{
           </div>
         </div>
         
-        {/* Token Switch Buttons and Refresh */}
+        {/* Token Switch Buttons */}
         <div className="flex space-x-2">
-          <button
-            onClick={onRefreshBalance}
-            className="px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600"
-            disabled={isLoading}
-          >
-            {isLoading ? '↻' : '⟳'}
-          </button>
           <button
             onClick={() => onTokenChange(TokenType.SOL)}
             className={`px-3 py-1 text-xs rounded ${
@@ -962,8 +945,8 @@ const TradingControls: FC<TradingControlsProps> = ({
   // Enhanced game server connection (compatible with existing hook)
   const { currentGame, isConnected, placeBet, cashOut, countdown, isWaitingPeriod, canBet } = useGameSocket(walletAddress, userId || undefined);
   
-  // Real wallet balance integration
-  const { balance: realSolBalance, loading: balanceLoading, updateBalance } = useWalletBalance(walletAddress);
+  // Real wallet balance integration (auto-refresh only)
+  const { balance: realSolBalance, loading: balanceLoading } = useWalletBalance(walletAddress);
   
   // Calculate countdown values
   const countdownSeconds = countdown ? Math.ceil(countdown / 1000) : 0;
@@ -1056,7 +1039,6 @@ const TradingControls: FC<TradingControlsProps> = ({
       
       if (success) {
         setActiveBet(null);
-        updateBalance(); // Refresh wallet balance after cashout
         toast.success('Cashed out successfully!');
         if (onSell) onSell(100);
       } else {
@@ -1070,7 +1052,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     } finally {
       setIsCashingOut(false);
     }
-  }, [authenticated, walletAddress, isConnected, activeBet, cashOut, onSell, updateBalance]);
+  }, [authenticated, walletAddress, isConnected, activeBet, cashOut, onSell]);
 
   // Auto cashout effect
   useEffect(() => {
@@ -1123,12 +1105,24 @@ const TradingControls: FC<TradingControlsProps> = ({
     setAutoCashoutValue(value.toString());
   };
 
-  // Enhanced bet placement (compatible with existing hook)
+  // Enhanced bet placement with detailed debugging
   const handleBuy = async () => {
     const amountNum = parseFloat(amount);
     
     // Clear previous errors
     setServerError('');
+    
+    console.log('🎯 Attempting to place bet:', {
+      amount: amountNum,
+      walletAddress,
+      userId,
+      gameStatus,
+      isConnected,
+      canBet,
+      isWaitingPeriod,
+      activeBalance,
+      currentToken
+    });
     
     // Enhanced validation
     if (isNaN(amountNum) || amountNum <= 0) {
@@ -1154,6 +1148,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     
     // Check for wallet readiness
     if (!isWalletReady || !isConnected) {
+      console.log('❌ Wallet not ready:', { isWalletReady, isConnected });
       setServerError('Please login to play');
       toast.error('Please login to play');
       return;
@@ -1161,6 +1156,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     
     // Enhanced game availability check
     if (!activeIsGameActive || !canBet) {
+      console.log('❌ Game not available:', { activeIsGameActive, canBet, isWaitingPeriod, countdownSeconds });
       if (isWaitingPeriod && countdownSeconds <= 2) {
         setServerError('Too late - game starting soon!');
         toast.error('Too late - game starting soon!');
@@ -1173,15 +1169,21 @@ const TradingControls: FC<TradingControlsProps> = ({
 
     // Check balance
     if (amountNum > activeBalance) {
+      console.log('❌ Insufficient balance:', { amountNum, activeBalance });
       setServerError('Insufficient balance');
       toast.error('Insufficient balance');
       return;
     }
 
+    console.log('✅ All validations passed, placing bet...');
+    
     setIsPlacingBet(true);
     try {
       // Compatible bet placement with existing hook
+      console.log('📡 Calling placeBet function...');
       const success = await placeBet(walletAddress, amountNum, userId || undefined);
+      
+      console.log('📡 placeBet response:', success);
       
       if (success) {
         // Store bet with calculated entry multiplier
@@ -1196,20 +1198,22 @@ const TradingControls: FC<TradingControlsProps> = ({
         };
         
         setActiveBet(newBet);
-        updateBalance(); // Refresh wallet balance after bet placement
+        
+        console.log('✅ Bet placed successfully:', newBet);
         
         const betType = gameStatus === 'waiting' ? 'Pre-game bet' : 'Bet';
         toast.success(`${betType} placed: ${amountNum} SOL (Entry: ${entryMultiplier.toFixed(2)}x)`);
         
         if (onBuy) onBuy(amountNum);
       } else {
-        const errorMsg = 'Failed to place bet';
+        const errorMsg = 'Failed to place bet - server returned false';
+        console.log('❌ Bet placement failed:', errorMsg);
         setServerError(errorMsg);
         toast.error(errorMsg);
       }
     } catch (error) {
-      console.error('Error placing bet:', error);
-      const errorMsg = 'Failed to place bet';
+      console.error('❌ Error placing bet:', error);
+      const errorMsg = `Failed to place bet: ${error instanceof Error ? error.message : 'Unknown error'}`;
       setServerError(errorMsg);
       toast.error(errorMsg);
     } finally {
@@ -1302,7 +1306,6 @@ const TradingControls: FC<TradingControlsProps> = ({
           showExpanded={showBalanceExpanded}
           onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
           isLoading={balanceLoading}
-          onRefreshBalance={updateBalance}
         />
 
         {/* Auto Cashout Settings */}
@@ -1379,7 +1382,6 @@ const TradingControls: FC<TradingControlsProps> = ({
         showExpanded={showBalanceExpanded}
         onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
         isLoading={balanceLoading}
-        onRefreshBalance={updateBalance}
       />
 
       {/* Auto Cashout Settings */}

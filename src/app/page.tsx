@@ -1,4 +1,4 @@
-// src/app/page.tsx - Fixed version with overflow issues resolved
+// src/app/page.tsx - Fixed version with leaderboard visibility issues resolved
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -29,22 +29,37 @@ export default function Home() {
   // Track mount state to prevent hydration issues
   useEffect(() => {
     setIsMounted(true);
-  }, []);
+    // Show leaderboard immediately on mobile/tablet, or after a short delay on desktop
+    if (width && width < 1024) {
+      setIsLeaderboardVisible(true);
+    } else {
+      // For desktop, show after a brief delay or on scroll
+      const timer = setTimeout(() => setIsLeaderboardVisible(true), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [width]);
 
-  // Scroll handler with better mobile optimization
+  // Simplified scroll handler - more aggressive visibility
   const handleScroll = useCallback(() => {
     if (typeof window === 'undefined' || !isMounted) return;
     
     const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
     const windowHeight = window.innerHeight;
-    const threshold = isSmall ? windowHeight * 0.3 : windowHeight * 0.5;
+    // Much lower threshold - show after scrolling just 20% on desktop
+    const threshold = isDesktop ? windowHeight * 0.2 : 0;
     
     setIsLeaderboardVisible(scrollTop > threshold);
-  }, [isSmall, isMounted]);
+  }, [isDesktop, isMounted]);
 
   // Set up window scroll listener with debouncing
   useEffect(() => {
     if (!isMounted) return;
+
+    // For mobile/tablet, always show leaderboard
+    if (isMobile || isTablet) {
+      setIsLeaderboardVisible(true);
+      return;
+    }
 
     let ticking = false;
     const scrollHandler = () => {
@@ -63,7 +78,7 @@ export default function Home() {
     return () => {
       window.removeEventListener('scroll', scrollHandler);
     };
-  }, [handleScroll, isMounted]);
+  }, [handleScroll, isMounted, isMobile, isTablet]);
 
   const handleLoginClick = () => {
     login();
@@ -82,7 +97,7 @@ export default function Home() {
 
   return (
     <Layout>
-      {/* FIXED: Main container - REMOVED overflow-x-hidden to prevent dropdown clipping */}
+      {/* Main container */}
       <div className="w-full min-h-screen bg-[#0B0E16]">
         
         {/* Content wrapper - single column on mobile, side-by-side on desktop */}
@@ -100,7 +115,7 @@ export default function Home() {
           {/* Mobile Chat - floating overlay, doesn't affect layout */}
           {isMobile && <MobileChat />}
           
-          {/* FIXED: Main Content Area - REMOVED overflow-x-hidden and min-w-0 */}
+          {/* Main Content Area */}
           <div className="flex-1 flex flex-col w-full">
             
             {/* Login Prompt - fully responsive */}
@@ -141,7 +156,7 @@ export default function Home() {
               </div>
             )}
             
-            {/* FIXED: Main Chart Container - REMOVED overflow constraints */}
+            {/* Main Chart Container */}
             <div className={`
               flex-1 w-full
               ${authenticated ? '' : 'opacity-50 pointer-events-none'}
@@ -152,7 +167,7 @@ export default function Home() {
               </div>
             </div>
             
-            {/* Scroll Indicator - only on desktop */}
+            {/* Scroll Indicator - only show on desktop when leaderboard is hidden */}
             {isDesktop && !isLeaderboardVisible && (
               <div className="text-center py-4 text-gray-400 transition-opacity duration-300 animate-bounce">
                 <div className="flex flex-col items-center">
@@ -162,20 +177,35 @@ export default function Home() {
               </div>
             )}
 
-            {/* FIXED: Leaderboard Section - REMOVED overflow-x-hidden */}
+            {/* FIXED: Leaderboard Section - Always show on mobile/tablet, conditional on desktop */}
             <div className={`
               w-full
               ${isExtraSmall ? 'mt-2 mb-2 px-1' : 
                 isSmall ? 'mt-4 mb-4 px-2' : 
                 isMobile ? 'mt-6 mb-6 px-2' : 
                 'mt-12 mb-8 px-4'}
-              transition-opacity duration-300 
-              ${(isLeaderboardVisible || isMobile || isTablet) ? 'opacity-100' : 'opacity-0'}
+              transition-all duration-500 ease-in-out
+              ${(isLeaderboardVisible || isMobile || isTablet) ? 
+                'opacity-100 translate-y-0 pointer-events-auto' : 
+                'opacity-0 translate-y-4 pointer-events-none'
+              }
             `}>
               <div className="w-full">
                 <Leaderboard />
               </div>
             </div>
+            
+            {/* Debug info - remove this in production */}
+            {process.env.NODE_ENV === 'development' && (
+              <div className="fixed bottom-4 right-4 bg-black/80 text-white p-2 rounded text-xs">
+                <div>Width: {width}px</div>
+                <div>Mounted: {isMounted ? 'Yes' : 'No'}</div>
+                <div>Mobile: {isMobile ? 'Yes' : 'No'}</div>
+                <div>Tablet: {isTablet ? 'Yes' : 'No'}</div>
+                <div>Desktop: {isDesktop ? 'Yes' : 'No'}</div>
+                <div>Leaderboard Visible: {isLeaderboardVisible ? 'Yes' : 'No'}</div>
+              </div>
+            )}
             
             {/* Bottom spacing for complete scroll */}
             <div className={`

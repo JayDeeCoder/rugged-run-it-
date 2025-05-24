@@ -33,59 +33,85 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries: propEntries }) => {
   }, [activeTimeframe]);
 
   return (
-    <div className="bg-[#0d0d0f] border border-gray-800 mx-2 rounded-lg text-gray-400 p-4 mt-8">
-      <div className="flex items-center justify-between mb-4">
-        <div className='flex text-sm items-center gap-2'>
+    <div className="bg-[#0d0d0f] border border-gray-800 mx-2 rounded-lg text-gray-400 p-3 sm:p-4 mt-8">
+      {/* Header Section - Mobile Responsive */}
+      <div className="mb-4 space-y-3 sm:space-y-0">
+        {/* Title and Live Indicator Row */}
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl sm:text-2xl lg:text-3xl uppercase font-semibold text-white">
+            Leaderboard
+          </h2>
+          <div className='flex items-center'>
+            <span className="h-2 w-2 bg-blue-500 rounded-full mr-2 animate-pulse"></span>
+            <span className="text-xs text-gray-400 hidden sm:inline">Live Updates</span>
+            <span className="text-xs text-gray-400 sm:hidden">Live</span>
+          </div>
+        </div>
+        
+        {/* Timeframe Buttons Row */}
+        <div className='flex flex-wrap gap-2 sm:gap-3'>
           <button 
-            className={`border border-gray-800 rounded-md p-1 transition ${activeTimeframe === 'daily' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
+            className={`flex-1 sm:flex-none border border-gray-800 rounded-md px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm transition-all duration-200 min-w-0 ${
+              activeTimeframe === 'daily' 
+                ? 'bg-gray-700 text-white border-gray-600' 
+                : 'hover:bg-gray-700 hover:border-gray-600'
+            }`}
             onClick={() => setActiveTimeframe('daily')}
           >
-            24hours
+            24hrs
           </button>
           <button 
-            className={`border border-gray-800 rounded-md p-1 transition ${activeTimeframe === 'weekly' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
+            className={`flex-1 sm:flex-none border border-gray-800 rounded-md px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm transition-all duration-200 min-w-0 ${
+              activeTimeframe === 'weekly' 
+                ? 'bg-gray-700 text-white border-gray-600' 
+                : 'hover:bg-gray-700 hover:border-gray-600'
+            }`}
             onClick={() => setActiveTimeframe('weekly')}
           >
             7days
           </button>
           <button 
-            className={`border border-gray-800 rounded-md p-1 transition ${activeTimeframe === 'monthly' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
+            className={`flex-1 sm:flex-none border border-gray-800 rounded-md px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm transition-all duration-200 min-w-0 ${
+              activeTimeframe === 'monthly' 
+                ? 'bg-gray-700 text-white border-gray-600' 
+                : 'hover:bg-gray-700 hover:border-gray-600'
+            }`}
             onClick={() => setActiveTimeframe('monthly')}
           >
             30days
           </button>
           <button 
-            className={`border border-gray-800 rounded-md p-1 transition ${activeTimeframe === 'all_time' ? 'bg-gray-700 text-white' : 'hover:bg-gray-700'}`}
+            className={`flex-1 sm:flex-none border border-gray-800 rounded-md px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm transition-all duration-200 min-w-0 ${
+              activeTimeframe === 'all_time' 
+                ? 'bg-gray-700 text-white border-gray-600' 
+                : 'hover:bg-gray-700 hover:border-gray-600'
+            }`}
             onClick={() => setActiveTimeframe('all_time')}
           >
             All Time
           </button>
         </div>
-        <h2 className="text-3xl uppercase">Leaderboard</h2>
-        <div className='flex items-center'>
-          <span className="h-2 w-2 bg-blue-500 rounded-full mr-2"></span>
-          <span className="text-xs text-gray-400">Live Updates</span>
-        </div>
       </div>
       
-      <div className="flex text-gray-500 text-sm py-2 border-b border-gray-800">
-        <div className="w-10 text-center">Rank</div>
-        <div className="flex-1 ml-7">User</div>
-        <div className="text-right">Profit</div>
+      {/* Table Header */}
+      <div className="flex text-gray-500 text-xs sm:text-sm py-2 border-b border-gray-800 font-medium">
+        <div className="w-8 sm:w-10 text-center">Rank</div>
+        <div className="flex-1 ml-4 sm:ml-7">User</div>
+        <div className="text-right w-16 sm:w-20">Profit</div>
       </div>
       
       {/* Scrollable container with hidden scrollbar */}
-      <div className="max-h-64 overflow-y-auto scrollbar-hide">
+      <div className="max-h-64 sm:max-h-80 overflow-y-auto scrollbar-hide">
         {loading ? (
           <div className="flex justify-center py-8">
-            <div className="animate-pulse text-gray-400">Loading leaderboard...</div>
+            <div className="animate-pulse text-gray-400 text-sm">Loading leaderboard...</div>
           </div>
         ) : error ? (
-          <div className="text-center py-8 text-red-500">
+          <div className="text-center py-8 text-red-500 text-sm">
             {error}
           </div>
         ) : entries.length === 0 ? (
-          <div className="text-center py-8 text-gray-400">
+          <div className="text-center py-8 text-gray-400 text-sm">
             No entries for this period
           </div>
         ) : (

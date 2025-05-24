@@ -1,5 +1,5 @@
 // src/components/chat/ChatBox.tsx
-import { FC, useEffect, useRef } from 'react';
+import { FC, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
@@ -11,6 +11,17 @@ const ChatBox: FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const { authenticated, login } = usePrivy();
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -29,7 +40,7 @@ const ChatBox: FC = () => {
   };
 
   return (
-    <div className="flex flex-col font-dynapuff h-[85vh] max-h-[900px] min-h-[400px] bg-[#0d0d0f] border-r border-b border-gray-800">
+    <div className="flex flex-col font-dynapuff h-[75vh] md:h-[90vh] max-h-[400px] md:max-h-[950px] min-h-[350px] bg-[#0d0d0f] border-r border-b border-gray-800">
       {/* Header */}
       <div className="flex justify-between p-3 border-b border-gray-800 bg-[#0d0d0f] flex-shrink-0">
         <h2 className="text-sm text-white font-medium flex items-center">
@@ -71,7 +82,7 @@ const ChatBox: FC = () => {
         style={{
           scrollbarWidth: 'none', 
           msOverflowStyle: 'none',
-          maxHeight: 'calc(85vh - 120px)', // Subtract header + input heights
+          maxHeight: isMobile ? 'calc(75vh - 120px)' : 'calc(90vh - 120px)',
         }}
       >
         {!authenticated ? (

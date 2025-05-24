@@ -508,6 +508,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
                 seconds={countdownSeconds} 
                 onComplete={() => {}} // Server handles game start
                 lastCrashMultiplier={gameResults[0]?.value || null}
+                isServerSynced={isConnected} // NEW: Sync with server when connected
               />
             </div>
           )}

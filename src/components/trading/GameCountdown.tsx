@@ -1,52 +1,78 @@
-// src/components/trading/GameCountdown.tsx
 import { FC, useEffect, useState, useCallback } from 'react';
 
 interface GameCountdownProps {
   seconds: number;
   onComplete: () => void;
   lastCrashMultiplier?: number | null;
+  isServerSynced?: boolean; // NEW: Whether to sync with server countdown
 }
 
 const GameCountdown: FC<GameCountdownProps> = ({ 
   seconds, 
   onComplete,
-  lastCrashMultiplier = null
+  lastCrashMultiplier = null,
+  isServerSynced = true // DEFAULT: Sync with server
 }) => {
   const [countdown, setCountdown] = useState<number>(seconds);
   const [isFinalCountdown, setIsFinalCountdown] = useState<boolean>(false);
   const [showGenerating, setShowGenerating] = useState<boolean>(false);
   
-  // Manage the countdown timer
+  // ENHANCED: Sync with server countdown when props change
   useEffect(() => {
-    if (countdown <= 0) {
-      // When countdown reaches zero, show "Generating New Game" for 1 second
-      if (!showGenerating) {
+    if (isServerSynced) {
+      // If server provides real-time countdown, use that directly
+      setCountdown(seconds);
+      setShowGenerating(false); // Reset generating state when new countdown starts
+      
+      // Reset final countdown state
+      if (seconds > 3) {
+        setIsFinalCountdown(false);
+      }
+    } else {
+      // Fallback to initial seconds if not server synced
+      setCountdown(seconds);
+    }
+  }, [seconds, isServerSynced]);
+  
+  // ENHANCED: Handle countdown completion and final countdown effects
+  useEffect(() => {
+    // Set pulsing effect for final 3 seconds
+    if (countdown <= 3 && countdown > 0) {
+      setIsFinalCountdown(true);
+    } else {
+      setIsFinalCountdown(false);
+    }
+    
+    // Handle countdown completion
+    if (countdown <= 0 && !showGenerating) {
+      if (isServerSynced) {
+        // If server synced, don't show generating - server handles game start
+        onComplete();
+      } else {
+        // Original behavior for non-server synced
         setShowGenerating(true);
         setTimeout(() => {
           setShowGenerating(false);
-          onComplete(); // Call the completion handler
+          onComplete();
         }, 1000);
       }
       return;
     }
     
-    // Set pulsing effect for final 3 seconds
-    if (countdown <= 3) {
-      setIsFinalCountdown(true);
+    // Only run internal timer if NOT server synced
+    if (!isServerSynced && countdown > 0) {
+      const timer = setTimeout(() => {
+        setCountdown(prev => prev - 1);
+      }, 1000);
+      
+      return () => clearTimeout(timer);
     }
-    
-    // Update countdown every second
-    const timer = setTimeout(() => {
-      setCountdown(prev => prev - 1);
-    }, 1000);
-    
-    return () => clearTimeout(timer);
-  }, [countdown, onComplete, showGenerating]);
+  }, [countdown, onComplete, showGenerating, isServerSynced]);
   
   return (
     <div className="relative p-5 rounded-xl flex flex-col items-center">
       {showGenerating ? (
-        // "Generating New Game" animation
+        // "Generating New Game" animation - only shown for non-server synced
         <div className="flex flex-col items-center">
           <div className="text-3xl md:text-4xl font-dynapuff text-green-400 mb-3 text-center leading-tight animate-pulse">
             Generating New Game
@@ -61,7 +87,7 @@ const GameCountdown: FC<GameCountdownProps> = ({
         // Normal countdown display
         <>
           <div className="text-3xl md:text-4xl font-dynapuff text-white mb-3 text-center leading-tight">
-            Next Round In
+            {isServerSynced ? 'Next Round In' : 'Game Starting In'}
           </div>
           
           <div 
@@ -76,11 +102,29 @@ const GameCountdown: FC<GameCountdownProps> = ({
             {countdown}
           </div>
           
+          {/* ENHANCED: Additional server sync info */}
+          {isServerSynced && countdown > 0 && (
+            <div className="mt-2 text-center">
+              <div className="text-sm text-blue-400 animate-pulse">
+                🔗 Server Synced
+              </div>
+            </div>
+          )}
+          
           {lastCrashMultiplier !== null && (
             <div className="mt-5 text-center">
               <div className="text-base text-gray-400 mb-1">Last Game</div>
               <div className="text-2xl font-dynapuff text-red-500">
                 RUGGED @ {lastCrashMultiplier.toFixed(2)}x
+              </div>
+            </div>
+          )}
+          
+          {/* ENHANCED: Show betting status during countdown */}
+          {isServerSynced && countdown > 0 && countdown <= 8 && (
+            <div className="mt-3 text-center">
+              <div className="text-lg text-green-400 font-dynapuff">
+                🎯 Pre-Game Betting Open!
               </div>
             </div>
           )}

@@ -1154,18 +1154,24 @@ const TradingControls: FC<TradingControlsProps> = ({
       return;
     }
     
-    // Enhanced game availability check
-    if (!activeIsGameActive || !canBet) {
+    // Enhanced game availability check (allow betting during active games)
+    if (!activeIsGameActive) {
       console.log('❌ Game not available:', { activeIsGameActive, canBet, isWaitingPeriod, countdownSeconds });
-      if (isWaitingPeriod && countdownSeconds <= 2) {
-        setServerError('Too late - game starting soon!');
-        toast.error('Too late - game starting soon!');
-      } else {
-        setServerError('Game is not available');
-        toast.error('Game is not available');
-      }
+      setServerError('Game is not available');
+      toast.error('Game is not available');
       return;
     }
+    
+    // For waiting period, respect the canBet flag (2 second cutoff is fine)
+    if (isWaitingPeriod && !canBet) {
+      console.log('❌ Waiting period ended:', { isWaitingPeriod, canBet, countdownSeconds });
+      setServerError('Game starting now!');
+      toast.error('Game starting now!');
+      return;
+    }
+    
+    // For active games, always allow betting (users can bet at current multiplier)
+    // No additional restrictions needed during active gameplay
 
     // Check balance
     if (amountNum > activeBalance) {

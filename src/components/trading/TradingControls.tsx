@@ -159,7 +159,9 @@ const BalanceDisplay: FC<{
   onWithdrawClick: () => void;
   onAirdropClick: () => void;
   isMobile: boolean;
-}> = ({ currentToken, activeBalance, onTokenChange, onDepositClick, onWithdrawClick, onAirdropClick, isMobile }) => {
+  showExpanded: boolean;
+  onToggleExpanded: () => void;
+}> = ({ currentToken, activeBalance, onTokenChange, onDepositClick, onWithdrawClick, onAirdropClick, isMobile, showExpanded, onToggleExpanded }) => {
   const formatBalance = (balance: number, token: TokenType) => {
     if (token === TokenType.SOL) {
       return balance.toFixed(3);
@@ -170,11 +172,13 @@ const BalanceDisplay: FC<{
 
   if (isMobile) {
     return (
-      <div className="bg-gray-800 rounded-lg p-2 mb-3">
-        <div className="flex items-center justify-between">
-          {/* Balance info */}
+      <div className="mb-2">
+        <div 
+          className="flex items-center justify-between bg-gray-800 rounded-lg p-2 cursor-pointer"
+          onClick={onToggleExpanded}
+        >
           <div className="flex items-center space-x-2">
-            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+            <div className={`w-5 h-5 rounded-full flex items-center justify-center ${
               currentToken === TokenType.SOL ? 'bg-blue-500' : 'bg-green-500'
             }`}>
               <span className="text-white font-bold text-xs">
@@ -182,7 +186,6 @@ const BalanceDisplay: FC<{
               </span>
             </div>
             <div>
-              <div className="text-xs text-gray-400">Balance</div>
               <div className={`text-sm font-bold ${
                 currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
               }`}>
@@ -190,58 +193,62 @@ const BalanceDisplay: FC<{
               </div>
             </div>
           </div>
-
-          {/* Action buttons */}
-          <div className="flex space-x-1">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onTokenChange(TokenType.SOL);
-              }}
-              className={`px-2 py-1 text-xs rounded ${
-                currentToken === TokenType.SOL 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-gray-700 text-gray-300'
-              }`}
-            >
-              SOL
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onTokenChange(TokenType.RUGGED);
-                if (activeBalance < 10) {
-                  onAirdropClick();
-                }
-              }}
-              className={`px-2 py-1 text-xs rounded ${
-                currentToken === TokenType.RUGGED 
-                  ? 'bg-green-600 text-white' 
-                  : 'bg-gray-700 text-gray-300'
-              }`}
-            >
-              RUG
-            </button>
+          <div className="flex items-center space-x-2">
+            <Wallet className="w-4 h-4 text-gray-400" />
+            <span className="text-gray-400 text-sm">{showExpanded ? '▲' : '▼'}</span>
           </div>
         </div>
 
-        {/* Wallet actions row */}
-        <div className="flex space-x-2 mt-2">
-          <button
-            onClick={onDepositClick}
-            className="flex-1 bg-green-600 hover:bg-green-700 text-white py-1 px-2 rounded text-xs flex items-center justify-center"
-          >
-            <ArrowDownLeft className="w-3 h-3 mr-1" />
-            Deposit
-          </button>
-          <button
-            onClick={onWithdrawClick}
-            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-1 px-2 rounded text-xs flex items-center justify-center"
-          >
-            <ArrowUpRight className="w-3 h-3 mr-1" />
-            Withdraw
-          </button>
-        </div>
+        {showExpanded && (
+          <div className="bg-gray-800 rounded-lg p-2 mt-1">
+            {/* Token switcher */}
+            <div className="flex space-x-2 mb-2">
+              <button
+                onClick={() => onTokenChange(TokenType.SOL)}
+                className={`flex-1 px-2 py-1 text-xs rounded ${
+                  currentToken === TokenType.SOL 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-700 text-gray-300'
+                }`}
+              >
+                SOL
+              </button>
+              <button
+                onClick={() => {
+                  onTokenChange(TokenType.RUGGED);
+                  if (activeBalance < 10) {
+                    onAirdropClick();
+                  }
+                }}
+                className={`flex-1 px-2 py-1 text-xs rounded ${
+                  currentToken === TokenType.RUGGED 
+                    ? 'bg-green-600 text-white' 
+                    : 'bg-gray-700 text-gray-300'
+                }`}
+              >
+                RUGGED
+              </button>
+            </div>
+
+            {/* Wallet actions */}
+            <div className="flex space-x-2">
+              <button
+                onClick={onDepositClick}
+                className="flex-1 bg-green-600 hover:bg-green-700 text-white py-1 px-2 rounded text-xs flex items-center justify-center"
+              >
+                <ArrowDownLeft className="w-3 h-3 mr-1" />
+                Deposit
+              </button>
+              <button
+                onClick={onWithdrawClick}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-1 px-2 rounded text-xs flex items-center justify-center"
+              >
+                <ArrowUpRight className="w-3 h-3 mr-1" />
+                Withdraw
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -404,7 +411,7 @@ const AutoCashoutSection: FC<{
             </div>
           </div>
           
-          <div className={`grid ${isMobile ? 'grid-cols-2' : 'grid-cols-4'} gap-2`}>
+          <div className={`grid gap-2 ${isMobile ? 'grid-cols-4' : 'grid-cols-4'}`}>
             {quickValues.map((value) => (
               <button
                 key={value}
@@ -413,7 +420,7 @@ const AutoCashoutSection: FC<{
                   parseFloat(autoCashoutValue) === value
                     ? 'bg-green-600 text-white'
                     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
+                } ${isMobile ? 'text-[10px] px-1' : ''}`}
                 disabled={!autoCashoutEnabled}
               >
                 {value.toFixed(1)}x
@@ -500,7 +507,7 @@ const BettingSection: FC<{
   const amountValid = !isNaN(parseFloat(amount)) && parseFloat(amount) > 0 && parseFloat(amount) <= activeBalance;
 
   return (
-    <div className="border-t border-gray-800 pt-3">
+    <div className={isMobile ? "" : "border-t border-gray-800 pt-3"}>
       <h3 className="text-sm font-bold text-gray-400 mb-3">
         {activeBet ? 'ACTIVE BET' : 'PLACE BET'}
       </h3>
@@ -539,19 +546,19 @@ const BettingSection: FC<{
           </div>
           
           {/* Quick Amount Buttons */}
-          <div className={`grid ${isMobile ? 'grid-cols-2' : 'grid-cols-4'} gap-2 mb-3`}>
+          <div className={`grid gap-1 mb-3 ${isMobile ? 'grid-cols-4' : 'grid-cols-4'}`}>
             {quickAmounts.map((amt) => (
               <button
                 key={amt}
                 onClick={() => onQuickAmount(amt)}
-                className={`px-2 py-1 text-xs rounded transition-colors ${
+                className={`px-1 py-1 text-xs rounded transition-colors ${
                   parseFloat(amount) === amt
                     ? 'bg-green-600 text-white'
                     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
+                } ${isMobile ? 'text-[10px] px-1' : ''}`}
                 disabled={!canBet}
               >
-                {amt.toString()} {currentToken}
+                {isMobile ? amt.toString() : `${amt.toString()} ${currentToken}`}
               </button>
             ))}
           </div>
@@ -774,6 +781,9 @@ const TradingControls: FC<TradingControlsProps> = ({
   const [isPlacingBet, setIsPlacingBet] = useState<boolean>(false);
   const [isCashingOut, setIsCashingOut] = useState<boolean>(false);
   
+  // State for expanded sections
+  const [showBalanceExpanded, setShowBalanceExpanded] = useState<boolean>(false);
+  
   // Real game state from server
   const activeCurrentGame = currentGame;
   const activeIsGameActive = activeCurrentGame?.status === 'active' || activeCurrentGame?.status === 'waiting';
@@ -957,7 +967,7 @@ const TradingControls: FC<TradingControlsProps> = ({
 
   const activeBalance = currentToken === TokenType.SOL ? solBalance : ruggedBalance;
 
-  // Enhanced responsive container with dynamic sizing
+  // Enhanced responsive container with dynamic sizing and mobile-first betting layout
   const containerClasses = `
     bg-[#0d0d0f] text-white border border-gray-800 rounded-lg
     ${isMobile 
@@ -966,6 +976,115 @@ const TradingControls: FC<TradingControlsProps> = ({
     }
   `;
 
+  // Mobile-optimized layout - betting controls first for decision making
+  if (isMobile) {
+    return (
+      <div className={containerClasses}>
+        {/* Compact Game Info */}
+        <CompactGameInfo
+          game={activeCurrentGame}
+          countdown={countdown || 0}
+          showCountdown={showCountdown}
+          isConnected={isConnected}
+          isMobile={isMobile}
+        />
+
+        {/* Active Bet Display - Priority for decision making */}
+        {activeBet && (
+          <ActiveBetDisplay
+            bet={activeBet}
+            currentMultiplier={activeCurrentMultiplier}
+            isMobile={isMobile}
+          />
+        )}
+
+        {/* Betting Section - Main decision making area */}
+        <div className="bg-gray-900 bg-opacity-50 rounded-lg p-3 mb-3">
+          <BettingSection
+            activeBet={activeBet}
+            amount={amount}
+            onAmountChange={(e) => handleAmountChange({ target: { value: e } } as React.ChangeEvent<HTMLInputElement>)}
+            onQuickAmount={setQuickAmount}
+            onPlaceBet={handleBuy}
+            onCashout={handleCashout}
+            quickAmounts={quickAmounts}
+            currentToken={currentToken}
+            activeBalance={activeBalance}
+            isPlacingBet={isPlacingBet}
+            isCashingOut={isCashingOut}
+            isWalletReady={isWalletReady}
+            canBet={canBet}
+            isWaitingPeriod={isWaitingPeriod}
+            gameStatus={gameStatus}
+            isConnected={isConnected}
+            currentMultiplier={activeCurrentMultiplier}
+            isMobile={isMobile}
+          />
+        </div>
+
+        {/* Collapsible Balance Display */}
+        <BalanceDisplay
+          currentToken={currentToken}
+          activeBalance={activeBalance}
+          onTokenChange={handleTokenChange}
+          onDepositClick={() => setShowDepositModal(true)}
+          onWithdrawClick={() => setShowWithdrawModal(true)}
+          onAirdropClick={() => setShowAirdropModal(true)}
+          isMobile={isMobile}
+          showExpanded={showBalanceExpanded}
+          onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
+        />
+
+        {/* Auto Cashout Settings */}
+        <AutoCashoutSection
+          autoCashoutEnabled={autoCashoutEnabled}
+          autoCashoutValue={autoCashoutValue}
+          onToggle={setAutoCashoutEnabled}
+          onValueChange={handleAutoCashoutValueChange}
+          onQuickValue={setQuickAutoCashoutValue}
+          isMobile={isMobile}
+          showExpanded={showAutoCashout}
+          onToggleExpanded={() => setShowAutoCashout(!showAutoCashout)}
+        />
+
+        {/* Status Messages */}
+        <StatusMessages
+          isWalletReady={isWalletReady}
+          isConnected={isConnected}
+          amount={amount}
+          activeBalance={activeBalance}
+          activeBet={activeBet}
+          isWaitingPeriod={isWaitingPeriod}
+          canBet={canBet}
+          gameStatus={gameStatus}
+          currentMultiplier={activeCurrentMultiplier}
+          countdownSeconds={countdownSeconds}
+        />
+
+        {/* Modals */}
+        <AirdropModal 
+          isOpen={showAirdropModal}
+          onClose={() => setShowAirdropModal(false)}
+        />
+        
+        <DepositModal 
+          isOpen={showDepositModal}
+          onClose={() => setShowDepositModal(false)}
+          currentToken={currentToken}
+          walletAddress={walletAddress}
+        />
+        
+        <WithdrawModal 
+          isOpen={showWithdrawModal}
+          onClose={() => setShowWithdrawModal(false)}
+          currentToken={currentToken}
+          balance={activeBalance}
+        />
+      </div>
+    );
+  }
+
+  // Desktop layout
   return (
     <div className={containerClasses}>
       {/* Compact Game Info */}
@@ -986,6 +1105,8 @@ const TradingControls: FC<TradingControlsProps> = ({
         onWithdrawClick={() => setShowWithdrawModal(true)}
         onAirdropClick={() => setShowAirdropModal(true)}
         isMobile={isMobile}
+        showExpanded={showBalanceExpanded}
+        onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
       />
 
       {/* Auto Cashout Settings */}

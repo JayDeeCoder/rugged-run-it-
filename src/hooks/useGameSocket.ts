@@ -40,7 +40,13 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
     // Enhanced connection with automatic reconnection
     useEffect(() => {
-        const serverUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'ws://localhost:3001';
+        const serverUrl = 'wss://a78c-3-16-49-236.ngrok-free.app';
+        console.log('🔍 Using hardcoded URL:', serverUrl);
+        
+        // 🔍 DEBUG: Let's see what's happening
+        console.log('🔍 Environment variable:', process.env.NEXT_PUBLIC_GAME_SERVER_URL);
+        console.log('🔍 Server URL being used:', serverUrl);
+        console.log('🔍 All env vars:', Object.keys(process.env).filter(key => key.startsWith('NEXT_PUBLIC')));
         
         const newSocket = io(serverUrl, {
             transports: ['websocket'],

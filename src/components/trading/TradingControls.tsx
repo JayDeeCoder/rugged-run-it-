@@ -60,10 +60,14 @@ const TradingControls: FC<TradingControlsProps> = ({
   // State for user ID
   const [userId, setUserId] = useState<string | null>(null);
   
-  // Real game server connection
-  const { currentGame, isConnected, placeBet, cashOut } = useGameSocket(walletAddress, userId || undefined);
+  // Enhanced game server connection with countdown support
+  const { currentGame, isConnected, placeBet, cashOut, countdown, isWaitingPeriod, canBet } = useGameSocket(walletAddress, userId || undefined);
   
-  // Enhanced bet tracking
+  // Calculate countdown values (FIXED: Added missing calculations)
+  const countdownSeconds = countdown ? Math.ceil(countdown / 1000) : 0;
+  const showCountdown = countdown && countdown > 0 && currentGame?.status === 'waiting';
+  
+  // Enhanced bet tracking (FIXED: Removed duplicate declaration)
   const [activeBet, setActiveBet] = useState<ActiveBet | null>(null);
   
   // Token context and wallet balance
@@ -146,7 +150,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     setCurrentToken(token);
   };
 
-  // Enhanced cashout with proper payout calculation
+  // Enhanced cashout with detailed result handling
   const handleCashout = useCallback(async () => {
     if (!authenticated || !walletAddress || !isConnected || !activeBet) {
       return;
@@ -154,19 +158,15 @@ const TradingControls: FC<TradingControlsProps> = ({
 
     setIsCashingOut(true);
     try {
-      // Calculate actual payout based on entry point vs current multiplier
-      const actualMultiplier = Math.max(activeCurrentMultiplier, activeBet.entryMultiplier);
-      const payout = activeBet.amount * actualMultiplier;
+      const result = await cashOut(walletAddress);
       
-      // Call cashOut with only walletAddress as expected by useGameSocket
-      const success = await cashOut(walletAddress);
-      
-      if (success) {
+      if (result.success) {
         setActiveBet(null);
-        toast.success(`Cashed out: ${payout.toFixed(3)} SOL`);
+        const payoutText = result.payout ? `${result.payout.toFixed(3)} SOL` : 'successfully';
+        toast.success(`Cashed out ${payoutText}!`);
         if (onSell) onSell(100);
       } else {
-        toast.error('Failed to cash out');
+        toast.error(result.reason || 'Failed to cash out');
       }
     } catch (error) {
       console.error('Error cashing out:', error);
@@ -174,7 +174,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     } finally {
       setIsCashingOut(false);
     }
-  }, [authenticated, walletAddress, isConnected, activeBet, activeCurrentMultiplier, cashOut, onSell]);
+  }, [authenticated, walletAddress, isConnected, activeBet, cashOut, onSell]);
 
   // Auto cashout effect
   useEffect(() => {
@@ -231,7 +231,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     setAutoCashoutValue(value.toString());
   };
 
-  // Enhanced bet placement with entry multiplier tracking
+  // Enhanced bet placement with pre-game betting support
   const handleBuy = async () => {
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum) || amountNum <= 0) {
@@ -239,16 +239,23 @@ const TradingControls: FC<TradingControlsProps> = ({
       return;
     }
     
+    // Check for wallet readiness
     if (!isWalletReady || !isConnected) {
       toast.error('Please login to play');
       return;
     }
     
-    if (!activeIsGameActive) {
-      toast.error('Game is not available');
+    // Enhanced game availability check (FIXED: countdownSeconds now properly defined)
+    if (!activeIsGameActive || !canBet) {
+      if (isWaitingPeriod && countdownSeconds <= 2) {
+        toast.error('Too late - game starting soon!');
+      } else {
+        toast.error('Game is not available');
+      }
       return;
     }
 
+    // Check balance
     if (amountNum > activeBalance) {
       toast.error('Insufficient balance');
       return;
@@ -256,11 +263,11 @@ const TradingControls: FC<TradingControlsProps> = ({
 
     setIsPlacingBet(true);
     try {
-      // Get current multiplier as entry point (1.0 for waiting games)
-      const entryMultiplier = gameStatus === 'waiting' ? 1.0 : activeCurrentMultiplier;
-      
       const success = await placeBet(walletAddress, amountNum, userId || undefined);
       if (success) {
+        // For pre-game bets, entry multiplier is always 1.0
+        const entryMultiplier = gameStatus === 'waiting' ? 1.0 : activeCurrentMultiplier;
+        
         // Store bet with entry multiplier
         const newBet: ActiveBet = {
           id: `bet_${Date.now()}`,
@@ -271,7 +278,9 @@ const TradingControls: FC<TradingControlsProps> = ({
         };
         
         setActiveBet(newBet);
-        toast.success(`Bet placed: ${amountNum} SOL (Entry: ${entryMultiplier.toFixed(2)}x)`);
+        
+        const betType = gameStatus === 'waiting' ? 'Pre-game bet' : 'Bet';
+        toast.success(`${betType} placed: ${amountNum} SOL (Entry: ${entryMultiplier.toFixed(2)}x)`);
         
         if (onBuy) onBuy(amountNum);
       } else {
@@ -329,13 +338,23 @@ const TradingControls: FC<TradingControlsProps> = ({
           </div>
         </div>
 
-        {/* Game Info */}
+        {/* Enhanced Game Info with Countdown (FIXED: showCountdown and countdownSeconds) */}
         {activeCurrentGame && (
           <div className="bg-gray-800 p-2 rounded-md mb-3">
             <div className="flex justify-between items-center mb-1">
               <span className="text-gray-400 text-sm">Game #{activeCurrentGame.gameNumber}</span>
               <span className="text-yellow-400 font-bold text-lg">{activeCurrentGame.multiplier.toFixed(2)}x</span>
             </div>
+            
+            {/* Countdown display for waiting period */}
+            {showCountdown && (
+              <div className="text-center mb-2">
+                <div className="text-blue-400 text-xs">Game Starting In</div>
+                <div className="text-green-400 font-bold text-xl">{countdownSeconds}s</div>
+                <div className="text-xs text-gray-400">Place your bets now!</div>
+              </div>
+            )}
+            
             <div className="flex justify-between items-center text-xs">
               <span className="text-gray-400">
                 <Users size={12} className="inline mr-1" />
@@ -382,7 +401,7 @@ const TradingControls: FC<TradingControlsProps> = ({
               onChange={handleAmountChange}
               className="w-full bg-gray-800 text-white px-3 py-2 rounded-md focus:outline-none text-center"
               placeholder="Enter bet amount"
-              disabled={!activeIsGameActive}
+              disabled={!canBet}
             />
           </div>
         )}
@@ -399,7 +418,7 @@ const TradingControls: FC<TradingControlsProps> = ({
                     ? 'bg-green-600 text-white'
                     : 'bg-gray-700 text-gray-300'
                 }`}
-                disabled={!activeIsGameActive}
+                disabled={!canBet}
               >
                 {amt.toString()}
               </button>
@@ -407,20 +426,21 @@ const TradingControls: FC<TradingControlsProps> = ({
           </div>
         )}
 
-        {/* Side-by-side Action Buttons */}
+        {/* Side-by-side Action Buttons with Enhanced States */}
         <div className="grid grid-cols-2 gap-3">
           {!activeBet ? (
             <>
               <button
                 onClick={handleBuy}
-                disabled={isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !activeIsGameActive}
+                disabled={isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !canBet}
                 className={`py-3 rounded-md font-bold text-sm ${
-                  isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !activeIsGameActive
+                  isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !canBet
                     ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                     : 'bg-green-600 hover:bg-green-700 text-white'
                 }`}
               >
-                {isPlacingBet ? 'Placing...' : 'Place Bet'}
+                {isPlacingBet ? 'Placing...' : 
+                 isWaitingPeriod ? 'Pre-Bet' : 'Place Bet'}
               </button>
               <button
                 disabled
@@ -452,16 +472,28 @@ const TradingControls: FC<TradingControlsProps> = ({
           )}
         </div>
 
-        {/* Warning messages for mobile */}
+        {/* Enhanced Warning messages for mobile */}
         {!isWalletReady && (
           <div className="text-yellow-500 text-xs text-center mt-2">
             Login to play
           </div>
         )}
         
-        {gameStatus === 'waiting' && (
+        {isWaitingPeriod && !canBet && (
+          <div className="text-red-500 text-xs text-center mt-2">
+            Too late - game starting!
+          </div>
+        )}
+        
+        {isWaitingPeriod && canBet && (
           <div className="text-blue-500 text-xs text-center mt-2">
-            Waiting for next round
+            Pre-game betting open
+          </div>
+        )}
+        
+        {gameStatus === 'active' && !activeBet && (
+          <div className="text-green-500 text-xs text-center mt-2">
+            Game active - bet now!
           </div>
         )}
       </div>
@@ -484,13 +516,23 @@ const TradingControls: FC<TradingControlsProps> = ({
         </div>
       </div>
 
-      {/* Game Info */}
+      {/* Enhanced Game Info with Countdown (FIXED: showCountdown and countdownSeconds) */}
       {activeCurrentGame && (
         <div className="bg-gray-800 p-3 rounded-md mb-4">
           <div className="flex justify-between items-center mb-2">
             <span className="text-gray-400">Game #{activeCurrentGame.gameNumber}</span>
             <span className="text-yellow-400 font-bold">{activeCurrentGame.multiplier.toFixed(2)}x</span>
           </div>
+          
+          {/* Countdown display for waiting period */}
+          {showCountdown && (
+            <div className="text-center mb-3 p-2 bg-blue-900 bg-opacity-30 rounded-md">
+              <div className="text-blue-400 text-sm">Next Game Starting In</div>
+              <div className="text-green-400 font-bold text-2xl">{countdownSeconds}s</div>
+              <div className="text-xs text-gray-400">Pre-game betting is open!</div>
+            </div>
+          )}
+          
           <div className="flex justify-between items-center text-sm">
             <span className="text-gray-400">Total Bets:</span>
             <span className="text-white">{activeCurrentGame.totalBets.toFixed(3)} SOL</span>
@@ -714,15 +756,15 @@ const TradingControls: FC<TradingControlsProps> = ({
           </>
         )}
         
-        {/* Action Buttons */}
+        {/* Enhanced Action Buttons */}
         <div className="grid grid-cols-2 gap-2">
           {!activeBet ? (
             <>
               <button
                 onClick={handleBuy}
-                disabled={isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !activeIsGameActive || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0}
+                disabled={isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !canBet || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0}
                 className={`py-2 rounded-md font-bold text-sm flex items-center justify-center ${
-                  isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !activeIsGameActive || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0
+                  isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !canBet || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0
                     ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                     : 'bg-green-600 hover:bg-green-700 text-white'
                 }`}
@@ -735,7 +777,7 @@ const TradingControls: FC<TradingControlsProps> = ({
                 ) : (
                   <>
                     <Coins className="mr-2 h-4 w-4" />
-                    Place Bet
+                    {isWaitingPeriod ? 'Pre-Bet' : 'Place Bet'}
                   </>
                 )}
               </button>
@@ -782,7 +824,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         </div>
       </div>
       
-      {/* Warning messages */}
+      {/* Enhanced Warning messages (FIXED: countdownSeconds now properly defined) */}
       <div className="mt-1">
         {!isWalletReady && (
           <div className="text-yellow-500 text-xs flex items-center">
@@ -805,17 +847,38 @@ const TradingControls: FC<TradingControlsProps> = ({
           </div>
         )}
         
-        {gameStatus === 'waiting' && (
+        {isWaitingPeriod && canBet && (
           <div className="text-blue-500 text-xs flex items-center">
             <Timer className="h-3 w-3 mr-1 flex-shrink-0" />
-            <span>Ready to bet - Next round starting soon</span>
+            <span>Pre-game betting open - {countdownSeconds}s remaining</span>
+          </div>
+        )}
+        
+        {isWaitingPeriod && !canBet && (
+          <div className="text-red-500 text-xs flex items-center">
+            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
+            <span>Too late to bet - Game starting now!</span>
+          </div>
+        )}
+        
+        {gameStatus === 'active' && !activeBet && canBet && (
+          <div className="text-green-500 text-xs flex items-center">
+            <Timer className="h-3 w-3 mr-1 flex-shrink-0" />
+            <span>Game active - Place bet now at {activeCurrentMultiplier.toFixed(2)}x</span>
+          </div>
+        )}
+        
+        {gameStatus === 'active' && !canBet && (
+          <div className="text-red-500 text-xs flex items-center">
+            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
+            <span>Too late to bet - Multiplier too high</span>
           </div>
         )}
         
         {gameStatus === 'crashed' && (
           <div className="text-red-500 text-xs flex items-center">
             <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
-            <span>Round ended. Waiting for next round.</span>
+            <span>Round ended. Next round starting soon.</span>
           </div>
         )}
       </div>

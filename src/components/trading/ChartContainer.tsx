@@ -28,10 +28,10 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   const [isPlacingBet, setIsPlacingBet] = useState<boolean>(false);
   const [isCashingOut, setIsCashingOut] = useState<boolean>(false);
   
-  // Local bet tracking since server doesn't provide userGameState
+  // Real server bet tracking (no more local state)
   const [userBet, setUserBet] = useState<number>(0);
-  const [betPlacedAt, setBetPlacedAt] = useState<number | null>(null);
-  const [countdownSeconds, setCountdownSeconds] = useState<number>(0);
+  const [betEntryMultiplier, setBetEntryMultiplier] = useState<number>(1.0);
+  const [lastGameNumber, setLastGameNumber] = useState<number>(0);
   
   // Create a reference to the chart container
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -50,8 +50,16 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   const walletAddress = embeddedWallet?.address || '';
   
-  // Connect to real game server with current implementation
-  const { currentGame, isConnected, placeBet, cashOut } = useGameSocket(walletAddress, currentUser?.id);
+  // Connect to real game server - ENHANCED with full data extraction
+  const { 
+    currentGame, 
+    isConnected, 
+    placeBet, 
+    cashOut, 
+    countdown,
+    isWaitingPeriod,
+    canBet 
+  } = useGameSocket(walletAddress, currentUser?.id);
 
   const isMobile = width ? width < 768 : false;
 
@@ -132,11 +140,18 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     }
   }, [trades]);
 
-  // Handle real game state changes with current GameState interface
+  // ENHANCED: Handle real game state changes with server bet tracking
   useEffect(() => {
     if (!currentGame || !isMountedRef.current) return;
 
-    // Handle game crash with current multiplier (no crashedAt property)
+    // Reset user bet state on new game
+    if (currentGame.gameNumber !== lastGameNumber) {
+      setUserBet(0);
+      setBetEntryMultiplier(1.0);
+      setLastGameNumber(currentGame.gameNumber);
+    }
+
+    // Handle game crash - only process real server events
     if (currentGame.status === 'crashed') {
       const crashMultiplier = currentGame.multiplier;
       
@@ -149,37 +164,19 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       
       setGameResults(prev => [newResult, ...prev.slice(0, 49)]);
       
-      // Handle user's bet result with local state
+      // Handle user's bet result - server should tell us the result
       if (userBet > 0) {
-        // Since no userGameState, assume they lost if game crashed
+        // If we had a bet and game crashed, we lost (unless we cashed out)
         setSellSuccess(false);
         setTriggerSellEffect(true);
         toast.error(`Crashed at ${crashMultiplier.toFixed(2)}x! Lost ${userBet.toFixed(3)} SOL`);
         
         // Reset user bet
         setUserBet(0);
-        setBetPlacedAt(null);
+        setBetEntryMultiplier(1.0);
       }
-      
-      // Start countdown for next game (simple 10 second countdown)
-      setCountdownSeconds(10);
     }
-
-    // Reset countdown when game starts
-    if (currentGame.status === 'active') {
-      setCountdownSeconds(0);
-    }
-  }, [currentGame, userBet]);
-
-  // Handle countdown timer
-  useEffect(() => {
-    if (countdownSeconds > 0) {
-      const timer = setTimeout(() => {
-        setCountdownSeconds(prev => prev - 1);
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [countdownSeconds]);
+  }, [currentGame, lastGameNumber, userBet]);
 
   // Handle effect completion
   const handleEffectComplete = () => {
@@ -188,20 +185,50 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     }
   };
 
-  // Handle placing a bet using current server API
+  // ENHANCED: Real server bet placement with result tracking
   const handleBuy = useCallback(async (amount: number) => {
-    if (amount <= 0 || amount > walletBalance || !currentGame || currentGame.status !== 'active' || !isMountedRef.current) {
+    if (amount <= 0 || amount > walletBalance || !currentGame || !isMountedRef.current) {
       toast.error('Cannot place bet right now');
+      return;
+    }
+
+    // Allow betting during waiting period OR active game
+    if (currentGame.status !== 'active' && currentGame.status !== 'waiting') {
+      toast.error('Game not available for betting');
+      return;
+    }
+
+    if (!canBet) {
+      toast.error('Betting not allowed right now');
       return;
     }
 
     setIsPlacingBet(true);
     
     try {
-      console.log(`Placing real bet: ${amount} SOL in game #${currentGame.gameNumber}`);
+      console.log(`Placing real bet: ${amount} SOL in game #${currentGame.gameNumber} (${currentGame.status})`);
 
-      // Place bet on real server
-      const success = await placeBet(walletAddress, amount, currentUser?.id);
+      // Place bet on real server - handle both return types
+      const result = await placeBet(walletAddress, amount, currentUser?.id);
+      
+      // Handle different return types from useGameSocket with proper type guards
+      let success: boolean;
+      let entryMultiplier: number;
+      let reason: string | undefined;
+
+      if (typeof result === 'boolean') {
+        success = result;
+        entryMultiplier = currentGame.multiplier;
+        reason = undefined;
+      } else if (result && typeof result === 'object' && 'success' in result) {
+        success = (result as any).success;
+        entryMultiplier = (result as any).entryMultiplier || currentGame.multiplier;
+        reason = (result as any).reason;
+      } else {
+        success = false;
+        entryMultiplier = currentGame.multiplier;
+        reason = 'Unknown response format';
+      }
       
       if (success) {
         // Create order for local tracking
@@ -213,13 +240,14 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
 
         placeOrder(order);
         
-        // Track bet locally
+        // Track bet with entry multiplier from server or current game multiplier
         setUserBet(amount);
-        setBetPlacedAt(currentGame.multiplier);
+        setBetEntryMultiplier(entryMultiplier);
         
-        toast.success(`Bet placed: ${amount} SOL`);
+        const betType = currentGame.status === 'waiting' ? 'Pre-game bet' : 'Live bet';
+        toast.success(`${betType} placed: ${amount} SOL @ ${entryMultiplier.toFixed(2)}x`);
       } else {
-        toast.error('Failed to place bet on server');
+        toast.error(reason || 'Failed to place bet on server');
       }
     } catch (error) {
       console.error('Failed to place bet:', error);
@@ -229,16 +257,16 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         setIsPlacingBet(false);
       }
     }
-  }, [walletBalance, currentGame, placeBet, walletAddress, currentUser?.id, placeOrder]);
+  }, [walletBalance, currentGame, placeBet, walletAddress, currentUser?.id, placeOrder, canBet]);
 
-  // Handle selling (full cashout only with current API)
+  // ENHANCED: Real server cashout with server result tracking
   const handleSell = useCallback(async (percentage: number) => {
     if (userBet <= 0 || !currentGame || currentGame.status !== 'active' || !isMountedRef.current) {
       toast.error('No active bet to cash out');
       return;
     }
 
-    // Only allow 100% cashout with current API
+    // Only allow 100% cashout with current server API
     if (percentage < 100) {
       toast.error('Partial cashouts not supported yet');
       return;
@@ -250,17 +278,36 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       const currentMultiplier = currentGame.multiplier;
       console.log(`Cashing out 100% at multiplier ${currentMultiplier}x`);
 
-      // Cash out on real server (current API only takes walletAddress)
-      const success = await cashOut(walletAddress);
+      // Cash out on real server - handle both return types
+      const result = await cashOut(walletAddress);
+      
+      // Handle different return types from useGameSocket with proper type guards
+      let success: boolean;
+      let payout: number | undefined;
+      let reason: string | undefined;
+
+      if (typeof result === 'boolean') {
+        success = result;
+        payout = undefined;
+        reason = undefined;
+      } else if (result && typeof result === 'object' && 'success' in result) {
+        success = (result as any).success;
+        payout = (result as any).payout;
+        reason = (result as any).reason;
+      } else {
+        success = false;
+        payout = undefined;
+        reason = 'Unknown response format';
+      }
       
       if (success) {
-        // Calculate full cashout amount
-        const cashoutAmount = userBet * currentMultiplier;
+        // Calculate payout if not provided by server
+        const finalPayout = payout || (userBet * currentMultiplier * 0.6); // 40% house edge
         
         // Create sell order for local tracking
         const order: Order = {
           side: 'sell',
-          amount: cashoutAmount,
+          amount: finalPayout,
           timestamp: new Date().toISOString(),
         };
 
@@ -279,14 +326,14 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         setSellSuccess(true);
         setTriggerSellEffect(true);
         
-        // Reset user bet since we cashed out 100%
+        // Reset user bet since we cashed out
         setUserBet(0);
-        setBetPlacedAt(null);
+        setBetEntryMultiplier(1.0);
         
-        const profit = userBet * (currentMultiplier - 1);
-        toast.success(`Cashed out: +${profit.toFixed(3)} SOL`);
+        const profit = finalPayout - userBet;
+        toast.success(`Cashed out: +${profit.toFixed(3)} SOL (${finalPayout.toFixed(3)} total)`);
       } else {
-        toast.error('Failed to cash out on server');
+        toast.error(reason || 'Failed to cash out on server');
       }
     } catch (error) {
       console.error('Failed to cash out:', error);
@@ -315,28 +362,29 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   
   const gameStats = calculateGameStats();
 
-  // Calculate chart height based on viewport size
+  // Calculate chart height based on viewport size - SMALLER for mobile
   const getChartHeight = () => {
     if (useMobileHeight && isMobile) {
-      return 300;
+      return 240; // Reduced from 300
     }
-    return isMobile ? 350 : 500;
+    return isMobile ? 280 : 500; // Reduced mobile from 350
   };
 
-  // Real game data with current implementation
+  // Real game data from server
   const currentMultiplier = currentGame?.multiplier || 1.0;
   const gameStatus = currentGame?.status || 'waiting';
   const gameId = currentGame?.gameNumber || 0;
-  const isGameActive = gameStatus === 'active';
+  const isGameActive = gameStatus === 'active' || gameStatus === 'waiting';
   const hasActiveGame = userBet > 0;
-  const showCountdown = gameStatus === 'crashed' && countdownSeconds > 0;
+  const showCountdown = isWaitingPeriod && countdown && countdown > 0;
+  const countdownSeconds = countdown ? Math.ceil(countdown / 1000) : 0;
 
   return (
     <div className="p-2 flex flex-col">
-      {/* Game Identification and Status - condensed for mobile */}
-      <div className="bg-[#0d0d0f] p-2 md:p-3 mb-2 md:mb-3 rounded-lg flex items-center justify-between border border-gray-800 text-sm md:text-base">
+      {/* Game Identification and Status - more compact for mobile */}
+      <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg flex items-center justify-between border border-gray-800 ${isMobile ? 'text-xs' : 'text-sm md:text-base'}`}>
         <div className="flex items-center">
-          <span className="text-gray-400 text-xs md:text-sm mr-1">Round #</span>
+          <span className="text-gray-400 mr-1">Round #</span>
           <span className="font-bold text-white">{gameId}</span>
           {!isConnected && <span className="ml-2 text-red-400 text-xs">(OFFLINE)</span>}
         </div>
@@ -357,37 +405,46 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         </div>
         
         <div className="flex items-center">
-          <span className="text-gray-400 text-xs md:text-sm hidden xs:inline mr-1">Current</span>
-          <span className="text-base font-bold text-yellow-400">{currentMultiplier.toFixed(2)}x</span>
+          <span className="text-gray-400 hidden xs:inline mr-1">Current</span>
+          <span className={`font-bold text-yellow-400 ${isMobile ? 'text-sm' : 'text-base'}`}>
+            {currentMultiplier.toFixed(2)}x
+          </span>
         </div>
       </div>
 
-      {/* Balance and Holdings Display - simplified for mobile */}
-      <div className="bg-[#0d0d0f] p-2 md:p-3 mb-2 md:mb-3 rounded-lg flex flex-wrap justify-between border border-gray-800 text-xs md:text-sm">
-        <div className="px-2 py-1">
+      {/* Balance and Holdings Display - more compact */}
+      <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg flex flex-wrap justify-between border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>
+        <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
           <span className="text-gray-400">Balance:</span>
           <span className="text-green-400 ml-1 font-bold">{walletBalance.toFixed(3)}</span>
         </div>
-        <div className="px-2 py-1">
+        <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
           <span className="text-gray-400">Bet:</span>
           <span className={`ml-1 font-bold ${userBet > 0 ? 'text-blue-400' : 'text-gray-400'}`}>
             {userBet > 0 ? userBet.toFixed(3) : '0.000'}
           </span>
         </div>
-        <div className="px-2 py-1">
+        <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
+          <span className="text-gray-400">Entry:</span>
+          <span className={`ml-1 font-bold ${userBet > 0 ? 'text-purple-400' : 'text-gray-400'}`}>
+            {userBet > 0 ? betEntryMultiplier.toFixed(2) + 'x' : '-'}
+          </span>
+        </div>
+        <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
           <span className="text-gray-400">Potential:</span>
           <span className={`ml-1 font-bold ${userBet > 0 ? 'text-yellow-400' : 'text-gray-400'}`}>
-            {userBet > 0 ? (userBet * (currentMultiplier - 1)).toFixed(3) : '0.000'}
+            {userBet > 0 ? (userBet * Math.max(currentMultiplier, betEntryMultiplier) * 0.6).toFixed(3) : '0.000'}
           </span>
         </div>
       </div>
 
-      {/* Real game info */}
+      {/* Real game info - compact */}
       {currentGame && (
-        <div className="bg-[#0d0d0f] p-2 mb-2 rounded-lg border border-gray-800 text-xs text-gray-400">
+        <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs'} text-gray-400`}>
           <div className="flex justify-between">
             <span>Players: {currentGame.totalPlayers || 0}</span>
             <span>Total Bets: {(currentGame.totalBets || 0).toFixed(3)} SOL</span>
+            {showCountdown && <span className="text-blue-400">Next: {countdownSeconds}s</span>}
           </div>
         </div>
       )}
@@ -396,16 +453,16 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       <div className="mb-2">
         <MiniCharts 
           data={gameResults} 
-          maxCharts={isMobile ? 5 : 10} 
+          maxCharts={isMobile ? 4 : 8} // Reduced for mobile
           onNewGame={(result) => {
             console.log('New game result:', result);
           }}
         />
       </div>
 
-      {/* Mobile optimized layout - stacked on small screens, side by side on larger */}
+      {/* Mobile optimized layout - smaller containers */}
       <div className={`grid grid-cols-1 ${isMobile ? '' : 'md:grid-cols-4'} gap-4`}>
-        {/* Chart container - with a fixed height relative to screen size */}
+        {/* Chart container - SMALLER mobile height with better margins */}
         <div 
           key={`game-${gameId}`} 
           ref={chartContainerRef}
@@ -416,8 +473,13 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
             onMultiplierUpdate={() => {}} // Multiplier comes from real server now
             onGameCrash={() => {}} // Handled by real server events
             currentBet={userBet}
-            betPlacedAt={betPlacedAt ?? undefined}
+            betPlacedAt={betEntryMultiplier}
             height={getChartHeight()}
+            useMobileHeight={isMobile}
+            // REAL SERVER DATA
+            serverMultiplier={currentMultiplier}
+            serverGameStatus={gameStatus}
+            isServerConnected={isConnected}
           />
 
           {triggerSellEffect && (
@@ -458,20 +520,20 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         </div>
       </div>
 
-      {/* Game Statistics - from real results */}
-      <div className="mt-4 bg-[#0d0d0f] p-3 rounded-lg border border-gray-800">
+      {/* Game Statistics - from real results, more compact */}
+      <div className={`mt-4 bg-[#0d0d0f] p-3 rounded-lg border border-gray-800 ${isMobile ? 'p-2' : 'p-3'}`}>
         <div className="grid grid-cols-3 gap-4">
           <div className="text-center">
-            <div className="text-xs md:text-sm text-gray-400">Average</div>
-            <div className="text-base md:text-lg font-bold text-green-400">{gameStats.average}x</div>
+            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Average</div>
+            <div className={`font-bold text-green-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.average}x</div>
           </div>
           <div className="text-center">
-            <div className="text-xs md:text-sm text-gray-400">Best</div>
-            <div className="text-base md:text-lg font-bold text-yellow-400">{gameStats.highest}x</div>
+            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Best</div>
+            <div className={`font-bold text-yellow-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.highest}x</div>
           </div>
           <div className="text-center">
-            <div className="text-xs md:text-sm text-gray-400">Rounds</div>
-            <div className="text-base md:text-lg font-bold text-blue-400">{gameResults.length}</div>
+            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Rounds</div>
+            <div className={`font-bold text-blue-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameResults.length}</div>
           </div>
         </div>
       </div>

@@ -1,8 +1,9 @@
-// Fixed useGameSocket hook with proper TypeScript types
+// Enhanced useGameSocket hook with pre-game betting and countdown support
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 
+// Enhanced GameState interface
 interface GameState {
     id: string;
     gameNumber: number;
@@ -13,6 +14,33 @@ interface GameState {
     startTime: number;
     maxMultiplier?: number;
     serverTime?: number;
+    countdown?: number;        // NEW: Countdown in milliseconds for waiting period
+    canBet?: boolean;         // NEW: Whether betting is currently allowed
+    preGameBets?: number;     // NEW: Pre-game bet totals
+    preGamePlayers?: number;  // NEW: Pre-game player count
+}
+
+// NEW: Enhanced bet result interface
+interface BetResult {
+    success: boolean;
+    reason?: string;
+    walletAddress: string;
+    betAmount: number;
+    entryMultiplier?: number;
+    gameState?: {
+        totalBets: number;
+        totalPlayers: number;
+        status: 'waiting' | 'active' | 'crashed';
+        countdown?: number;
+    };
+}
+
+// NEW: Enhanced cashout result interface
+interface CashOutResult {
+    success: boolean;
+    reason?: string;
+    payout?: number;
+    walletAddress: string;
 }
 
 export function useGameSocket(walletAddress: string, userId?: string) {
@@ -21,10 +49,16 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     const [currentGame, setCurrentGame] = useState<GameState | null>(null);
     const [gameHistory, setGameHistory] = useState<GameState[]>([]);
     
-    // FIX: Add initial value for useRef
+    // NEW: Countdown and waiting period state
+    const [countdown, setCountdown] = useState<number>(0);
+    const [isWaitingPeriod, setIsWaitingPeriod] = useState<boolean>(false);
+    const [canBet, setCanBet] = useState<boolean>(false);
+    
+    // Existing sync state
     const [serverTimeOffset, setServerTimeOffset] = useState(0);
-    const gameStateRef = useRef<GameState | null>(null); // Fixed: added initial value
-    const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Fixed: added initial value
+    const gameStateRef = useRef<GameState | null>(null);
+    const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const countdownRef = useRef<number>(0); // NEW: Track countdown for validation
 
     // Calculate server time offset for synchronization
     const syncServerTime = useCallback((serverTime: number) => {
@@ -38,15 +72,21 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         return Date.now() + serverTimeOffset;
     }, [serverTimeOffset]);
 
+    // NEW: Update countdown and betting availability
+    const updateCountdownState = useCallback((countdownMs: number, gameStatus: string) => {
+        setCountdown(countdownMs);
+        countdownRef.current = countdownMs;
+        setIsWaitingPeriod(gameStatus === 'waiting');
+        
+        // Allow betting during waiting period (but not in last 2 seconds) or during active game
+        const canBetNow = (gameStatus === 'waiting' && countdownMs > 2000) || gameStatus === 'active';
+        setCanBet(canBetNow);
+    }, []);
+
     // Enhanced connection with automatic reconnection
     useEffect(() => {
         const serverUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'wss://cb85-3-16-49-236.ngrok-free.app';
-        console.log('🔍 Using environment variable URL:', serverUrl);
-        
-        // 🔍 DEBUG: Let's see what's happening
-        console.log('🔍 Environment variable:', process.env.NEXT_PUBLIC_GAME_SERVER_URL);
-        console.log('🔍 Server URL being used:', serverUrl);
-        console.log('🔍 All env vars:', Object.keys(process.env).filter(key => key.startsWith('NEXT_PUBLIC')));
+        console.log('🔍 Connecting to enhanced game server:', serverUrl);
         
         const newSocket = io(serverUrl, {
             transports: ['websocket'],
@@ -58,22 +98,19 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
         // Enhanced connection handler
         newSocket.on('connect', () => {
-            console.log('Connected to game server');
+            console.log('Connected to enhanced game server');
             setIsConnected(true);
-            
-            // Request immediate game sync
             newSocket.emit('requestGameSync');
         });
 
-        // FIX: Handle game state with proper type checking
+        // Enhanced game state handler with countdown support
         newSocket.on('gameState', (gameState: any) => {
-            console.log('Received game state:', gameState);
+            console.log('Received enhanced game state:', gameState);
             
             if (gameState.serverTime) {
                 syncServerTime(gameState.serverTime);
             }
             
-            // FIX: Ensure all required fields are present
             const newGameState: GameState = {
                 id: gameState.gameId || gameState.id || '',
                 gameNumber: gameState.gameNumber || 0,
@@ -83,14 +120,88 @@ export function useGameSocket(walletAddress: string, userId?: string) {
                 totalPlayers: gameState.totalPlayers || 0,
                 startTime: gameState.startTime || Date.now(),
                 maxMultiplier: gameState.maxMultiplier,
-                serverTime: gameState.serverTime
+                serverTime: gameState.serverTime,
+                countdown: gameState.countdown,
+                canBet: gameState.canBet,
+                preGameBets: gameState.preGameBets,
+                preGamePlayers: gameState.preGamePlayers
             };
+            
+            // Update countdown state
+            if (gameState.countdown !== undefined) {
+                updateCountdownState(gameState.countdown, gameState.status);
+            }
             
             setCurrentGame(newGameState);
             gameStateRef.current = newGameState;
         });
 
-        // FIX: Enhanced multiplier update with proper type validation
+        // NEW: Handle waiting period start
+        newSocket.on('gameWaiting', (data: any) => {
+            console.log('Game waiting period started:', data);
+            
+            if (data.serverTime) {
+                syncServerTime(data.serverTime);
+            }
+            
+            updateCountdownState(data.countdown || 10000, 'waiting');
+            
+            // Update game state for waiting period
+            if (gameStateRef.current) {
+                const waitingGame: GameState = {
+                    ...gameStateRef.current,
+                    id: data.gameId || gameStateRef.current.id,
+                    gameNumber: data.gameNumber || gameStateRef.current.gameNumber,
+                    status: 'waiting',
+                    multiplier: 1.0,
+                    countdown: data.countdown,
+                    canBet: data.canBet,
+                    serverTime: data.serverTime
+                };
+                
+                setCurrentGame(waitingGame);
+                gameStateRef.current = waitingGame;
+            }
+        });
+
+        // NEW: Handle countdown updates
+        newSocket.on('countdownUpdate', (data: any) => {
+            if (data.serverTime) {
+                syncServerTime(data.serverTime);
+            }
+            
+            updateCountdownState(data.countdown, 'waiting');
+            
+            // Update current game with countdown
+            if (gameStateRef.current && gameStateRef.current.status === 'waiting') {
+                const updatedGame: GameState = {
+                    ...gameStateRef.current,
+                    countdown: data.countdown,
+                    canBet: data.canBet,
+                    serverTime: data.serverTime
+                };
+                
+                setCurrentGame(updatedGame);
+                gameStateRef.current = updatedGame;
+            }
+        });
+
+        // NEW: Handle waiting period bet updates
+        newSocket.on('waitingGameUpdate', (data: any) => {
+            if (gameStateRef.current && gameStateRef.current.status === 'waiting') {
+                const updatedGame: GameState = {
+                    ...gameStateRef.current,
+                    totalBets: data.totalBets || gameStateRef.current.totalBets,
+                    totalPlayers: data.totalPlayers || gameStateRef.current.totalPlayers,
+                    countdown: data.countdown || gameStateRef.current.countdown
+                };
+                
+                setCurrentGame(updatedGame);
+                gameStateRef.current = updatedGame;
+            }
+        });
+
+        // Enhanced multiplier update handler
         newSocket.on('multiplierUpdate', (data: any) => {
             if (gameStateRef.current && gameStateRef.current.gameNumber === data.gameNumber) {
                 if (data.serverTime) {
@@ -111,56 +222,68 @@ export function useGameSocket(walletAddress: string, userId?: string) {
             }
         });
 
-        // FIX: Handle game started with proper types
+        // Enhanced game started handler
         newSocket.on('gameStarted', (data: any) => {
-            console.log('New game started:', data);
+            console.log('Enhanced game started with pre-game bets:', data);
             
             if (data.serverTime) {
                 syncServerTime(data.serverTime);
             }
+            
+            // Reset countdown state when game starts
+            setCountdown(0);
+            setIsWaitingPeriod(false);
+            setCanBet(true);
             
             const newGameState: GameState = {
                 id: data.gameId || '',
                 gameNumber: data.gameNumber || 0,
                 multiplier: 1.0,
                 status: 'active',
-                totalBets: 0,
-                totalPlayers: 0,
+                totalBets: data.totalBets || data.preGameBets || 0,
+                totalPlayers: data.totalPlayers || data.preGamePlayers || 0,
                 startTime: data.startTime || Date.now(),
                 maxMultiplier: data.maxMultiplier,
-                serverTime: data.serverTime
+                serverTime: data.serverTime,
+                preGameBets: data.preGameBets,
+                preGamePlayers: data.preGamePlayers,
+                canBet: true
             };
             
             setCurrentGame(newGameState);
             gameStateRef.current = newGameState;
         });
 
-        // FIX: Handle game crashed with proper type validation
+        // Enhanced game crashed handler
         newSocket.on('gameCrashed', (data: any) => {
             console.log('Game crashed:', data);
+            
+            // Reset countdown and betting state
+            setCountdown(0);
+            setIsWaitingPeriod(false);
+            setCanBet(false);
             
             if (gameStateRef.current && gameStateRef.current.gameNumber === data.gameNumber) {
                 const crashedGame: GameState = {
                     ...gameStateRef.current,
                     status: 'crashed',
-                    multiplier: data.crashMultiplier || data.finalMultiplier || gameStateRef.current.multiplier
+                    multiplier: data.crashMultiplier || data.finalMultiplier || gameStateRef.current.multiplier,
+                    canBet: false
                 };
                 
                 setCurrentGame(crashedGame);
                 gameStateRef.current = null; // Clear current game
                 
-                // FIX: Add to history with proper type
                 setGameHistory(prev => [...prev.slice(-49), crashedGame]);
             }
         });
 
-        // FIX: Handle periodic server sync with type validation
+        // Enhanced server sync handler
         newSocket.on('serverSync', (data: any) => {
             if (data.serverTime) {
                 syncServerTime(data.serverTime);
             }
             
-            // Only update if we have the same game
             if (gameStateRef.current && gameStateRef.current.gameNumber === data.gameNumber) {
                 const syncedGame: GameState = {
                     ...gameStateRef.current,
@@ -173,13 +296,12 @@ export function useGameSocket(walletAddress: string, userId?: string) {
                 setCurrentGame(syncedGame);
                 gameStateRef.current = syncedGame;
             } else if (data.gameNumber) {
-                // We're out of sync, request full game state
                 console.log('Game out of sync, requesting fresh state...');
                 newSocket.emit('requestGameSync');
             }
         });
 
-        // FIX: Handle explicit game sync responses
+        // Handle game sync responses
         newSocket.on('gameSync', (data: any) => {
             console.log('Received game sync:', data);
             
@@ -187,17 +309,24 @@ export function useGameSocket(walletAddress: string, userId?: string) {
                 syncServerTime(data.serverTime);
             }
             
-            if (data.status === 'active') {
+            if (data.status) {
                 const syncedGame: GameState = {
                     id: data.gameId || '',
                     gameNumber: data.gameNumber || 0,
                     multiplier: data.multiplier || 1.0,
                     status: data.status,
-                    totalBets: 0,
-                    totalPlayers: 0,
-                    startTime: 0,
-                    serverTime: data.serverTime
+                    totalBets: data.totalBets || 0,
+                    totalPlayers: data.totalPlayers || 0,
+                    startTime: data.startTime || 0,
+                    serverTime: data.serverTime,
+                    countdown: data.countdown,
+                    canBet: data.canBet
                 };
+                
+                // Update countdown state if in waiting period
+                if (data.status === 'waiting' && data.countdown !== undefined) {
+                    updateCountdownState(data.countdown, 'waiting');
+                }
                 
                 setCurrentGame(syncedGame);
                 gameStateRef.current = syncedGame;
@@ -206,7 +335,6 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
         // Handle game history
         newSocket.on('gameHistory', (history: any[]) => {
-            // FIX: Map history to proper GameState objects
             const mappedHistory: GameState[] = history.map(game => ({
                 id: game.id || '',
                 gameNumber: game.gameNumber || 0,
@@ -221,37 +349,41 @@ export function useGameSocket(walletAddress: string, userId?: string) {
             setGameHistory(mappedHistory);
         });
 
-        // FIX: Handle bet updates with proper type validation
+        // Enhanced bet placed handler
         newSocket.on('betPlaced', (data: any) => {
             if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
                 const updatedGame: GameState = {
                     ...gameStateRef.current,
                     totalBets: data.totalBets || gameStateRef.current.totalBets,
-                    totalPlayers: data.totalPlayers || gameStateRef.current.totalPlayers
+                    totalPlayers: data.totalPlayers || gameStateRef.current.totalPlayers,
+                    countdown: data.countdown || gameStateRef.current.countdown
                 };
                 setCurrentGame(updatedGame);
                 gameStateRef.current = updatedGame;
             }
         });
 
+        // Error handlers
         newSocket.on('disconnect', () => {
             console.log('Disconnected from game server');
             setIsConnected(false);
+            setCanBet(false);
         });
 
         newSocket.on('connect_error', (error) => {
             console.error('Connection error:', error);
             setIsConnected(false);
+            setCanBet(false);
         });
 
         setSocket(newSocket);
 
-        // Set up periodic sync check
+        // Periodic sync check
         const syncInterval = setInterval(() => {
             if (newSocket.connected && gameStateRef.current) {
                 newSocket.emit('requestGameSync');
             }
-        }, 30000); // Every 30 seconds
+        }, 30000);
 
         return () => {
             clearInterval(syncInterval);
@@ -260,24 +392,41 @@ export function useGameSocket(walletAddress: string, userId?: string) {
             }
             newSocket.close();
         };
-    }, [walletAddress, syncServerTime]);
+    }, [walletAddress, syncServerTime, updateCountdownState]);
 
-    // Enhanced place bet with validation
+    // Enhanced place bet with pre-game betting support
     const placeBet = useCallback(async (walletAddress: string, amount: number, userId?: string): Promise<boolean> => {
         return new Promise((resolve) => {
-            if (!socket || !isConnected || !currentGame || currentGame.status !== 'active') {
+            if (!socket || !isConnected || !currentGame) {
+                console.log('Cannot place bet: no socket, connection, or game');
+                resolve(false);
+                return;
+            }
+
+            // NEW: Allow betting during waiting period and active games
+            if (currentGame.status !== 'active' && currentGame.status !== 'waiting') {
+                console.log('Cannot place bet: game status is', currentGame.status);
+                resolve(false);
+                return;
+            }
+
+            // NEW: Check if betting is allowed (not in last 2 seconds of countdown)
+            if (!canBet) {
+                console.log('Cannot place bet: betting not allowed (too close to game start)');
                 resolve(false);
                 return;
             }
 
             const timeout = setTimeout(() => {
+                console.log('Bet timeout after 10 seconds');
                 resolve(false);
-            }, 10000); // 10 second timeout
+            }, 10000);
 
             socket.emit('placeBet', { walletAddress, betAmount: amount, userId });
             
-            socket.once('betResult', (data: any) => {
+            socket.once('betResult', (data: BetResult) => {
                 clearTimeout(timeout);
+                console.log('Bet result:', data);
                 resolve(data.success);
                 
                 // Update local state if bet was successful
@@ -285,32 +434,38 @@ export function useGameSocket(walletAddress: string, userId?: string) {
                     const updatedGame: GameState = {
                         ...gameStateRef.current,
                         totalBets: data.gameState.totalBets || gameStateRef.current.totalBets,
-                        totalPlayers: data.gameState.totalPlayers || gameStateRef.current.totalPlayers
+                        totalPlayers: data.gameState.totalPlayers || gameStateRef.current.totalPlayers,
+                        countdown: data.gameState.countdown || gameStateRef.current.countdown
                     };
                     setCurrentGame(updatedGame);
                     gameStateRef.current = updatedGame;
                 }
             });
         });
-    }, [socket, isConnected, currentGame]);
+    }, [socket, isConnected, currentGame, canBet]);
 
-    // Enhanced cash out
-    const cashOut = useCallback(async (walletAddress: string): Promise<boolean> => {
+    // Enhanced cash out with detailed result
+    const cashOut = useCallback(async (walletAddress: string): Promise<{ success: boolean; payout?: number; reason?: string }> => {
         return new Promise((resolve) => {
             if (!socket || !isConnected || !currentGame || currentGame.status !== 'active') {
-                resolve(false);
+                resolve({ success: false, reason: 'Game not active or not connected' });
                 return;
             }
 
             const timeout = setTimeout(() => {
-                resolve(false);
+                resolve({ success: false, reason: 'Timeout' });
             }, 10000);
 
             socket.emit('cashOut', { walletAddress });
             
-            socket.once('cashOutResult', (data: any) => {
+            socket.once('cashOutResult', (data: CashOutResult) => {
                 clearTimeout(timeout);
-                resolve(data.success);
+                console.log('Cashout result:', data);
+                resolve({
+                    success: data.success,
+                    payout: data.payout,
+                    reason: data.reason
+                });
             });
         });
     }, [socket, isConnected, currentGame]);
@@ -322,6 +477,10 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         placeBet,
         cashOut,
         serverTimeOffset,
-        getServerTime
+        getServerTime,
+        // NEW: Countdown and waiting period state
+        countdown,
+        isWaitingPeriod,
+        canBet
     };
 }

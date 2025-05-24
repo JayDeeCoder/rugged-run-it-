@@ -1,4 +1,4 @@
-// src/components/trading/TradingControls.tsx
+// src/components/trading/TradingControls.tsx - Fixed Version
 import { FC, useState, useEffect, useContext, useCallback } from 'react';
 import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon, Timer, Users, Settings, Wallet, TrendingUp } from 'lucide-react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
@@ -7,6 +7,7 @@ import Button from '../common/Button';
 import { useGameSocket } from '../../hooks/useGameSocket';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 // Import from barrel file instead of direct imports
 import { AirdropModal, DepositModal, WithdrawModal } from './index';
@@ -24,6 +25,7 @@ interface ActiveBet {
   entryMultiplier: number;
   timestamp: number;
   gameId: string;
+  transactionId?: string;
 }
 
 interface TradingControlsProps {
@@ -38,6 +40,46 @@ interface TradingControlsProps {
   isGameActive?: boolean;
   isMobile?: boolean;
 }
+
+// Solana connection for balance checks
+const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
+
+// Enhanced wallet balance hook
+const useWalletBalance = (walletAddress: string) => {
+  const [balance, setBalance] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [lastUpdated, setLastUpdated] = useState<number>(0);
+
+  const updateBalance = useCallback(async () => {
+    if (!walletAddress) return;
+    
+    setLoading(true);
+    try {
+      const publicKey = new PublicKey(walletAddress);
+      const balanceResponse = await connection.getBalance(publicKey);
+      const solBalance = balanceResponse / LAMPORTS_PER_SOL;
+      setBalance(solBalance);
+      setLastUpdated(Date.now());
+      console.log(`💰 Wallet balance updated: ${solBalance.toFixed(3)} SOL`);
+    } catch (error) {
+      console.error('Failed to fetch wallet balance:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [walletAddress]);
+
+  // Auto-update balance every 30 seconds
+  useEffect(() => {
+    if (walletAddress) {
+      updateBalance();
+      const interval = setInterval(updateBalance, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [walletAddress, updateBalance]);
+
+  return { balance, loading, updateBalance, lastUpdated };
+};
 
 // Compact Game Info Component
 const CompactGameInfo: FC<{
@@ -150,7 +192,7 @@ const CompactGameInfo: FC<{
   );
 };
 
-// Balance Display Component
+// Enhanced Balance Display Component with real-time updates
 const BalanceDisplay: FC<{
   currentToken: TokenType;
   activeBalance: number;
@@ -161,7 +203,21 @@ const BalanceDisplay: FC<{
   isMobile: boolean;
   showExpanded: boolean;
   onToggleExpanded: () => void;
-}> = ({ currentToken, activeBalance, onTokenChange, onDepositClick, onWithdrawClick, onAirdropClick, isMobile, showExpanded, onToggleExpanded }) => {
+  isLoading: boolean;
+  onRefreshBalance: () => void;
+}> = ({ 
+  currentToken, 
+  activeBalance, 
+  onTokenChange, 
+  onDepositClick, 
+  onWithdrawClick, 
+  onAirdropClick, 
+  isMobile, 
+  showExpanded, 
+  onToggleExpanded,
+  isLoading,
+  onRefreshBalance
+}) => {
   const formatBalance = (balance: number, token: TokenType) => {
     if (token === TokenType.SOL) {
       return balance.toFixed(3);
@@ -190,11 +246,20 @@ const BalanceDisplay: FC<{
                 currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
               }`}>
                 {formatBalance(activeBalance, currentToken)} {currentToken}
+                {isLoading && <span className="ml-1 text-xs text-gray-400">↻</span>}
               </div>
             </div>
           </div>
           <div className="flex items-center space-x-2">
-            <Wallet className="w-4 h-4 text-gray-400" />
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                onRefreshBalance();
+              }}
+              className="text-gray-400 hover:text-white"
+            >
+              <Wallet className="w-4 h-4" />
+            </button>
             <span className="text-gray-400 text-sm">{showExpanded ? '▲' : '▼'}</span>
           </div>
         </div>
@@ -272,12 +337,20 @@ const BalanceDisplay: FC<{
               currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
             }`}>
               {formatBalance(activeBalance, currentToken)} {currentToken}
+              {isLoading && <span className="ml-2 text-xs text-gray-400">Updating...</span>}
             </div>
           </div>
         </div>
         
-        {/* Token Switch Buttons */}
+        {/* Token Switch Buttons and Refresh */}
         <div className="flex space-x-2">
+          <button
+            onClick={onRefreshBalance}
+            className="px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600"
+            disabled={isLoading}
+          >
+            {isLoading ? '↻' : '⟳'}
+          </button>
           <button
             onClick={() => onTokenChange(TokenType.SOL)}
             className={`px-3 py-1 text-xs rounded ${
@@ -327,7 +400,7 @@ const BalanceDisplay: FC<{
   );
 };
 
-// Auto Cashout Component
+// Auto Cashout Component (unchanged)
 const AutoCashoutSection: FC<{
   autoCashoutEnabled: boolean;
   autoCashoutValue: string;
@@ -433,16 +506,21 @@ const AutoCashoutSection: FC<{
   );
 };
 
-// Active Bet Display Component
+// Active Bet Display Component (unchanged)
 const ActiveBetDisplay: FC<{
   bet: ActiveBet;
   currentMultiplier: number;
   isMobile: boolean;
 }> = ({ bet, currentMultiplier, isMobile }) => {
   const calculatePotentialWin = () => {
-    const winMultiplier = Math.max(currentMultiplier, bet.entryMultiplier);
-    return bet.amount * winMultiplier;
+    const growthRatio = currentMultiplier / bet.entryMultiplier;
+    const rawPayout = bet.amount * growthRatio;
+    const finalPayout = rawPayout * (1 - 0.40); // Apply 40% house edge
+    return Math.max(0, finalPayout);
   };
+
+  const profit = calculatePotentialWin() - bet.amount;
+  const isProfit = profit > 0;
 
   return (
     <div className="bg-blue-900 bg-opacity-30 p-3 rounded-lg mb-3">
@@ -451,8 +529,11 @@ const ActiveBetDisplay: FC<{
         <div className="text-lg font-bold text-blue-300">
           {bet.amount} SOL @ {bet.entryMultiplier.toFixed(2)}x
         </div>
-        <div className="text-sm text-green-400 mt-1">
+        <div className={`text-sm mt-1 ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
           Potential: {calculatePotentialWin().toFixed(3)} SOL
+        </div>
+        <div className={`text-xs mt-1 ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
+          P&L: {profit >= 0 ? '+' : ''}{profit.toFixed(3)} SOL
         </div>
         {isMobile && (
           <div className="text-xs text-gray-400 mt-1">
@@ -464,7 +545,7 @@ const ActiveBetDisplay: FC<{
   );
 };
 
-// Betting Section Component
+// Enhanced Betting Section Component
 const BettingSection: FC<{
   activeBet: ActiveBet | null;
   amount: string;
@@ -484,6 +565,7 @@ const BettingSection: FC<{
   isConnected: boolean;
   currentMultiplier: number;
   isMobile: boolean;
+  betValidationError?: string;
 }> = ({
   activeBet,
   amount,
@@ -502,9 +584,15 @@ const BettingSection: FC<{
   gameStatus,
   isConnected,
   currentMultiplier,
-  isMobile
+  isMobile,
+  betValidationError
 }) => {
-  const amountValid = !isNaN(parseFloat(amount)) && parseFloat(amount) > 0 && parseFloat(amount) <= activeBalance;
+  const amountNum = parseFloat(amount);
+  const amountValid = !isNaN(amountNum) && amountNum > 0 && amountNum <= activeBalance;
+  const minBetAmount = currentToken === TokenType.SOL ? 0.001 : 1;
+  const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
+  
+  const amountInRange = amountNum >= minBetAmount && amountNum <= maxBetAmount;
 
   if (isMobile) {
     return (
@@ -519,7 +607,7 @@ const BettingSection: FC<{
                   value={amount}
                   onChange={(e) => onAmountChange(e.target.value)}
                   className="flex-1 bg-gray-700 text-white px-2 py-1.5 rounded text-sm focus:outline-none"
-                  placeholder="Amount"
+                  placeholder={`Min: ${minBetAmount}`}
                   disabled={!canBet}
                 />
                 <button
@@ -530,7 +618,7 @@ const BettingSection: FC<{
                   ½
                 </button>
                 <button
-                  onClick={() => onQuickAmount(activeBalance)}
+                  onClick={() => onQuickAmount(Math.min(activeBalance, maxBetAmount))}
                   className="bg-gray-600 text-gray-300 px-2 text-xs rounded hover:bg-gray-500"
                   disabled={!canBet}
                 >
@@ -555,6 +643,11 @@ const BettingSection: FC<{
                   </button>
                 ))}
               </div>
+
+              {/* Validation error */}
+              {betValidationError && (
+                <div className="text-red-400 text-xs mt-1">{betValidationError}</div>
+              )}
             </div>
           </>
         ) : null}
@@ -565,9 +658,9 @@ const BettingSection: FC<{
             <>
               <button
                 onClick={onPlaceBet}
-                disabled={isPlacingBet || !isWalletReady || !amountValid || !canBet}
+                disabled={isPlacingBet || !isWalletReady || !amountValid || !amountInRange || !canBet}
                 className={`py-2.5 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
-                  isPlacingBet || !isWalletReady || !amountValid || !canBet
+                  isPlacingBet || !isWalletReady || !amountValid || !amountInRange || !canBet
                     ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                     : 'bg-green-600 hover:bg-green-700 text-white'
                 }`}
@@ -629,7 +722,7 @@ const BettingSection: FC<{
     );
   }
 
-  // Desktop version - unchanged
+  // Desktop version with enhanced validation
   return (
     <div className="border-t border-gray-800 pt-3">
       <h3 className="text-sm font-bold text-gray-400 mb-3">
@@ -641,7 +734,7 @@ const BettingSection: FC<{
           {/* Amount Input */}
           <div className="mb-3">
             <label className="block text-gray-400 text-xs mb-1">
-              Bet Amount ({currentToken})
+              Bet Amount ({currentToken}) - Min: {minBetAmount}, Max: {maxBetAmount}
             </label>
             <div className="flex">
               <input
@@ -649,7 +742,7 @@ const BettingSection: FC<{
                 value={amount}
                 onChange={(e) => onAmountChange(e.target.value)}
                 className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-l-md focus:outline-none"
-                placeholder="0.00"
+                placeholder={`Min: ${minBetAmount}`}
                 disabled={!canBet}
               />
               <button
@@ -660,13 +753,18 @@ const BettingSection: FC<{
                 Half
               </button>
               <button
-                onClick={() => onQuickAmount(activeBalance)}
+                onClick={() => onQuickAmount(Math.min(activeBalance, maxBetAmount))}
                 className="bg-gray-600 text-gray-300 px-2 text-xs rounded-r-md hover:bg-gray-500"
                 disabled={!canBet}
               >
                 Max
               </button>
             </div>
+            
+            {/* Validation error */}
+            {betValidationError && (
+              <div className="text-red-400 text-xs mt-1">{betValidationError}</div>
+            )}
           </div>
           
           {/* Quick Amount Buttons */}
@@ -695,9 +793,9 @@ const BettingSection: FC<{
           <>
             <button
               onClick={onPlaceBet}
-              disabled={isPlacingBet || !isWalletReady || !amountValid || !canBet}
+              disabled={isPlacingBet || !isWalletReady || !amountValid || !amountInRange || !canBet}
               className={`py-3 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
-                isPlacingBet || !isWalletReady || !amountValid || !canBet
+                isPlacingBet || !isWalletReady || !amountValid || !amountInRange || !canBet
                   ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                   : 'bg-green-600 hover:bg-green-700 text-white'
               }`}
@@ -759,7 +857,7 @@ const BettingSection: FC<{
   );
 };
 
-// Status Messages Component
+// Enhanced Status Messages Component
 const StatusMessages: FC<{
   isWalletReady: boolean;
   isConnected: boolean;
@@ -771,6 +869,7 @@ const StatusMessages: FC<{
   gameStatus: string;
   currentMultiplier: number;
   countdownSeconds: number;
+  serverError?: string;
 }> = ({
   isWalletReady,
   isConnected,
@@ -781,9 +880,14 @@ const StatusMessages: FC<{
   canBet,
   gameStatus,
   currentMultiplier,
-  countdownSeconds
+  countdownSeconds,
+  serverError
 }) => {
   const getStatusMessage = () => {
+    if (serverError) {
+      return { text: serverError, icon: AlertCircle, color: 'text-red-500' };
+    }
+
     if (!isWalletReady) {
       return { text: 'Login to play', icon: AlertCircle, color: 'text-yellow-500' };
     }
@@ -855,8 +959,11 @@ const TradingControls: FC<TradingControlsProps> = ({
   // State for user ID
   const [userId, setUserId] = useState<string | null>(null);
   
-  // Enhanced game server connection with countdown support
+  // Enhanced game server connection (compatible with existing hook)
   const { currentGame, isConnected, placeBet, cashOut, countdown, isWaitingPeriod, canBet } = useGameSocket(walletAddress, userId || undefined);
+  
+  // Real wallet balance integration
+  const { balance: realSolBalance, loading: balanceLoading, updateBalance } = useWalletBalance(walletAddress);
   
   // Calculate countdown values
   const countdownSeconds = countdown ? Math.ceil(countdown / 1000) : 0;
@@ -867,22 +974,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   
   // Token context and wallet balance
   const [currentToken, setCurrentToken] = useState<TokenType>(TokenType.SOL);
-  const [solBalance, setSolBalance] = useState<number>(0);
   const [ruggedBalance, setRuggedBalance] = useState<number>(1000); // Default RUGGED balance
-  
-  // Update wallet balance from real wallet data
-  useEffect(() => {
-    if (embeddedWallet && authenticated) {
-      const updateBalance = async () => {
-        try {
-          setSolBalance(propWalletBalance || 0.1); // Default small balance for testing
-        } catch (error) {
-          console.warn('Could not fetch wallet balance:', error);
-        }
-      };
-      updateBalance();
-    }
-  }, [embeddedWallet, authenticated, propWalletBalance]);
   
   // Check if wallet is ready
   const isWalletReady = authenticated && walletAddress !== '';
@@ -908,18 +1000,14 @@ const TradingControls: FC<TradingControlsProps> = ({
   // State for expanded sections
   const [showBalanceExpanded, setShowBalanceExpanded] = useState<boolean>(false);
   
+  // Error state
+  const [serverError, setServerError] = useState<string>('');
+  
   // Real game state from server
   const activeCurrentGame = currentGame;
   const activeIsGameActive = activeCurrentGame?.status === 'active' || activeCurrentGame?.status === 'waiting';
   const activeCurrentMultiplier = activeCurrentGame?.multiplier || propCurrentMultiplier;
   const gameStatus = activeCurrentGame?.status || 'waiting';
-  
-  // Calculate potential payout based on entry multiplier
-  const calculatePotentialWin = () => {
-    if (!activeBet) return 0;
-    const winMultiplier = Math.max(activeCurrentMultiplier, activeBet.entryMultiplier);
-    return activeBet.amount * winMultiplier;
-  };
 
   // Get or create user when wallet connects
   useEffect(() => {
@@ -943,12 +1031,20 @@ const TradingControls: FC<TradingControlsProps> = ({
     setAmount(savedAmount);
   }, [savedAmount]);
 
+  // Handle socket errors - removed since not available in current hook
+  // useEffect(() => {
+  //   if (socketError) {
+  //     setServerError(socketError);
+  //     setTimeout(() => setServerError(''), 5000);
+  //   }
+  // }, [socketError]);
+
   // Handle token switch
   const handleTokenChange = (token: TokenType) => {
     setCurrentToken(token);
   };
 
-  // Enhanced cashout with detailed result handling
+  // Enhanced cashout (compatible with existing hook)
   const handleCashout = useCallback(async () => {
     if (!authenticated || !walletAddress || !isConnected || !activeBet) {
       return;
@@ -956,23 +1052,25 @@ const TradingControls: FC<TradingControlsProps> = ({
 
     setIsCashingOut(true);
     try {
-      const result = await cashOut(walletAddress);
+      const success = await cashOut(walletAddress);
       
-      if (result.success) {
+      if (success) {
         setActiveBet(null);
-        const payoutText = result.payout ? `${result.payout.toFixed(3)} SOL` : 'successfully';
-        toast.success(`Cashed out ${payoutText}!`);
+        updateBalance(); // Refresh wallet balance after cashout
+        toast.success('Cashed out successfully!');
         if (onSell) onSell(100);
       } else {
-        toast.error(result.reason || 'Failed to cash out');
+        setServerError('Failed to cash out');
+        toast.error('Failed to cash out');
       }
     } catch (error) {
       console.error('Error cashing out:', error);
+      setServerError('Failed to cash out');
       toast.error('Failed to cash out');
     } finally {
       setIsCashingOut(false);
     }
-  }, [authenticated, walletAddress, isConnected, activeBet, cashOut, onSell]);
+  }, [authenticated, walletAddress, isConnected, activeBet, cashOut, onSell, updateBalance]);
 
   // Auto cashout effect
   useEffect(() => {
@@ -990,8 +1088,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   }, [activeCurrentMultiplier, autoCashoutEnabled, autoCashoutValue, activeBet, activeIsGameActive, gameStatus, handleCashout]);
 
   // Handle amount change
-  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
+  const handleAmountChange = (value: string) => {
     const pattern = currentToken === TokenType.SOL 
       ? /^(\d+)?(\.\d{0,6})?$/ 
       : /^\d*$/;
@@ -1026,16 +1123,38 @@ const TradingControls: FC<TradingControlsProps> = ({
     setAutoCashoutValue(value.toString());
   };
 
-  // Enhanced bet placement with pre-game betting support
+  // Enhanced bet placement (compatible with existing hook)
   const handleBuy = async () => {
     const amountNum = parseFloat(amount);
+    
+    // Clear previous errors
+    setServerError('');
+    
+    // Enhanced validation
     if (isNaN(amountNum) || amountNum <= 0) {
+      setServerError('Invalid amount');
       toast.error('Invalid amount');
+      return;
+    }
+    
+    const minBetAmount = currentToken === TokenType.SOL ? 0.001 : 1;
+    const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
+    
+    if (amountNum < minBetAmount) {
+      setServerError(`Minimum bet: ${minBetAmount} ${currentToken}`);
+      toast.error(`Minimum bet: ${minBetAmount} ${currentToken}`);
+      return;
+    }
+    
+    if (amountNum > maxBetAmount) {
+      setServerError(`Maximum bet: ${maxBetAmount} ${currentToken}`);
+      toast.error(`Maximum bet: ${maxBetAmount} ${currentToken}`);
       return;
     }
     
     // Check for wallet readiness
     if (!isWalletReady || !isConnected) {
+      setServerError('Please login to play');
       toast.error('Please login to play');
       return;
     }
@@ -1043,8 +1162,10 @@ const TradingControls: FC<TradingControlsProps> = ({
     // Enhanced game availability check
     if (!activeIsGameActive || !canBet) {
       if (isWaitingPeriod && countdownSeconds <= 2) {
+        setServerError('Too late - game starting soon!');
         toast.error('Too late - game starting soon!');
       } else {
+        setServerError('Game is not available');
         toast.error('Game is not available');
       }
       return;
@@ -1052,46 +1173,68 @@ const TradingControls: FC<TradingControlsProps> = ({
 
     // Check balance
     if (amountNum > activeBalance) {
+      setServerError('Insufficient balance');
       toast.error('Insufficient balance');
       return;
     }
 
     setIsPlacingBet(true);
     try {
+      // Compatible bet placement with existing hook
       const success = await placeBet(walletAddress, amountNum, userId || undefined);
+      
       if (success) {
-        // For pre-game bets, entry multiplier is always 1.0
+        // Store bet with calculated entry multiplier
         const entryMultiplier = gameStatus === 'waiting' ? 1.0 : activeCurrentMultiplier;
         
-        // Store bet with entry multiplier
         const newBet: ActiveBet = {
           id: `bet_${Date.now()}`,
           amount: amountNum,
-          entryMultiplier: entryMultiplier,
+          entryMultiplier,
           timestamp: Date.now(),
           gameId: activeCurrentGame?.id || 'unknown'
         };
         
         setActiveBet(newBet);
+        updateBalance(); // Refresh wallet balance after bet placement
         
         const betType = gameStatus === 'waiting' ? 'Pre-game bet' : 'Bet';
         toast.success(`${betType} placed: ${amountNum} SOL (Entry: ${entryMultiplier.toFixed(2)}x)`);
         
         if (onBuy) onBuy(amountNum);
       } else {
-        toast.error('Failed to place bet');
+        const errorMsg = 'Failed to place bet';
+        setServerError(errorMsg);
+        toast.error(errorMsg);
       }
     } catch (error) {
       console.error('Error placing bet:', error);
-      toast.error('Failed to place bet');
+      const errorMsg = 'Failed to place bet';
+      setServerError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setIsPlacingBet(false);
     }
   };
 
-  const activeBalance = currentToken === TokenType.SOL ? solBalance : ruggedBalance;
+  const activeBalance = currentToken === TokenType.SOL ? realSolBalance : ruggedBalance;
 
-  // Enhanced responsive container with dynamic sizing and mobile-first betting layout
+  // Validation error message
+  const getBetValidationError = () => {
+    const amountNum = parseFloat(amount);
+    const minBetAmount = currentToken === TokenType.SOL ? 0.001 : 1;
+    const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
+    
+    if (isNaN(amountNum) || amountNum <= 0) return 'Enter valid amount';
+    if (amountNum < minBetAmount) return `Minimum: ${minBetAmount} ${currentToken}`;
+    if (amountNum > maxBetAmount) return `Maximum: ${maxBetAmount} ${currentToken}`;
+    if (amountNum > activeBalance) return 'Insufficient balance';
+    return '';
+  };
+
+  const betValidationError = getBetValidationError();
+
+  // Enhanced responsive container
   const containerClasses = `
     bg-[#0d0d0f] text-white border border-gray-800 rounded-lg
     ${isMobile 
@@ -1100,7 +1243,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     }
   `;
 
-  // Mobile-optimized layout - betting controls first for decision making
+  // Mobile-optimized layout
   if (isMobile) {
     return (
       <div className={containerClasses}>
@@ -1113,7 +1256,7 @@ const TradingControls: FC<TradingControlsProps> = ({
           isMobile={isMobile}
         />
 
-        {/* Active Bet Display - Priority for decision making */}
+        {/* Active Bet Display */}
         {activeBet && (
           <ActiveBetDisplay
             bet={activeBet}
@@ -1122,12 +1265,12 @@ const TradingControls: FC<TradingControlsProps> = ({
           />
         )}
 
-        {/* Betting Section - Main decision making area */}
+        {/* Betting Section */}
         <div className="bg-gray-900 bg-opacity-50 rounded-lg p-3 mb-3">
           <BettingSection
             activeBet={activeBet}
             amount={amount}
-            onAmountChange={(e) => handleAmountChange({ target: { value: e } } as React.ChangeEvent<HTMLInputElement>)}
+            onAmountChange={handleAmountChange}
             onQuickAmount={setQuickAmount}
             onPlaceBet={handleBuy}
             onCashout={handleCashout}
@@ -1143,6 +1286,7 @@ const TradingControls: FC<TradingControlsProps> = ({
             isConnected={isConnected}
             currentMultiplier={activeCurrentMultiplier}
             isMobile={isMobile}
+            betValidationError={betValidationError}
           />
         </div>
 
@@ -1157,6 +1301,8 @@ const TradingControls: FC<TradingControlsProps> = ({
           isMobile={isMobile}
           showExpanded={showBalanceExpanded}
           onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
+          isLoading={balanceLoading}
+          onRefreshBalance={updateBalance}
         />
 
         {/* Auto Cashout Settings */}
@@ -1183,6 +1329,7 @@ const TradingControls: FC<TradingControlsProps> = ({
           gameStatus={gameStatus}
           currentMultiplier={activeCurrentMultiplier}
           countdownSeconds={countdownSeconds}
+          serverError={serverError}
         />
 
         {/* Modals */}
@@ -1231,6 +1378,8 @@ const TradingControls: FC<TradingControlsProps> = ({
         isMobile={isMobile}
         showExpanded={showBalanceExpanded}
         onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
+        isLoading={balanceLoading}
+        onRefreshBalance={updateBalance}
       />
 
       {/* Auto Cashout Settings */}
@@ -1258,7 +1407,7 @@ const TradingControls: FC<TradingControlsProps> = ({
       <BettingSection
         activeBet={activeBet}
         amount={amount}
-        onAmountChange={(e) => handleAmountChange({ target: { value: e } } as React.ChangeEvent<HTMLInputElement>)}
+        onAmountChange={handleAmountChange}
         onQuickAmount={setQuickAmount}
         onPlaceBet={handleBuy}
         onCashout={handleCashout}
@@ -1274,6 +1423,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         isConnected={isConnected}
         currentMultiplier={activeCurrentMultiplier}
         isMobile={isMobile}
+        betValidationError={betValidationError}
       />
 
       {/* Status Messages */}
@@ -1288,6 +1438,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         gameStatus={gameStatus}
         currentMultiplier={activeCurrentMultiplier}
         countdownSeconds={countdownSeconds}
+        serverError={serverError}
       />
 
       {/* Modals */}

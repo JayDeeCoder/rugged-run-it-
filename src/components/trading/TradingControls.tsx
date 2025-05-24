@@ -1,6 +1,6 @@
 // src/components/trading/TradingControls.tsx
 import { FC, useState, useEffect, useContext, useCallback } from 'react';
-import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon, Timer, Users } from 'lucide-react';
+import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon, Timer, Users, Settings, Wallet, TrendingUp } from 'lucide-react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import useLocalStorage from '../../hooks/useLocalStorage';
 import Button from '../common/Button';
@@ -39,6 +39,670 @@ interface TradingControlsProps {
   isMobile?: boolean;
 }
 
+// Compact Game Info Component
+const CompactGameInfo: FC<{
+  game: any;
+  countdown: number;
+  showCountdown: boolean;
+  isConnected: boolean;
+  isMobile: boolean;
+}> = ({ game, countdown, showCountdown, isConnected, isMobile }) => {
+  const getStatusDisplay = () => {
+    if (!game) return { text: 'Connecting...', color: 'text-gray-400', bg: 'bg-gray-600' };
+    switch (game.status) {
+      case 'waiting':
+        return { text: 'Next Round', color: 'text-blue-400', bg: 'bg-blue-600' };
+      case 'active':
+        return { text: 'Active', color: 'text-green-400', bg: 'bg-green-600' };
+      case 'crashed':
+        return { text: 'Ended', color: 'text-red-400', bg: 'bg-red-600' };
+      default:
+        return { text: 'Connecting...', color: 'text-gray-400', bg: 'bg-gray-600' };
+    }
+  };
+
+  const status = getStatusDisplay();
+
+  if (isMobile) {
+    return (
+      <div className="bg-gray-800 rounded-lg p-2 mb-3">
+        {/* Compact header row */}
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center space-x-2">
+            <span className={`px-2 py-0.5 rounded text-xs font-medium ${status.bg}`}>
+              {status.text}
+            </span>
+            <span className={`px-1.5 py-0.5 rounded text-xs ${isConnected ? 'bg-green-600' : 'bg-red-600'}`}>
+              {isConnected ? '●' : '○'}
+            </span>
+          </div>
+          {game && (
+            <span className="text-yellow-400 font-bold text-lg">
+              {game.multiplier?.toFixed(2) || '1.00'}x
+            </span>
+          )}
+        </div>
+
+        {/* Game details row */}
+        {game && (
+          <div className="flex justify-between items-center text-xs text-gray-400">
+            <span>#{game.gameNumber}</span>
+            <div className="flex space-x-3">
+              <span>{game.totalPlayers || 0} players</span>
+              <span>{(game.totalBets || 0).toFixed(2)} SOL</span>
+            </div>
+          </div>
+        )}
+
+        {/* Countdown */}
+        {showCountdown && countdown > 0 && (
+          <div className="text-center mt-1 p-1 bg-blue-900 bg-opacity-30 rounded">
+            <div className="text-blue-400 text-xs">Starting in {Math.ceil(countdown / 1000)}s</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Desktop version - slightly more detailed
+  return (
+    <div className="bg-gray-800 rounded-lg p-3 mb-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center space-x-2">
+          <span className={`px-2 py-1 rounded text-xs ${status.bg}`}>
+            {status.text}
+          </span>
+          <span className={`px-2 py-1 rounded text-xs ${isConnected ? 'bg-green-600' : 'bg-red-600'}`}>
+            {isConnected ? 'Connected' : 'Disconnected'}
+          </span>
+        </div>
+        {game && (
+          <span className="text-yellow-400 font-bold text-xl">
+            {game.multiplier?.toFixed(2) || '1.00'}x
+          </span>
+        )}
+      </div>
+
+      {game && (
+        <div className="grid grid-cols-3 gap-2 text-xs text-gray-400">
+          <div>
+            <span className="block text-gray-500">Game</span>
+            <span className="text-white">#{game.gameNumber}</span>
+          </div>
+          <div>
+            <span className="block text-gray-500">Players</span>
+            <span className="text-white">{game.totalPlayers || 0}</span>
+          </div>
+          <div>
+            <span className="block text-gray-500">Total</span>
+            <span className="text-white">{(game.totalBets || 0).toFixed(2)} SOL</span>
+          </div>
+        </div>
+      )}
+
+      {showCountdown && countdown > 0 && (
+        <div className="text-center mt-2 p-2 bg-blue-900 bg-opacity-30 rounded">
+          <div className="text-blue-400 text-sm">Starting in {Math.ceil(countdown / 1000)}s</div>
+          <div className="text-xs text-gray-400">Pre-game betting open!</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Balance Display Component
+const BalanceDisplay: FC<{
+  currentToken: TokenType;
+  activeBalance: number;
+  onTokenChange: (token: TokenType) => void;
+  onDepositClick: () => void;
+  onWithdrawClick: () => void;
+  onAirdropClick: () => void;
+  isMobile: boolean;
+}> = ({ currentToken, activeBalance, onTokenChange, onDepositClick, onWithdrawClick, onAirdropClick, isMobile }) => {
+  const formatBalance = (balance: number, token: TokenType) => {
+    if (token === TokenType.SOL) {
+      return balance.toFixed(3);
+    } else {
+      return balance.toFixed(0);
+    }
+  };
+
+  if (isMobile) {
+    return (
+      <div className="bg-gray-800 rounded-lg p-2 mb-3">
+        <div className="flex items-center justify-between">
+          {/* Balance info */}
+          <div className="flex items-center space-x-2">
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${
+              currentToken === TokenType.SOL ? 'bg-blue-500' : 'bg-green-500'
+            }`}>
+              <span className="text-white font-bold text-xs">
+                {currentToken === TokenType.SOL ? 'S' : 'R'}
+              </span>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400">Balance</div>
+              <div className={`text-sm font-bold ${
+                currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
+              }`}>
+                {formatBalance(activeBalance, currentToken)} {currentToken}
+              </div>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex space-x-1">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onTokenChange(TokenType.SOL);
+              }}
+              className={`px-2 py-1 text-xs rounded ${
+                currentToken === TokenType.SOL 
+                  ? 'bg-blue-600 text-white' 
+                  : 'bg-gray-700 text-gray-300'
+              }`}
+            >
+              SOL
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onTokenChange(TokenType.RUGGED);
+                if (activeBalance < 10) {
+                  onAirdropClick();
+                }
+              }}
+              className={`px-2 py-1 text-xs rounded ${
+                currentToken === TokenType.RUGGED 
+                  ? 'bg-green-600 text-white' 
+                  : 'bg-gray-700 text-gray-300'
+              }`}
+            >
+              RUG
+            </button>
+          </div>
+        </div>
+
+        {/* Wallet actions row */}
+        <div className="flex space-x-2 mt-2">
+          <button
+            onClick={onDepositClick}
+            className="flex-1 bg-green-600 hover:bg-green-700 text-white py-1 px-2 rounded text-xs flex items-center justify-center"
+          >
+            <ArrowDownLeft className="w-3 h-3 mr-1" />
+            Deposit
+          </button>
+          <button
+            onClick={onWithdrawClick}
+            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-1 px-2 rounded text-xs flex items-center justify-center"
+          >
+            <ArrowUpRight className="w-3 h-3 mr-1" />
+            Withdraw
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Desktop version
+  return (
+    <div className="bg-gray-800 rounded-lg p-3 mb-3">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center space-x-3">
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+            currentToken === TokenType.SOL ? 'bg-blue-500' : 'bg-green-500'
+          }`}>
+            <span className="text-white font-bold text-sm">
+              {currentToken === TokenType.SOL ? 'SOL' : 'RUG'}
+            </span>
+          </div>
+          
+          <div>
+            <div className="text-xs text-gray-400">Balance</div>
+            <div className={`text-lg font-bold ${
+              currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
+            }`}>
+              {formatBalance(activeBalance, currentToken)} {currentToken}
+            </div>
+          </div>
+        </div>
+        
+        {/* Token Switch Buttons */}
+        <div className="flex space-x-2">
+          <button
+            onClick={() => onTokenChange(TokenType.SOL)}
+            className={`px-3 py-1 text-xs rounded ${
+              currentToken === TokenType.SOL 
+                ? 'bg-blue-600 text-white' 
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            SOL
+          </button>
+          <button
+            onClick={() => {
+              onTokenChange(TokenType.RUGGED);
+              if (activeBalance < 10) {
+                onAirdropClick();
+              }
+            }}
+            className={`px-3 py-1 text-xs rounded ${
+              currentToken === TokenType.RUGGED 
+                ? 'bg-green-600 text-white' 
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            RUGGED
+          </button>
+        </div>
+      </div>
+
+      {/* Wallet Actions */}
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={onDepositClick}
+          className="bg-green-600 hover:bg-green-700 text-white py-2 px-3 rounded text-sm flex items-center justify-center"
+        >
+          <ArrowDownLeft className="w-4 h-4 mr-2" />
+          Deposit
+        </button>
+        <button
+          onClick={onWithdrawClick}
+          className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm flex items-center justify-center"
+        >
+          <ArrowUpRight className="w-4 h-4 mr-2" />
+          Withdraw
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Auto Cashout Component
+const AutoCashoutSection: FC<{
+  autoCashoutEnabled: boolean;
+  autoCashoutValue: string;
+  onToggle: (enabled: boolean) => void;
+  onValueChange: (value: string) => void;
+  onQuickValue: (value: number) => void;
+  isMobile: boolean;
+  showExpanded: boolean;
+  onToggleExpanded: () => void;
+}> = ({ 
+  autoCashoutEnabled, 
+  autoCashoutValue, 
+  onToggle, 
+  onValueChange, 
+  onQuickValue,
+  isMobile,
+  showExpanded,
+  onToggleExpanded
+}) => {
+  const quickValues = [1.5, 2.0, 3.0, 5.0];
+
+  return (
+    <div className="mb-3">
+      <div 
+        className="flex justify-between items-center bg-gray-800 p-2 rounded-lg cursor-pointer"
+        onClick={onToggleExpanded}
+      >
+        <div className="flex items-center space-x-2">
+          <div className={`h-3 w-3 rounded-full ${autoCashoutEnabled ? 'bg-green-500' : 'bg-gray-600'}`}></div>
+          <span className="text-gray-300 text-sm">Auto Cashout</span>
+        </div>
+        <div className="flex items-center space-x-2">
+          <span className="text-gray-400 text-sm">
+            {autoCashoutEnabled ? `${autoCashoutValue}x` : 'Off'}
+          </span>
+          <Settings className="w-4 h-4 text-gray-400" />
+        </div>
+      </div>
+      
+      {showExpanded && (
+        <div className="bg-gray-800 p-3 rounded-lg mt-1">
+          <div className="flex items-center justify-between mb-3">
+            <label className="text-gray-300 text-sm">Enable Auto Cashout</label>
+            <div className="relative inline-block w-10 h-5">
+              <input
+                type="checkbox"
+                id="auto-cashout-toggle"
+                checked={autoCashoutEnabled}
+                onChange={(e) => onToggle(e.target.checked)}
+                className="opacity-0 absolute w-0 h-0"
+              />
+              <label 
+                htmlFor="auto-cashout-toggle"
+                className={`absolute cursor-pointer top-0 left-0 right-0 bottom-0 rounded-full transition-colors ${
+                  autoCashoutEnabled ? 'bg-green-600' : 'bg-gray-600'
+                }`}
+              >
+                <span 
+                  className={`absolute h-3 w-3 mt-1 bg-white rounded-full transition-transform ${
+                    autoCashoutEnabled ? 'translate-x-5 ml-0' : 'translate-x-1'
+                  }`} 
+                />
+              </label>
+            </div>
+          </div>
+          
+          <div className="mb-3">
+            <label className="block text-gray-300 text-sm mb-1">
+              Cashout at Multiplier
+            </label>
+            <div className="flex">
+              <input
+                type="text"
+                value={autoCashoutValue}
+                onChange={(e) => onValueChange(e.target.value)}
+                className="flex-1 bg-gray-700 text-white px-3 py-1 rounded-l-md focus:outline-none text-sm"
+                placeholder="2.00"
+                disabled={!autoCashoutEnabled}
+              />
+              <span className="bg-gray-600 text-gray-300 px-3 py-1 rounded-r-md text-sm">x</span>
+            </div>
+          </div>
+          
+          <div className={`grid ${isMobile ? 'grid-cols-2' : 'grid-cols-4'} gap-2`}>
+            {quickValues.map((value) => (
+              <button
+                key={value}
+                onClick={() => onQuickValue(value)}
+                className={`px-2 py-1 text-xs rounded ${
+                  parseFloat(autoCashoutValue) === value
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+                disabled={!autoCashoutEnabled}
+              >
+                {value.toFixed(1)}x
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Active Bet Display Component
+const ActiveBetDisplay: FC<{
+  bet: ActiveBet;
+  currentMultiplier: number;
+  isMobile: boolean;
+}> = ({ bet, currentMultiplier, isMobile }) => {
+  const calculatePotentialWin = () => {
+    const winMultiplier = Math.max(currentMultiplier, bet.entryMultiplier);
+    return bet.amount * winMultiplier;
+  };
+
+  return (
+    <div className="bg-blue-900 bg-opacity-30 p-3 rounded-lg mb-3">
+      <div className="text-center">
+        <div className="text-sm text-blue-400 mb-1">Active Bet</div>
+        <div className="text-lg font-bold text-blue-300">
+          {bet.amount} SOL @ {bet.entryMultiplier.toFixed(2)}x
+        </div>
+        <div className="text-sm text-green-400 mt-1">
+          Potential: {calculatePotentialWin().toFixed(3)} SOL
+        </div>
+        {isMobile && (
+          <div className="text-xs text-gray-400 mt-1">
+            Current: {currentMultiplier.toFixed(2)}x
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Betting Section Component
+const BettingSection: FC<{
+  activeBet: ActiveBet | null;
+  amount: string;
+  onAmountChange: (amount: string) => void;
+  onQuickAmount: (amount: number) => void;
+  onPlaceBet: () => void;
+  onCashout: () => void;
+  quickAmounts: number[];
+  currentToken: TokenType;
+  activeBalance: number;
+  isPlacingBet: boolean;
+  isCashingOut: boolean;
+  isWalletReady: boolean;
+  canBet: boolean;
+  isWaitingPeriod: boolean;
+  gameStatus: string;
+  isConnected: boolean;
+  currentMultiplier: number;
+  isMobile: boolean;
+}> = ({
+  activeBet,
+  amount,
+  onAmountChange,
+  onQuickAmount,
+  onPlaceBet,
+  onCashout,
+  quickAmounts,
+  currentToken,
+  activeBalance,
+  isPlacingBet,
+  isCashingOut,
+  isWalletReady,
+  canBet,
+  isWaitingPeriod,
+  gameStatus,
+  isConnected,
+  currentMultiplier,
+  isMobile
+}) => {
+  const amountValid = !isNaN(parseFloat(amount)) && parseFloat(amount) > 0 && parseFloat(amount) <= activeBalance;
+
+  return (
+    <div className="border-t border-gray-800 pt-3">
+      <h3 className="text-sm font-bold text-gray-400 mb-3">
+        {activeBet ? 'ACTIVE BET' : 'PLACE BET'}
+      </h3>
+      
+      {!activeBet && (
+        <>
+          {/* Amount Input */}
+          <div className="mb-3">
+            <label className="block text-gray-400 text-xs mb-1">
+              Bet Amount ({currentToken})
+            </label>
+            <div className="flex">
+              <input
+                type="text"
+                value={amount}
+                onChange={(e) => onAmountChange(e.target.value)}
+                className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-l-md focus:outline-none"
+                placeholder="0.00"
+                disabled={!canBet}
+              />
+              <button
+                onClick={() => onQuickAmount(activeBalance * 0.5)}
+                className="bg-gray-600 text-gray-300 px-2 text-xs border-l border-gray-900 hover:bg-gray-500"
+                disabled={!canBet}
+              >
+                Half
+              </button>
+              <button
+                onClick={() => onQuickAmount(activeBalance)}
+                className="bg-gray-600 text-gray-300 px-2 text-xs rounded-r-md hover:bg-gray-500"
+                disabled={!canBet}
+              >
+                Max
+              </button>
+            </div>
+          </div>
+          
+          {/* Quick Amount Buttons */}
+          <div className={`grid ${isMobile ? 'grid-cols-2' : 'grid-cols-4'} gap-2 mb-3`}>
+            {quickAmounts.map((amt) => (
+              <button
+                key={amt}
+                onClick={() => onQuickAmount(amt)}
+                className={`px-2 py-1 text-xs rounded transition-colors ${
+                  parseFloat(amount) === amt
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+                disabled={!canBet}
+              >
+                {amt.toString()} {currentToken}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      
+      {/* Action Buttons */}
+      <div className="grid grid-cols-2 gap-3">
+        {!activeBet ? (
+          <>
+            <button
+              onClick={onPlaceBet}
+              disabled={isPlacingBet || !isWalletReady || !amountValid || !canBet}
+              className={`py-3 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
+                isPlacingBet || !isWalletReady || !amountValid || !canBet
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  : 'bg-green-600 hover:bg-green-700 text-white'
+              }`}
+            >
+              {isPlacingBet ? (
+                <>
+                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                  Placing...
+                </>
+              ) : (
+                <>
+                  <Coins className="mr-2 h-4 w-4" />
+                  {isWaitingPeriod ? 'Pre-Bet' : 'Place Bet'}
+                </>
+              )}
+            </button>
+            <button
+              disabled
+              className="py-3 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
+            >
+              <Sparkles className="mr-2 h-4 w-4" />
+              Cash Out
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              disabled
+              className="py-3 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
+            >
+              <Coins className="mr-2 h-4 w-4" />
+              Bet Placed
+            </button>
+            <button
+              onClick={onCashout}
+              disabled={isCashingOut || !isConnected || gameStatus !== 'active'}
+              className={`py-3 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
+                isCashingOut || !isConnected || gameStatus !== 'active'
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  : 'bg-yellow-600 hover:bg-yellow-700 text-white'
+              }`}
+            >
+              {isCashingOut ? (
+                <>
+                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                  Cashing...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Cash Out ({currentMultiplier.toFixed(2)}x)
+                </>
+              )}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Status Messages Component
+const StatusMessages: FC<{
+  isWalletReady: boolean;
+  isConnected: boolean;
+  amount: string;
+  activeBalance: number;
+  activeBet: ActiveBet | null;
+  isWaitingPeriod: boolean;
+  canBet: boolean;
+  gameStatus: string;
+  currentMultiplier: number;
+  countdownSeconds: number;
+}> = ({
+  isWalletReady,
+  isConnected,
+  amount,
+  activeBalance,
+  activeBet,
+  isWaitingPeriod,
+  canBet,
+  gameStatus,
+  currentMultiplier,
+  countdownSeconds
+}) => {
+  const getStatusMessage = () => {
+    if (!isWalletReady) {
+      return { text: 'Login to play', icon: AlertCircle, color: 'text-yellow-500' };
+    }
+    
+    if (isWalletReady && !isConnected) {
+      return { text: 'Connecting to game server...', icon: AlertCircle, color: 'text-red-500' };
+    }
+    
+    if (isWalletReady && parseFloat(amount) > activeBalance && !activeBet) {
+      return { text: 'Insufficient balance', icon: AlertCircle, color: 'text-red-500' };
+    }
+    
+    if (isWaitingPeriod && canBet) {
+      return { text: `Pre-game betting open - ${countdownSeconds}s remaining`, icon: Timer, color: 'text-blue-500' };
+    }
+    
+    if (isWaitingPeriod && !canBet) {
+      return { text: 'Too late to bet - Game starting now!', icon: AlertCircle, color: 'text-red-500' };
+    }
+    
+    if (gameStatus === 'active' && !activeBet && canBet) {
+      return { text: `Game active - Place bet now at ${currentMultiplier.toFixed(2)}x`, icon: Timer, color: 'text-green-500' };
+    }
+    
+    if (gameStatus === 'active' && !canBet) {
+      return { text: 'Too late to bet - Multiplier too high', icon: AlertCircle, color: 'text-red-500' };
+    }
+    
+    if (gameStatus === 'crashed') {
+      return { text: 'Round ended. Next round starting soon.', icon: AlertCircle, color: 'text-red-500' };
+    }
+
+    return null;
+  };
+
+  const status = getStatusMessage();
+  if (!status) return null;
+
+  const IconComponent = status.icon;
+
+  return (
+    <div className="mt-2">
+      <div className={`${status.color} text-xs flex items-center`}>
+        <IconComponent className="h-3 w-3 mr-1 flex-shrink-0" />
+        <span>{status.text}</span>
+      </div>
+    </div>
+  );
+};
+
 const TradingControls: FC<TradingControlsProps> = ({ 
   onBuy, 
   onSell, 
@@ -63,11 +727,11 @@ const TradingControls: FC<TradingControlsProps> = ({
   // Enhanced game server connection with countdown support
   const { currentGame, isConnected, placeBet, cashOut, countdown, isWaitingPeriod, canBet } = useGameSocket(walletAddress, userId || undefined);
   
-  // Calculate countdown values (FIXED: Added missing calculations)
+  // Calculate countdown values
   const countdownSeconds = countdown ? Math.ceil(countdown / 1000) : 0;
-  const showCountdown = countdown && countdown > 0 && currentGame?.status === 'waiting';
+  const showCountdown = Boolean(countdown && countdown > 0 && currentGame?.status === 'waiting');
   
-  // Enhanced bet tracking (FIXED: Removed duplicate declaration)
+  // Enhanced bet tracking
   const [activeBet, setActiveBet] = useState<ActiveBet | null>(null);
   
   // Token context and wallet balance
@@ -218,14 +882,11 @@ const TradingControls: FC<TradingControlsProps> = ({
   };
 
   // Handle auto cashout value change
-  const handleAutoCashoutValueChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
+  const handleAutoCashoutValueChange = (value: string) => {
     if (/^(\d+)?(\.\d{0,2})?$/.test(value) || value === '') {
       setAutoCashoutValue(value);
     }
   };
-
-  const quickAutoCashoutValues = [1.5, 2.0, 3.0, 5.0];
 
   const setQuickAutoCashoutValue = (value: number) => {
     setAutoCashoutValue(value.toString());
@@ -245,7 +906,7 @@ const TradingControls: FC<TradingControlsProps> = ({
       return;
     }
     
-    // Enhanced game availability check (FIXED: countdownSeconds now properly defined)
+    // Enhanced game availability check
     if (!activeIsGameActive || !canBet) {
       if (isWaitingPeriod && countdownSeconds <= 2) {
         toast.error('Too late - game starting soon!');
@@ -294,594 +955,95 @@ const TradingControls: FC<TradingControlsProps> = ({
     }
   };
 
-  // Format token balance
-  const formatBalance = (balance: number, token: TokenType) => {
-    if (token === TokenType.SOL) {
-      return balance.toFixed(3);
-    } else {
-      return balance.toFixed(0);
-    }
-  };
-
   const activeBalance = currentToken === TokenType.SOL ? solBalance : ruggedBalance;
 
-  // Get game status display
-  const getGameStatusDisplay = () => {
-    switch (gameStatus) {
-      case 'waiting':
-        return { text: 'Next Round', color: 'text-blue-400', bg: 'bg-blue-600' };
-      case 'active':
-        return { text: 'Round Active', color: 'text-green-400', bg: 'bg-green-600' };
-      case 'crashed':
-        return { text: 'Round Ended', color: 'text-red-400', bg: 'bg-red-600' };
-      default:
-        return { text: 'Connecting...', color: 'text-gray-400', bg: 'bg-gray-600' };
+  // Enhanced responsive container with dynamic sizing
+  const containerClasses = `
+    bg-[#0d0d0f] text-white border border-gray-800 rounded-lg
+    ${isMobile 
+      ? 'p-3 max-w-sm mx-auto' 
+      : 'p-4 min-w-[320px] max-w-md'
     }
-  };
+  `;
 
-  const statusDisplay = getGameStatusDisplay();
-
-  // Enhanced Mobile UI with side-by-side controls
-  if (isMobile) {
-    return (
-      <div className="bg-[#0d0d0f] text-white p-3 border border-gray-800 rounded-lg">
-        {/* Connection Status */}
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-gray-400 text-sm">Status:</span>
-          <div className="flex items-center space-x-2">
-            <span className={`px-2 py-1 rounded text-xs ${statusDisplay.bg}`}>
-              {statusDisplay.text}
-            </span>
-            <span className={`px-2 py-1 rounded text-xs ${isConnected ? 'bg-green-600' : 'bg-red-600'}`}>
-              {isConnected ? 'Connected' : 'Disconnected'}
-            </span>
-          </div>
-        </div>
-
-        {/* Enhanced Game Info with Countdown (FIXED: showCountdown and countdownSeconds) */}
-        {activeCurrentGame && (
-          <div className="bg-gray-800 p-2 rounded-md mb-3">
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-gray-400 text-sm">Game #{activeCurrentGame.gameNumber}</span>
-              <span className="text-yellow-400 font-bold text-lg">{activeCurrentGame.multiplier.toFixed(2)}x</span>
-            </div>
-            
-            {/* Countdown display for waiting period */}
-            {showCountdown && (
-              <div className="text-center mb-2">
-                <div className="text-blue-400 text-xs">Game Starting In</div>
-                <div className="text-green-400 font-bold text-xl">{countdownSeconds}s</div>
-                <div className="text-xs text-gray-400">Place your bets now!</div>
-              </div>
-            )}
-            
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-gray-400">
-                <Users size={12} className="inline mr-1" />
-                {activeCurrentGame.totalPlayers} players
-              </span>
-              <span className="text-gray-400">
-                {activeCurrentGame.totalBets.toFixed(2)} SOL total
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Balance */}
-        <div className="bg-gray-800 p-2 rounded-md mb-3">
-          <div className="text-center">
-            <div className="text-xs text-gray-400">Balance</div>
-            <div className="text-sm font-bold text-blue-400">
-              {formatBalance(activeBalance, currentToken)} {currentToken}
-            </div>
-          </div>
-        </div>
-
-        {/* Active Bet Display */}
-        {activeBet && (
-          <div className="bg-blue-900 bg-opacity-30 p-2 rounded-md mb-3">
-            <div className="text-center">
-              <div className="text-xs text-blue-400">Potential Win</div>
-              <div className="text-lg font-bold text-blue-300">
-                {calculatePotentialWin().toFixed(3)} SOL
-              </div>
-              <div className="text-xs text-gray-400">
-                Entry: {activeBet.entryMultiplier.toFixed(2)}x | Bet: {activeBet.amount} SOL
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Bet Amount Input */}
-        {!activeBet && (
-          <div className="mb-3">
-            <input
-              type="text"
-              value={amount}
-              onChange={handleAmountChange}
-              className="w-full bg-gray-800 text-white px-3 py-2 rounded-md focus:outline-none text-center"
-              placeholder="Enter bet amount"
-              disabled={!canBet}
-            />
-          </div>
-        )}
-
-        {/* Quick amounts for mobile */}
-        {!activeBet && (
-          <div className="grid grid-cols-4 gap-2 mb-3">
-            {quickAmounts.map((amt) => (
-              <button
-                key={amt}
-                onClick={() => setQuickAmount(amt)}
-                className={`px-2 py-1 text-xs rounded-md ${
-                  parseFloat(amount) === amt
-                    ? 'bg-green-600 text-white'
-                    : 'bg-gray-700 text-gray-300'
-                }`}
-                disabled={!canBet}
-              >
-                {amt.toString()}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Side-by-side Action Buttons with Enhanced States */}
-        <div className="grid grid-cols-2 gap-3">
-          {!activeBet ? (
-            <>
-              <button
-                onClick={handleBuy}
-                disabled={isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !canBet}
-                className={`py-3 rounded-md font-bold text-sm ${
-                  isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !canBet
-                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-green-600 hover:bg-green-700 text-white'
-                }`}
-              >
-                {isPlacingBet ? 'Placing...' : 
-                 isWaitingPeriod ? 'Pre-Bet' : 'Place Bet'}
-              </button>
-              <button
-                disabled
-                className="py-3 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed"
-              >
-                Cash Out
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                disabled
-                className="py-3 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed"
-              >
-                Bet Placed
-              </button>
-              <button
-                onClick={handleCashout}
-                disabled={isCashingOut || !isConnected || gameStatus !== 'active'}
-                className={`py-3 rounded-md font-bold text-sm ${
-                  isCashingOut || !isConnected || gameStatus !== 'active'
-                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-yellow-600 hover:bg-yellow-700 text-white'
-                }`}
-              >
-                {isCashingOut ? 'Cashing...' : `Cash Out`}
-              </button>
-            </>
-          )}
-        </div>
-
-        {/* Enhanced Warning messages for mobile */}
-        {!isWalletReady && (
-          <div className="text-yellow-500 text-xs text-center mt-2">
-            Login to play
-          </div>
-        )}
-        
-        {isWaitingPeriod && !canBet && (
-          <div className="text-red-500 text-xs text-center mt-2">
-            Too late - game starting!
-          </div>
-        )}
-        
-        {isWaitingPeriod && canBet && (
-          <div className="text-blue-500 text-xs text-center mt-2">
-            Pre-game betting open
-          </div>
-        )}
-        
-        {gameStatus === 'active' && !activeBet && (
-          <div className="text-green-500 text-xs text-center mt-2">
-            Game active - bet now!
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // Enhanced Desktop UI
   return (
-    <div className="bg-[#0d0d0f] text-white grid grid-cols-1 gap-3 p-4 relative border border-gray-800 rounded-lg">
-      {/* Connection Status */}
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-gray-400">Game Status:</span>
-        <div className="flex items-center space-x-2">
-          <span className={`px-2 py-1 rounded text-xs ${statusDisplay.bg}`}>
-            {statusDisplay.text}
-          </span>
-          <span className={`px-2 py-1 rounded text-xs ${isConnected ? 'bg-green-600' : 'bg-red-600'}`}>
-            {isConnected ? 'Connected' : 'Disconnected'}
-          </span>
-        </div>
-      </div>
+    <div className={containerClasses}>
+      {/* Compact Game Info */}
+      <CompactGameInfo
+        game={activeCurrentGame}
+        countdown={countdown || 0}
+        showCountdown={showCountdown}
+        isConnected={isConnected}
+        isMobile={isMobile}
+      />
 
-      {/* Enhanced Game Info with Countdown (FIXED: showCountdown and countdownSeconds) */}
-      {activeCurrentGame && (
-        <div className="bg-gray-800 p-3 rounded-md mb-4">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-gray-400">Game #{activeCurrentGame.gameNumber}</span>
-            <span className="text-yellow-400 font-bold">{activeCurrentGame.multiplier.toFixed(2)}x</span>
-          </div>
-          
-          {/* Countdown display for waiting period */}
-          {showCountdown && (
-            <div className="text-center mb-3 p-2 bg-blue-900 bg-opacity-30 rounded-md">
-              <div className="text-blue-400 text-sm">Next Game Starting In</div>
-              <div className="text-green-400 font-bold text-2xl">{countdownSeconds}s</div>
-              <div className="text-xs text-gray-400">Pre-game betting is open!</div>
-            </div>
-          )}
-          
-          <div className="flex justify-between items-center text-sm">
-            <span className="text-gray-400">Total Bets:</span>
-            <span className="text-white">{activeCurrentGame.totalBets.toFixed(3)} SOL</span>
-          </div>
-          <div className="flex justify-between items-center text-sm">
-            <span className="text-gray-400">Players:</span>
-            <span className="text-white">{activeCurrentGame.totalPlayers}</span>
-          </div>
-        </div>
-      )}
+      {/* Balance Display with Wallet Actions */}
+      <BalanceDisplay
+        currentToken={currentToken}
+        activeBalance={activeBalance}
+        onTokenChange={handleTokenChange}
+        onDepositClick={() => setShowDepositModal(true)}
+        onWithdrawClick={() => setShowWithdrawModal(true)}
+        onAirdropClick={() => setShowAirdropModal(true)}
+        isMobile={isMobile}
+      />
 
-      {/* Token Switcher */}
-      <div className="flex items-center justify-between bg-gray-800 hover:bg-gray-700 transition-colors rounded-lg p-2 cursor-pointer mb-2">
-        <div 
-          className="flex items-center justify-between w-full"
-          onClick={() => setShowDepositModal(true)}
-        >
-          <div className="flex items-center">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center mr-2 ${
-              currentToken === TokenType.SOL ? 'bg-blue-500' : 'bg-green-500'
-            }`}>
-              <span className="text-white font-bold text-xs">{currentToken === TokenType.SOL ? 'SOL' : 'RUG'}</span>
-            </div>
-            
-            <div className="flex flex-col">
-              <span className="text-xs text-gray-400">Balance</span>
-              <span className={`text-sm font-bold ${
-                currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
-              }`}>
-                {formatBalance(activeBalance, currentToken)} {currentToken}
-              </span>
-            </div>
-          </div>
-          
-          {/* Token Switch Buttons */}
-          <div className="flex space-x-2">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleTokenChange(TokenType.SOL);
-              }}
-              className={`px-3 py-1 text-xs rounded-md ${
-                currentToken === TokenType.SOL 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-            >
-              SOL
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleTokenChange(TokenType.RUGGED);
-                if (ruggedBalance < 10) {
-                  setShowAirdropModal(true);
-                }
-              }}
-              className={`px-3 py-1 text-xs rounded-md ${
-                currentToken === TokenType.RUGGED 
-                  ? 'bg-green-600 text-white' 
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-            >
-              RUGGED
-            </button>
-          </div>
-        </div>
-      </div>
-      
       {/* Auto Cashout Settings */}
-      <div className="mb-2">
-        <div 
-          className="flex justify-between items-center bg-gray-800 p-2 rounded-md cursor-pointer"
-          onClick={() => setShowAutoCashout(!showAutoCashout)}
-        >
-          <div className="flex items-center">
-            <div className={`h-3 w-3 rounded-full mr-2 ${autoCashoutEnabled ? 'bg-green-500' : 'bg-gray-600'}`}></div>
-            <span className="text-gray-300">Auto Cashout</span>
-          </div>
-          <div className="text-gray-400 text-sm">
-            {autoCashoutEnabled ? `at ${autoCashoutValue}x` : 'Disabled'}
-            <span className="ml-2">{showAutoCashout ? '▲' : '▼'}</span>
-          </div>
-        </div>
-        
-        {showAutoCashout && (
-          <div className="bg-gray-800 p-3 rounded-md mt-1">
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-gray-300 text-sm">Enable Auto Cashout</label>
-              <div className="relative inline-block w-10 h-5">
-                <input
-                  type="checkbox"
-                  id="auto-cashout-toggle"
-                  checked={autoCashoutEnabled}
-                  onChange={(e) => setAutoCashoutEnabled(e.target.checked)}
-                  className="opacity-0 absolute w-0 h-0"
-                />
-                <label 
-                  htmlFor="auto-cashout-toggle"
-                  className={`absolute cursor-pointer top-0 left-0 right-0 bottom-0 rounded-full transition-colors ${
-                    autoCashoutEnabled ? 'bg-green-600' : 'bg-gray-600'
-                  }`}
-                >
-                  <span 
-                    className={`absolute h-3 w-3 mt-1 bg-white rounded-full transition-transform ${
-                      autoCashoutEnabled ? 'translate-x-5 ml-0' : 'translate-x-1'
-                    }`} 
-                  />
-                </label>
-              </div>
-            </div>
-            
-            <div className="mb-2">
-              <label className="block text-gray-300 text-sm mb-1">
-                Cashout at Multiplier
-              </label>
-              <div className="flex">
-                <input
-                  type="text"
-                  value={autoCashoutValue}
-                  onChange={handleAutoCashoutValueChange}
-                  className="flex-1 bg-gray-700 text-white px-3 py-1 rounded-l-md focus:outline-none"
-                  placeholder="2.00"
-                  disabled={!autoCashoutEnabled}
-                />
-                <span className="bg-gray-600 text-gray-300 px-3 py-1 rounded-r-md">x</span>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-4 gap-2">
-              {quickAutoCashoutValues.map((value) => (
-                <button
-                  key={value}
-                  onClick={() => setQuickAutoCashoutValue(value)}
-                  className={`px-2 py-1 text-xs rounded-md ${
-                    parseFloat(autoCashoutValue) === value
-                      ? 'bg-green-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                  disabled={!autoCashoutEnabled}
-                >
-                  {value.toFixed(1)}x
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-      
+      <AutoCashoutSection
+        autoCashoutEnabled={autoCashoutEnabled}
+        autoCashoutValue={autoCashoutValue}
+        onToggle={setAutoCashoutEnabled}
+        onValueChange={handleAutoCashoutValueChange}
+        onQuickValue={setQuickAutoCashoutValue}
+        isMobile={isMobile}
+        showExpanded={showAutoCashout}
+        onToggleExpanded={() => setShowAutoCashout(!showAutoCashout)}
+      />
+
       {/* Active Bet Display */}
       {activeBet && (
-        <div className="bg-blue-900 bg-opacity-30 p-3 rounded-md mb-2">
-          <div className="text-center">
-            <div className="text-sm text-blue-400">Active Bet</div>
-            <div className="text-lg font-bold text-blue-300">
-              {activeBet.amount} SOL @ {activeBet.entryMultiplier.toFixed(2)}x
-            </div>
-            <div className="text-sm text-green-400 mt-1">
-              Potential Win: {calculatePotentialWin().toFixed(3)} SOL
-            </div>
-          </div>
-        </div>
+        <ActiveBetDisplay
+          bet={activeBet}
+          currentMultiplier={activeCurrentMultiplier}
+          isMobile={isMobile}
+        />
       )}
-      
-      {/* BETTING SECTION */}
-      <div className="border-t border-gray-800 pt-3 mb-2">
-        <h3 className="text-sm font-bold text-gray-400 mb-2">
-          {activeBet ? 'ACTIVE BET' : 'PLACE BET'}
-        </h3>
-        
-        {!activeBet && (
-          <>
-            {/* Amount Input */}
-            <div className="mb-2">
-              <label className="block text-gray-400 text-xs mb-1">
-                Bet Amount ({currentToken})
-              </label>
-              <div className="flex">
-                <input
-                  type="text"
-                  value={amount}
-                  onChange={handleAmountChange}
-                  className="flex-1 bg-gray-800 text-white px-3 py-1 rounded-l-md focus:outline-none"
-                  placeholder="0.00"
-                  disabled={!activeIsGameActive}
-                />
-                <button
-                  onClick={() => setQuickAmount(activeBalance * 0.5)}
-                  className="bg-gray-700 text-gray-300 px-2 text-xs border-l border-gray-900"
-                  disabled={!activeIsGameActive}
-                >
-                  Half
-                </button>
-                <button
-                  onClick={() => setQuickAmount(activeBalance)}
-                  className="bg-gray-700 text-gray-300 px-2 text-xs rounded-r-md"
-                  disabled={!activeIsGameActive}
-                >
-                  Max
-                </button>
-              </div>
-            </div>
-            
-            {/* Quick Amount Buttons */}
-            <div className="grid grid-cols-4 gap-2 mb-3">
-              {quickAmounts.map((amt) => (
-                <button
-                  key={amt}
-                  onClick={() => setQuickAmount(amt)}
-                  className={`px-2 py-1 text-xs rounded-md ${
-                    parseFloat(amount) === amt
-                      ? 'bg-green-600 text-white'
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                  disabled={!activeIsGameActive}
-                >
-                  {amt.toString()} {currentToken}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-        
-        {/* Enhanced Action Buttons */}
-        <div className="grid grid-cols-2 gap-2">
-          {!activeBet ? (
-            <>
-              <button
-                onClick={handleBuy}
-                disabled={isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !canBet || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0}
-                className={`py-2 rounded-md font-bold text-sm flex items-center justify-center ${
-                  isPlacingBet || !isWalletReady || parseFloat(amount) > activeBalance || !canBet || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0
-                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-green-600 hover:bg-green-700 text-white'
-                }`}
-              >
-                {isPlacingBet ? (
-                  <>
-                    <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
-                    Placing...
-                  </>
-                ) : (
-                  <>
-                    <Coins className="mr-2 h-4 w-4" />
-                    {isWaitingPeriod ? 'Pre-Bet' : 'Place Bet'}
-                  </>
-                )}
-              </button>
-              <button
-                disabled
-                className="py-2 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
-              >
-                <Sparkles className="mr-2 h-4 w-4" />
-                Cash Out
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                disabled
-                className="py-2 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
-              >
-                <Coins className="mr-2 h-4 w-4" />
-                Bet Placed
-              </button>
-              <button
-                onClick={handleCashout}
-                disabled={isCashingOut || !isConnected || gameStatus !== 'active'}
-                className={`py-2 rounded-md font-bold text-sm flex items-center justify-center ${
-                  isCashingOut || !isConnected || gameStatus !== 'active'
-                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-yellow-600 hover:bg-yellow-700 text-white'
-                }`}
-              >
-                {isCashingOut ? (
-                  <>
-                    <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
-                    Cashing...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Cash Out ({activeCurrentMultiplier.toFixed(2)}x)
-                  </>
-                )}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-      
-      {/* Enhanced Warning messages (FIXED: countdownSeconds now properly defined) */}
-      <div className="mt-1">
-        {!isWalletReady && (
-          <div className="text-yellow-500 text-xs flex items-center">
-            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
-            <span>Login to play</span>
-          </div>
-        )}
-        
-        {isWalletReady && !isConnected && (
-          <div className="text-red-500 text-xs flex items-center">
-            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
-            <span>Connecting to game server...</span>
-          </div>
-        )}
-        
-        {isWalletReady && parseFloat(amount) > activeBalance && !activeBet && (
-          <div className="text-red-500 text-xs flex items-center">
-            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
-            <span>Insufficient balance</span>
-          </div>
-        )}
-        
-        {isWaitingPeriod && canBet && (
-          <div className="text-blue-500 text-xs flex items-center">
-            <Timer className="h-3 w-3 mr-1 flex-shrink-0" />
-            <span>Pre-game betting open - {countdownSeconds}s remaining</span>
-          </div>
-        )}
-        
-        {isWaitingPeriod && !canBet && (
-          <div className="text-red-500 text-xs flex items-center">
-            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
-            <span>Too late to bet - Game starting now!</span>
-          </div>
-        )}
-        
-        {gameStatus === 'active' && !activeBet && canBet && (
-          <div className="text-green-500 text-xs flex items-center">
-            <Timer className="h-3 w-3 mr-1 flex-shrink-0" />
-            <span>Game active - Place bet now at {activeCurrentMultiplier.toFixed(2)}x</span>
-          </div>
-        )}
-        
-        {gameStatus === 'active' && !canBet && (
-          <div className="text-red-500 text-xs flex items-center">
-            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
-            <span>Too late to bet - Multiplier too high</span>
-          </div>
-        )}
-        
-        {gameStatus === 'crashed' && (
-          <div className="text-red-500 text-xs flex items-center">
-            <AlertCircle className="h-3 w-3 mr-1 flex-shrink-0" />
-            <span>Round ended. Next round starting soon.</span>
-          </div>
-        )}
-      </div>
+
+      {/* Betting Section */}
+      <BettingSection
+        activeBet={activeBet}
+        amount={amount}
+        onAmountChange={(e) => handleAmountChange({ target: { value: e } } as React.ChangeEvent<HTMLInputElement>)}
+        onQuickAmount={setQuickAmount}
+        onPlaceBet={handleBuy}
+        onCashout={handleCashout}
+        quickAmounts={quickAmounts}
+        currentToken={currentToken}
+        activeBalance={activeBalance}
+        isPlacingBet={isPlacingBet}
+        isCashingOut={isCashingOut}
+        isWalletReady={isWalletReady}
+        canBet={canBet}
+        isWaitingPeriod={isWaitingPeriod}
+        gameStatus={gameStatus}
+        isConnected={isConnected}
+        currentMultiplier={activeCurrentMultiplier}
+        isMobile={isMobile}
+      />
+
+      {/* Status Messages */}
+      <StatusMessages
+        isWalletReady={isWalletReady}
+        isConnected={isConnected}
+        amount={amount}
+        activeBalance={activeBalance}
+        activeBet={activeBet}
+        isWaitingPeriod={isWaitingPeriod}
+        canBet={canBet}
+        gameStatus={gameStatus}
+        currentMultiplier={activeCurrentMultiplier}
+        countdownSeconds={countdownSeconds}
+      />
 
       {/* Modals */}
       <AirdropModal 

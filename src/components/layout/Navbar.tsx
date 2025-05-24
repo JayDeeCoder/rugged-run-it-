@@ -1,4 +1,4 @@
-// src/components/layout/Navbar.tsx - Fixed version
+// src/components/layout/Navbar.tsx - Fixed version with dropdown z-index issues resolved
 import { FC, useState, useEffect, useRef, useContext } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -34,9 +34,6 @@ const Navbar: FC = () => {
     setIsMounted(true);
   }, []);
 
-  // Note: User initialization should be handled in UserContext provider
-  // when authentication state changes
-
   // Fetch real balance from Solana blockchain
   useEffect(() => {
     const fetchBalance = async () => {
@@ -48,14 +45,12 @@ const Navbar: FC = () => {
       try {
         setIsLoadingBalance(true);
         
-        // Validate wallet address before proceeding
         if (!isValidSolanaAddress(walletAddress)) {
           console.error('Invalid wallet address:', walletAddress);
           setWalletBalance(0);
           return;
         }
         
-        // Get environment variables
         const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
         const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
         
@@ -65,12 +60,10 @@ const Navbar: FC = () => {
           return;
         }
         
-        // Create Solana connection
         const connectionConfig: any = {
           commitment: 'confirmed',
         };
         
-        // Add API key header if available
         if (apiKey) {
           connectionConfig.httpHeaders = {
             'x-api-key': apiKey
@@ -78,8 +71,6 @@ const Navbar: FC = () => {
         }
         
         const connection = new Connection(rpcUrl, connectionConfig);
-        
-        // Safely create PublicKey object
         const publicKey = safeCreatePublicKey(walletAddress);
         if (!publicKey) {
           console.error('Failed to create PublicKey for address:', walletAddress);
@@ -87,7 +78,6 @@ const Navbar: FC = () => {
           return;
         }
         
-        // Get actual balance from blockchain
         const lamports = await connection.getBalance(publicKey);
         const solBalance = lamports / LAMPORTS_PER_SOL;
         
@@ -101,26 +91,21 @@ const Navbar: FC = () => {
     };
 
     fetchBalance();
-    
-    // Refresh balance every 30 seconds (reduced frequency to avoid rate limits)
     const intervalId = setInterval(fetchBalance, 30000);
     return () => clearInterval(intervalId);
   }, [embeddedWallet, walletAddress, authenticated]);
 
-  // Enhanced login function
   const handleLogin = async () => {
     try {
       setIsLoggingIn(true);
       await login();
     } catch (error) {
       console.error('Login failed:', error);
-      // Optionally show error toast/notification
     } finally {
       setIsLoggingIn(false);
     }
   };
 
-  // Enhanced logout function
   const handleLogout = async () => {
     try {
       if (authenticated) {
@@ -128,14 +113,12 @@ const Navbar: FC = () => {
       }
       setShowUserMenu(false);
       setWalletBalance(0);
-      // Clear any cached user data if needed
     } catch (error) {
       console.error('Logout failed:', error);
     }
   };
 
   const disconnectWallet = () => {
-    // With Privy, logout handles wallet disconnection
     handleLogout();
   };
 
@@ -157,14 +140,12 @@ const Navbar: FC = () => {
       setShowUsernameModal(false);
     } catch (error) {
       console.error('Failed to set username:', error);
-      // Optionally show error message
     }
   };
 
-  // Show loading state while Privy initializes
   if (!isMounted || !ready) {
     return (
-      <header className="bg-[#0d0d0f] py-2 px-3 border-b border-gray-800 text-white">
+      <header className="bg-[#0d0d0f] py-2 px-3 border-b border-gray-800 text-white relative z-50">
         <div className="container mx-auto flex items-center justify-between">
           <Link href="/" className="flex items-center">
             <Image
@@ -184,11 +165,10 @@ const Navbar: FC = () => {
     );
   }
 
-  // Check if wallet is connected and address is valid
   const isWalletConnected = embeddedWallet !== undefined && isValidSolanaAddress(walletAddress);
 
   return (
-    <header className="bg-[#0d0d0f] py-2 px-3 border-b border-gray-800 text-white">
+    <header className="bg-[#0d0d0f] py-2 px-3 border-b border-gray-800 text-white relative z-50">
       <div className="container mx-auto flex items-center justify-between">
         <div className="flex items-center">
           <Link href="/" className="flex items-center mr-4">
@@ -238,9 +218,9 @@ const Navbar: FC = () => {
               </div>
 
               {/* User Menu */}
-              <div className="relative" ref={userMenuRef}>
+              <div className="relative z-50" ref={userMenuRef}>
                 <button
-                  className="flex items-center bg-gray-800 hover:bg-gray-700 rounded-md px-2 py-1 transition-colors"
+                  className="flex items-center bg-gray-800 hover:bg-gray-700 rounded-md px-2 py-1 transition-colors relative z-50"
                   onClick={() => setShowUserMenu(!showUserMenu)}
                   aria-label="User menu"
                 >
@@ -257,98 +237,107 @@ const Navbar: FC = () => {
                 </button>
 
                 {showUserMenu && (
-                  <div className="absolute right-0 mt-2 w-56 bg-gray-800 rounded-md shadow-lg overflow-hidden z-50 border border-gray-700">
-                    <div className="py-2">
-                      {/* User Info */}
-                      <div className="px-4 py-2 border-b border-gray-700">
-                        <div className="font-medium flex items-center justify-between">
-                          <span className="truncate">{getUserDisplayName()}</span>
-                          <button 
-                            onClick={handleSetUsername}
-                            className="text-xs bg-gray-700 hover:bg-gray-600 p-1 rounded transition-colors"
-                            title="Change username"
+                  <>
+                    {/* Backdrop to prevent clicks */}
+                    <div 
+                      className="fixed inset-0 z-40" 
+                      onClick={() => setShowUserMenu(false)}
+                    />
+                    
+                    {/* Dropdown Menu */}
+                    <div className="absolute right-0 mt-2 w-56 bg-gray-800 rounded-md shadow-xl overflow-hidden z-50 border border-gray-700 transform transition-all duration-200 ease-out">
+                      <div className="py-2">
+                        {/* User Info */}
+                        <div className="px-4 py-2 border-b border-gray-700">
+                          <div className="font-medium flex items-center justify-between">
+                            <span className="truncate">{getUserDisplayName()}</span>
+                            <button 
+                              onClick={handleSetUsername}
+                              className="text-xs bg-gray-700 hover:bg-gray-600 p-1 rounded transition-colors"
+                              title="Change username"
+                            >
+                              <Edit size={12} />
+                            </button>
+                          </div>
+                          <div className="text-sm text-gray-400 truncate">
+                            {user?.email?.address || user?.phone?.number || 'No contact info'}
+                          </div>
+                        </div>
+
+                        {/* Wallet Info */}
+                        <div className="px-4 py-2 border-b border-gray-700">
+                          {isWalletConnected ? (
+                            <>
+                              <div className="flex justify-between items-center mb-1">
+                                <span className="text-sm text-gray-400">Wallet:</span>
+                                <span className="text-sm font-mono">
+                                  {`${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-sm text-gray-400">Balance:</span>
+                                <span className="text-sm font-medium text-green-400">
+                                  {isLoadingBalance ? 'Loading...' : `${walletBalance.toFixed(3)} SOL`}
+                                </span>
+                              </div>
+                              <button
+                                onClick={disconnectWallet}
+                                className="mt-2 w-full text-sm bg-gray-700 hover:bg-gray-600 rounded px-3 py-1 text-left flex items-center transition-colors"
+                              >
+                                <Wallet size={14} className="mr-2" />
+                                Disconnect Wallet
+                              </button>
+                            </>
+                          ) : (
+                            <div className="text-center">
+                              <div className="text-sm text-gray-400 mb-2">
+                                {embeddedWallet ? 'Invalid wallet address' : 'No wallet connected'}
+                              </div>
+                              <div className="text-xs text-gray-500 mb-2">
+                                Wallet will be created automatically with your account
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Navigation Links */}
+                        <div className="py-1">
+                          <Link 
+                            href="/dashboard" 
+                            className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors block w-full" 
+                            onClick={() => setShowUserMenu(false)}
                           >
-                            <Edit size={12} />
+                            <BarChart2 size={14} className="mr-2" /> Dashboard
+                          </Link>
+                          <Link 
+                            href="/leaderboard" 
+                            className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors block w-full" 
+                            onClick={() => setShowUserMenu(false)}
+                          >
+                            <Trophy size={14} className="mr-2" /> Leaderboard
+                          </Link>
+                          <Link 
+                            href="/settings" 
+                            className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors block w-full" 
+                            onClick={() => setShowUserMenu(false)}
+                          >
+                            <Settings size={14} className="mr-2" /> Settings
+                          </Link>
+                        </div>
+
+                        {/* Logout */}
+                        <div className="border-t border-gray-700 py-1">
+                          <button
+                            onClick={handleLogout}
+                            className="w-full text-left px-4 py-2 text-sm hover:bg-gray-700 flex items-center text-red-400 transition-colors"
+                          >
+                            <LogOut size={14} className="mr-2" />
+                            Log Out
                           </button>
                         </div>
-                        <div className="text-sm text-gray-400 truncate">
-                          {user?.email?.address || user?.phone?.number || 'No contact info'}
-                        </div>
-                      </div>
-
-                      {/* Wallet Info */}
-                      <div className="px-4 py-2 border-b border-gray-700">
-                        {isWalletConnected ? (
-                          <>
-                            <div className="flex justify-between items-center mb-1">
-                              <span className="text-sm text-gray-400">Wallet:</span>
-                              <span className="text-sm font-mono">
-                                {`${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}`}
-                              </span>
-                            </div>
-                            <div className="flex justify-between items-center">
-                              <span className="text-sm text-gray-400">Balance:</span>
-                              <span className="text-sm font-medium text-green-400">
-                                {isLoadingBalance ? 'Loading...' : `${walletBalance.toFixed(3)} SOL`}
-                              </span>
-                            </div>
-                            <button
-                              onClick={disconnectWallet}
-                              className="mt-2 w-full text-sm bg-gray-700 hover:bg-gray-600 rounded px-3 py-1 text-left flex items-center transition-colors"
-                            >
-                              <Wallet size={14} className="mr-2" />
-                              Disconnect Wallet
-                            </button>
-                          </>
-                        ) : (
-                          <div className="text-center">
-                            <div className="text-sm text-gray-400 mb-2">
-                              {embeddedWallet ? 'Invalid wallet address' : 'No wallet connected'}
-                            </div>
-                            <div className="text-xs text-gray-500 mb-2">
-                              Wallet will be created automatically with your account
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Navigation Links */}
-                      <div className="py-1">
-                        <Link 
-                          href="/dashboard" 
-                          className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors" 
-                          onClick={() => setShowUserMenu(false)}
-                        >
-                          <BarChart2 size={14} className="mr-2" /> Dashboard
-                        </Link>
-                        <Link 
-                          href="/leaderboard" 
-                          className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors" 
-                          onClick={() => setShowUserMenu(false)}
-                        >
-                          <Trophy size={14} className="mr-2" /> Leaderboard
-                        </Link>
-                        <Link 
-                          href="/settings" 
-                          className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors" 
-                          onClick={() => setShowUserMenu(false)}
-                        >
-                          <Settings size={14} className="mr-2" /> Settings
-                        </Link>
-                      </div>
-
-                      {/* Logout */}
-                      <div className="border-t border-gray-700 py-1">
-                        <button
-                          onClick={handleLogout}
-                          className="w-full text-left px-4 py-2 text-sm hover:bg-gray-700 flex items-center text-red-400 transition-colors"
-                        >
-                          <LogOut size={14} className="mr-2" />
-                          Log Out
-                        </button>
                       </div>
                     </div>
-                  </div>
+                  </>
                 )}
               </div>
             </>
@@ -381,7 +370,7 @@ const Navbar: FC = () => {
 
       {/* Mobile Menu */}
       {showMobileMenu && (
-        <div className="md:hidden bg-gray-800 mt-3 rounded-md p-2">
+        <div className="md:hidden bg-gray-800 mt-3 rounded-md p-2 relative z-40">
           <nav className="flex flex-col">
             <Link 
               href="/dashboard" 

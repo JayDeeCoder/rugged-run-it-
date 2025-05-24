@@ -506,8 +506,132 @@ const BettingSection: FC<{
 }) => {
   const amountValid = !isNaN(parseFloat(amount)) && parseFloat(amount) > 0 && parseFloat(amount) <= activeBalance;
 
+  if (isMobile) {
+    return (
+      <div>
+        {!activeBet ? (
+          <>
+            {/* Compact amount input with inline quick amounts */}
+            <div className="mb-2">
+              <div className="flex gap-1 mb-1">
+                <input
+                  type="text"
+                  value={amount}
+                  onChange={(e) => onAmountChange(e.target.value)}
+                  className="flex-1 bg-gray-700 text-white px-2 py-1.5 rounded text-sm focus:outline-none"
+                  placeholder="Amount"
+                  disabled={!canBet}
+                />
+                <button
+                  onClick={() => onQuickAmount(activeBalance * 0.5)}
+                  className="bg-gray-600 text-gray-300 px-2 text-xs rounded hover:bg-gray-500"
+                  disabled={!canBet}
+                >
+                  ½
+                </button>
+                <button
+                  onClick={() => onQuickAmount(activeBalance)}
+                  className="bg-gray-600 text-gray-300 px-2 text-xs rounded hover:bg-gray-500"
+                  disabled={!canBet}
+                >
+                  Max
+                </button>
+              </div>
+              
+              {/* Ultra compact quick amounts */}
+              <div className="grid grid-cols-4 gap-1">
+                {quickAmounts.map((amt) => (
+                  <button
+                    key={amt}
+                    onClick={() => onQuickAmount(amt)}
+                    className={`py-1 text-xs rounded transition-colors ${
+                      parseFloat(amount) === amt
+                        ? 'bg-green-600 text-white'
+                        : 'bg-gray-700 text-gray-300'
+                    }`}
+                    disabled={!canBet}
+                  >
+                    {amt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : null}
+        
+        {/* Compact action buttons */}
+        <div className="grid grid-cols-2 gap-2">
+          {!activeBet ? (
+            <>
+              <button
+                onClick={onPlaceBet}
+                disabled={isPlacingBet || !isWalletReady || !amountValid || !canBet}
+                className={`py-2.5 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
+                  isPlacingBet || !isWalletReady || !amountValid || !canBet
+                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-green-600 hover:bg-green-700 text-white'
+                }`}
+              >
+                {isPlacingBet ? (
+                  <>
+                    <div className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full mr-1"></div>
+                    Placing
+                  </>
+                ) : (
+                  <>
+                    <Coins className="mr-1 h-4 w-4" />
+                    {isWaitingPeriod ? 'Pre-Bet' : 'Bet'}
+                  </>
+                )}
+              </button>
+              <button
+                disabled
+                className="py-2.5 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
+              >
+                <Sparkles className="mr-1 h-4 w-4" />
+                Cash Out
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                disabled
+                className="py-2.5 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
+              >
+                <Coins className="mr-1 h-4 w-4" />
+                Bet Active
+              </button>
+              <button
+                onClick={onCashout}
+                disabled={isCashingOut || !isConnected || gameStatus !== 'active'}
+                className={`py-2.5 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
+                  isCashingOut || !isConnected || gameStatus !== 'active'
+                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-yellow-600 hover:bg-yellow-700 text-white'
+                }`}
+              >
+                {isCashingOut ? (
+                  <>
+                    <div className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full mr-1"></div>
+                    Cashing
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="mr-1 h-4 w-4" />
+                    Cash Out
+                  </>
+                )}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Desktop version - unchanged
   return (
-    <div className={isMobile ? "" : "border-t border-gray-800 pt-3"}>
+    <div className="border-t border-gray-800 pt-3">
       <h3 className="text-sm font-bold text-gray-400 mb-3">
         {activeBet ? 'ACTIVE BET' : 'PLACE BET'}
       </h3>
@@ -546,19 +670,19 @@ const BettingSection: FC<{
           </div>
           
           {/* Quick Amount Buttons */}
-          <div className={`grid gap-1 mb-3 ${isMobile ? 'grid-cols-4' : 'grid-cols-4'}`}>
+          <div className="grid grid-cols-4 gap-2 mb-3">
             {quickAmounts.map((amt) => (
               <button
                 key={amt}
                 onClick={() => onQuickAmount(amt)}
-                className={`px-1 py-1 text-xs rounded transition-colors ${
+                className={`px-2 py-1 text-xs rounded transition-colors ${
                   parseFloat(amount) === amt
                     ? 'bg-green-600 text-white'
                     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                } ${isMobile ? 'text-[10px] px-1' : ''}`}
+                }`}
                 disabled={!canBet}
               >
-                {isMobile ? amt.toString() : `${amt.toString()} ${currentToken}`}
+                {amt.toString()} {currentToken}
               </button>
             ))}
           </div>

@@ -45,7 +45,7 @@ const ChatBox: FC = () => {
       <div className="flex justify-between p-3 border-b border-gray-800 bg-[#0d0d0f] flex-shrink-0">
         <h2 className="text-sm text-white font-medium flex items-center">
           <span className={`h-2 w-2 ${isConnected ? 'bg-green-500' : 'bg-red-500'} rounded-full mr-2`}></span>
-          GLOBAL ({activeUsers > 0 ? activeUsers : '—'})
+          ONLINE ({activeUsers > 0 ? activeUsers : '—'})
         </h2>
         <div className="flex space-x-3">
           <a href="https://discord.com/" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300">
@@ -59,8 +59,8 @@ const ChatBox: FC = () => {
           <a href="https://x.com/ruggeddotfun" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300">
             <Image 
               src="/images/x-social-media-white-icon.svg"
-              width={15}
-              height={15}
+              width={20}
+              height={20}
               alt="X"
             />
           </a>

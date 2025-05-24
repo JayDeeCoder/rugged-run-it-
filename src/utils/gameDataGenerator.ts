@@ -1,4 +1,4 @@
-// src/utils/gameDataGenerator.ts
+// src/utils/gameDataGenerator.ts - Enhanced with High Volatility Trading Movements
 import { Candle } from '../types/trade';
 
 // Reward tiers for "slot machine" randomness
@@ -10,49 +10,64 @@ export enum RewardTier {
   LEGENDARY = 'legendary' // 3% chance, 10.0-50.0x multiplier
 }
 
-// Market patterns with volatility profiles
+// Enhanced market patterns with more trading-like behavior
 export enum MarketPattern {
-  NORMAL = 'normal',          // Regular modest growth with natural volatility
-  BULL_RUN = 'bull_run',      // Sustained upward trend with strong momentum
-  ACCUMULATION = 'accumulation', // Sideways movement, building tension
-  DISTRIBUTION = 'distribution', // Slight decline, preparing for a move
-  FAKEOUT = 'fakeout',        // Quick rise then drop (smaller rug)
-  RUG_PULL = 'rug_pull',      // Dramatic crash (house edge)
-  SUPER_SPIKE = 'super_spike', // Rare dramatic upward move (player edge)
+  NORMAL = 'normal',              // Regular modest growth with natural volatility
+  BULL_RUN = 'bull_run',          // Sustained upward trend with pullbacks
+  ACCUMULATION = 'accumulation',   // Sideways movement with low volatility
+  DISTRIBUTION = 'distribution',   // Topping formation with high volatility
+  FAKEOUT = 'fakeout',            // Quick rise then sharp reversal
+  RUG_PULL = 'rug_pull',          // Dramatic crash (house edge)
+  SUPER_SPIKE = 'super_spike',    // Rare dramatic upward move
+  CONSOLIDATION = 'consolidation', // Tight range trading
+  BREAKOUT = 'breakout',          // Breaking through resistance
+  PULLBACK = 'pullback',          // Temporary decline in uptrend
+  WHIPSAW = 'whipsaw',            // Rapid back-and-forth movement
+  PARABOLIC = 'parabolic'         // Exponential growth phase
 }
 
-// Trader psychology profiles based on bet size vs wallet
+// Trader psychology profiles
 export enum TraderProfile {
-  CAUTIOUS = 'cautious',      // Bet < 5% of wallet
-  MODERATE = 'moderate',      // Bet 5-20% of wallet
-  AGGRESSIVE = 'aggressive',  // Bet 20-50% of wallet  
-  YOLO = 'yolo',              // Bet > 50% of wallet
-  TILT = 'tilt'               // Multiple large bets after losses
+  CAUTIOUS = 'cautious',
+  MODERATE = 'moderate',
+  AGGRESSIVE = 'aggressive',
+  YOLO = 'yolo',
+  TILT = 'tilt'
 }
 
-// Initial trading state interface
+// Enhanced trading state with more realistic market mechanics
 interface TradingState {
   currentPattern: MarketPattern;
-  patternDuration: number;    // How long current pattern has lasted
-  maxPatternDuration: number; // When to consider pattern change
-  momentum: number;           // -1.0 to 1.0, impacts price direction
-  volatility: number;         // 0.0 to 1.0, impacts price movement size
-  currentMultiplier: number;  // Current price multiplier
-  rugPullPending: boolean;    // If a rug pull is scheduled
-  rugPullThreshold: number;   // Threshold for triggering rug
-  playerBetsSum: number;      // Sum of active player bets
-  betsSinceLastRug: number;   // Number of bets since last rug
-  prevCandleClose: number;    // Previous candle close value
-  highWatermark: number;      // Highest multiplier in current game
-  supportsLevels: number[];   // Key support levels
-  lastCandleCount: number;    // For tracking new candles  
-  gameDuration: number;       // Total game duration in candles
-  currentCandle: number;      // Current candle number in game
-  forceRug: boolean;          // Force a rug pull
-  rewardTier: RewardTier;     // Current reward tier for this round
-  houseEdgeApplied: boolean;  // Whether house edge has been applied
-  traderProfile: TraderProfile; // Player's risk profile
-  consecutiveLosses: number;  // Track consecutive losses (for tilt)
+  patternDuration: number;
+  maxPatternDuration: number;
+  momentum: number;           // -1.0 to 1.0
+  volatility: number;         // 0.0 to 2.0 (increased range)
+  currentMultiplier: number;
+  rugPullPending: boolean;
+  rugPullThreshold: number;
+  playerBetsSum: number;
+  betsSinceLastRug: number;
+  prevCandleClose: number;
+  highWatermark: number;
+  supportLevels: number[];    // Dynamic support levels
+  resistanceLevels: number[]; // Dynamic resistance levels
+  lastCandleCount: number;
+  gameDuration: number;
+  currentCandle: number;
+  forceRug: boolean;
+  rewardTier: RewardTier;
+  houseEdgeApplied: boolean;
+  traderProfile: TraderProfile;
+  consecutiveLosses: number;
+  
+  // New volatility and movement parameters
+  microTrend: number;         // Short-term trend bias
+  noiseLevel: number;         // Random noise intensity
+  trendStrength: number;      // How strong the current trend is
+  consolidationPhase: boolean; // Whether in sideways movement
+  lastBreakoutLevel: number;  // Last significant price level broken
+  volumeSpike: boolean;       // Indicates high activity periods
+  fibonacciLevels: number[];  // Key retracement levels
 }
 
 // Game outcome details
@@ -66,20 +81,23 @@ export interface GameOutcome {
   traderProfile: TraderProfile;
 }
 
-// Helper function to get random integer between min and max (inclusive)
+// Helper functions
 function getRandomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1) + min);
 }
 
-// Determine reward tier based on RNG (slot machine element)
+function getRandomFloat(min: number, max: number): number {
+  return Math.random() * (max - min) + min;
+}
+
+// Determine reward tier
 function determineRewardTier(): RewardTier {
   const roll = Math.random() * 100;
-  
-  if (roll < 50) return RewardTier.COMMON;     // 50% chance
-  if (roll < 75) return RewardTier.UNCOMMON;   // 25% chance
-  if (roll < 90) return RewardTier.RARE;       // 15% chance
-  if (roll < 97) return RewardTier.EPIC;       // 7% chance
-  return RewardTier.LEGENDARY;                 // 3% chance
+  if (roll < 50) return RewardTier.COMMON;
+  if (roll < 75) return RewardTier.UNCOMMON;
+  if (roll < 90) return RewardTier.RARE;
+  if (roll < 97) return RewardTier.EPIC;
+  return RewardTier.LEGENDARY;
 }
 
 // Get multiplier range based on reward tier
@@ -98,34 +116,29 @@ function getMultiplierRange(tier: RewardTier): { min: number, max: number } {
   }
 }
 
-// Determine trader profile based on bet size vs wallet
+// Calculate trader profile
 export function determineTraderProfile(betAmount: number, walletBalance: number, consecutiveLosses: number = 0): TraderProfile {
-  // Calculate bet as percentage of wallet
   const betPercentage = (betAmount / walletBalance) * 100;
   
-  // Check for tilt behavior
   if (consecutiveLosses >= 3 && betPercentage > 20) {
     return TraderProfile.TILT;
   }
   
-  // Normal risk profiles
   if (betPercentage > 50) return TraderProfile.YOLO;
   if (betPercentage > 20) return TraderProfile.AGGRESSIVE;
   if (betPercentage > 5) return TraderProfile.MODERATE;
   return TraderProfile.CAUTIOUS;
 }
 
-// Calculate rugpull probability based on bet size, reward tier, and trader profile
+// Calculate rugpull probability
 function calculateRugPullProbability(
   betAmount: number, 
   walletBalance: number, 
   tier: RewardTier, 
   profile: TraderProfile
 ): number {
-  // Base chance of rugpull
-  let rugPullChance = 0.05; // 5% base chance
+  let rugPullChance = 0.05;
   
-  // Adjust based on reward tier (higher tier = higher chance of rugpull)
   switch (tier) {
     case RewardTier.COMMON:
       rugPullChance += 0.0;
@@ -144,102 +157,96 @@ function calculateRugPullProbability(
       break;
   }
   
-  // Adjust based on trader profile (more aggressive = higher rugpull chance)
   switch (profile) {
     case TraderProfile.CAUTIOUS:
-      rugPullChance *= 0.5; // Reduced chance for cautious players
+      rugPullChance *= 0.5;
       break;
     case TraderProfile.MODERATE:
-      // No adjustment
       break;
     case TraderProfile.AGGRESSIVE:
-      rugPullChance *= 1.5; // Increased chance for aggressive players
+      rugPullChance *= 1.5;
       break;
     case TraderProfile.YOLO:
-      rugPullChance *= 2.0; // Double chance for YOLO players
+      rugPullChance *= 2.0;
       break;
     case TraderProfile.TILT:
-      rugPullChance *= 2.5; // Highest chance for tilted players
+      rugPullChance *= 2.5;
       break;
   }
   
-  // Additional adjustment based on bet size as percentage of wallet
   const betPercentage = (betAmount / walletBalance);
-  rugPullChance += betPercentage * 0.2; // Up to additional 20% chance for all-in bets
+  rugPullChance += betPercentage * 0.2;
   
-  // Cap at 90% max probability
   return Math.min(0.9, rugPullChance);
 }
 
-// Apply house edge to final multiplier
-function applyHouseEdge(multiplier: number, tier: RewardTier): number {
-  // House edge varies by tier (more favorable for lower tiers to encourage continued play)
-  let houseEdgePercent = 0;
-  
-  switch (tier) {
-    case RewardTier.COMMON:
-      houseEdgePercent = 2; // 2% house edge
-      break;
-    case RewardTier.UNCOMMON:
-      houseEdgePercent = 5; // 5% house edge
-      break;
-    case RewardTier.RARE:
-      houseEdgePercent = 8; // 8% house edge
-      break;
-    case RewardTier.EPIC:
-      houseEdgePercent = 10; // 10% house edge
-      break;
-    case RewardTier.LEGENDARY:
-      houseEdgePercent = 15; // 15% house edge for huge multipliers
-      break;
-  }
-  
-  // Apply the house edge
+// Apply 40% house edge (as requested)
+function applyHouseEdge(multiplier: number): number {
+  const houseEdgePercent = 40; // Fixed 40% house edge
   return multiplier * (1 - (houseEdgePercent / 100));
 }
 
-// Create default trading state
-export const createInitialTradingState = (betAmount = 0, walletBalance = 1): TradingState => {
-  // Determine reward tier for this game session (slot machine element)
-  const rewardTier = determineRewardTier();
+// Generate dynamic support and resistance levels
+function generateSupportResistanceLevels(currentPrice: number, highWatermark: number): { support: number[], resistance: number[] } {
+  const support: number[] = [];
+  const resistance: number[] = [];
   
-  // Determine trader profile based on bet sizing
+  // Fibonacci retracement levels from high watermark
+  const fibLevels = [0.236, 0.382, 0.5, 0.618, 0.786];
+  const range = highWatermark - 1.0;
+  
+  fibLevels.forEach(level => {
+    const fibPrice = highWatermark - (range * level);
+    if (fibPrice < currentPrice) {
+      support.push(Number(fibPrice.toFixed(4)));
+    } else {
+      resistance.push(Number(fibPrice.toFixed(4)));
+    }
+  });
+  
+  // Add psychological levels
+  const psychLevels = [1.0, 1.5, 2.0, 2.5, 3.0, 5.0, 10.0, 15.0, 20.0, 25.0, 50.0];
+  psychLevels.forEach(level => {
+    if (level < currentPrice && level > 0.8) {
+      support.push(level);
+    } else if (level > currentPrice) {
+      resistance.push(level);
+    }
+  });
+  
+  return {
+    support: support.sort((a, b) => b - a).slice(0, 3), // Top 3 support levels
+    resistance: resistance.sort((a, b) => a - b).slice(0, 3) // Top 3 resistance levels
+  };
+}
+
+// Create enhanced initial trading state
+export const createInitialTradingState = (betAmount = 0, walletBalance = 1): TradingState => {
+  const rewardTier = determineRewardTier();
   const traderProfile = determineTraderProfile(betAmount, walletBalance);
   
-  // Determine game duration based on tier and other factors
   let gameDuration = 0;
-  const multiplierRange = getMultiplierRange(rewardTier);
-  
-  // More exciting tiers last longer to build suspense
   switch (rewardTier) {
     case RewardTier.COMMON:
-      gameDuration = getRandomInt(5, 30);
+      gameDuration = getRandomInt(10, 40);
       break;
     case RewardTier.UNCOMMON:
-      gameDuration = getRandomInt(15, 60);
+      gameDuration = getRandomInt(20, 70);
       break;
     case RewardTier.RARE:
-      gameDuration = getRandomInt(30, 90);
+      gameDuration = getRandomInt(40, 100);
       break;
     case RewardTier.EPIC:
-      gameDuration = getRandomInt(40, 120);
+      gameDuration = getRandomInt(60, 140);
       break;
     case RewardTier.LEGENDARY:
-      gameDuration = getRandomInt(60, 180);
+      gameDuration = getRandomInt(80, 200);
       break;
   }
   
-  // Check for rugpull
-  const rugPullChance = calculateRugPullProbability(
-    betAmount, 
-    walletBalance, 
-    rewardTier, 
-    traderProfile
-  );
-  
+  const rugPullChance = calculateRugPullProbability(betAmount, walletBalance, rewardTier, traderProfile);
   const willRugPull = Math.random() < rugPullChance;
   
-  // If YOLO or TILT with legendary win, higher chance of rugpull
   const rugPullPending = willRugPull || 
     ((traderProfile === TraderProfile.YOLO || traderProfile === TraderProfile.TILT) && 
      rewardTier === RewardTier.LEGENDARY && 
@@ -248,9 +255,9 @@ export const createInitialTradingState = (betAmount = 0, walletBalance = 1): Tra
   return {
     currentPattern: MarketPattern.NORMAL,
     patternDuration: 0,
-    maxPatternDuration: getRandomInt(5, 15),
+    maxPatternDuration: getRandomInt(3, 8), // Shorter patterns for more variety
     momentum: 0,
-    volatility: 0.3,
+    volatility: getRandomFloat(0.4, 0.8), // Higher base volatility
     currentMultiplier: 1.0,
     rugPullPending,
     rugPullThreshold: getRandomInt(3, 10),
@@ -258,7 +265,8 @@ export const createInitialTradingState = (betAmount = 0, walletBalance = 1): Tra
     betsSinceLastRug: 0,
     prevCandleClose: 1.0,
     highWatermark: 1.0,
-    supportsLevels: [1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 15.0, 20.0],
+    supportLevels: [1.0],
+    resistanceLevels: [1.5, 2.0, 3.0],
     lastCandleCount: 0,
     gameDuration,
     currentCandle: 0,
@@ -266,159 +274,106 @@ export const createInitialTradingState = (betAmount = 0, walletBalance = 1): Tra
     rewardTier,
     houseEdgeApplied: false,
     traderProfile,
-    consecutiveLosses: 0
+    consecutiveLosses: 0,
+    
+    // Enhanced parameters
+    microTrend: getRandomFloat(-0.3, 0.3),
+    noiseLevel: getRandomFloat(0.2, 0.6),
+    trendStrength: getRandomFloat(0.3, 0.8),
+    consolidationPhase: false,
+    lastBreakoutLevel: 1.0,
+    volumeSpike: false,
+    fibonacciLevels: [1.0, 1.236, 1.382, 1.5, 1.618, 2.0, 2.618, 3.0]
   };
 };
 
-// Add a player bet to the system
-export const addPlayerBet = (state: TradingState, betAmount: number, walletBalance: number): TradingState => {
-  const newState = { ...state };
-  newState.playerBetsSum += betAmount;
-  newState.betsSinceLastRug += 1;
-  
-  // Update trader profile based on new bet
-  newState.traderProfile = determineTraderProfile(
-    betAmount, 
-    walletBalance, 
-    newState.consecutiveLosses
-  );
-  
-  // Increase rug pull chance based on total bet amount, bet frequency, and trader profile
-  const rugPullModifier = newState.traderProfile === TraderProfile.YOLO ? 1.5 : 
-                          newState.traderProfile === TraderProfile.TILT ? 2.0 : 1.0;
-                          
-  if (
-    newState.playerBetsSum > newState.rugPullThreshold * rugPullModifier || 
-    newState.betsSinceLastRug > 10
-  ) {
-    // Schedule rug pull if significant player bets are in the system
-    newState.rugPullPending = Math.random() < (
-      (newState.playerBetsSum / (newState.rugPullThreshold * 2)) * rugPullModifier + 
-      newState.betsSinceLastRug / 20
-    );
-  }
-  
-  return newState;
-};
-
-// Update game state for next tick
+// Enhanced game state update with more realistic market behavior
 export const updateGameState = (state: TradingState): TradingState => {
   const newState = { ...state };
-  
-  // Increment candle count
   newState.currentCandle += 1;
   
-  // Check if near the target multiplier for this tier
+  // Update support and resistance levels
+  const levels = generateSupportResistanceLevels(newState.currentMultiplier, newState.highWatermark);
+  newState.supportLevels = levels.support;
+  newState.resistanceLevels = levels.resistance;
+  
+  // Check for forced rug pull
   const tierMultiplierRange = getMultiplierRange(newState.rewardTier);
   const targetMultiplier = (tierMultiplierRange.min + tierMultiplierRange.max) / 2;
   const nearTarget = newState.currentMultiplier > targetMultiplier * 0.7;
   
-  // Check if we need to force a rug pull based on game duration
   if (
     (newState.currentCandle >= newState.gameDuration * 0.85) || 
     (nearTarget && newState.rugPullPending && Math.random() < 0.3)
   ) {
-    // Time to force a rug pull - game has reached its predetermined length
     newState.forceRug = true;
     newState.currentPattern = MarketPattern.RUG_PULL;
     newState.patternDuration = 0;
-    
-    // Return early as we're forcing a rug pull
     return newState;
   }
   
-  // Increment pattern duration
   newState.patternDuration += 1;
   
-  // Pattern change logic based on reward tier and progression
+  // Enhanced pattern switching with more variety
   if (newState.patternDuration >= newState.maxPatternDuration) {
-    // Get progression percentage (how far we are through the game)
     const progressionPct = newState.currentCandle / newState.gameDuration;
+    const availablePatterns: MarketPattern[] = [];
     
-    // Early game (building phase)
+    // Determine available patterns based on game progression and current state
     if (progressionPct < 0.3) {
-      if (newState.rewardTier === RewardTier.COMMON || newState.rewardTier === RewardTier.UNCOMMON) {
-        // Lower tiers stay more stable
-        newState.currentPattern = [
-          MarketPattern.NORMAL, 
-          MarketPattern.ACCUMULATION, 
-          MarketPattern.DISTRIBUTION
-        ][Math.floor(Math.random() * 3)];
+      // Early game - building phase
+      availablePatterns.push(
+        MarketPattern.NORMAL,
+        MarketPattern.ACCUMULATION,
+        MarketPattern.CONSOLIDATION,
+        MarketPattern.PULLBACK
+      );
+      
+      if (newState.rewardTier !== RewardTier.COMMON) {
+        availablePatterns.push(MarketPattern.BULL_RUN, MarketPattern.BREAKOUT);
+      }
+    } else if (progressionPct < 0.7) {
+      // Mid game - momentum phase
+      if (newState.currentMultiplier < tierMultiplierRange.min * 0.8) {
+        availablePatterns.push(MarketPattern.BULL_RUN, MarketPattern.BREAKOUT, MarketPattern.SUPER_SPIKE);
+      } else if (newState.currentMultiplier > tierMultiplierRange.max * 1.1) {
+        availablePatterns.push(MarketPattern.DISTRIBUTION, MarketPattern.FAKEOUT, MarketPattern.PULLBACK);
       } else {
-        // Higher tiers show more early volatility to build excitement
-        newState.currentPattern = [
+        availablePatterns.push(
           MarketPattern.NORMAL,
           MarketPattern.BULL_RUN,
-          MarketPattern.FAKEOUT
-        ][Math.floor(Math.random() * 3)];
-      }
-    }
-    // Mid game (opportunity phase)
-    else if (progressionPct < 0.7) {
-      // Head toward the target multiplier 
-      if (newState.currentMultiplier < tierMultiplierRange.min * 0.8) {
-        // Need to go up to reach minimum tier value
-        newState.currentPattern = MarketPattern.BULL_RUN;
-      } 
-      else if (newState.currentMultiplier > tierMultiplierRange.max * 1.1) {
-        // Above max tier value, pull back
-        newState.currentPattern = Math.random() < 0.7 ? 
-          MarketPattern.DISTRIBUTION : MarketPattern.FAKEOUT;
-      }
-      else {
-        // Within target range, mix it up based on tier
-        if (newState.rewardTier === RewardTier.LEGENDARY && Math.random() < 0.2) {
-          newState.currentPattern = MarketPattern.SUPER_SPIKE;
-        } 
-        else if (newState.rewardTier === RewardTier.EPIC && Math.random() < 0.3) {
-          newState.currentPattern = Math.random() < 0.7 ? 
-            MarketPattern.BULL_RUN : MarketPattern.SUPER_SPIKE;
-        }
-        else {
-          // Random selection for other tiers
-          const patterns = Object.values(MarketPattern);
-          // Remove RUG_PULL from the options if not scheduled
-          const availablePatterns = newState.rugPullPending ? 
-            patterns : patterns.filter(p => p !== MarketPattern.RUG_PULL);
-            
-          newState.currentPattern = availablePatterns[
-            Math.floor(Math.random() * availablePatterns.length)
-          ];
+          MarketPattern.WHIPSAW,
+          MarketPattern.CONSOLIDATION,
+          MarketPattern.PARABOLIC
+        );
+        
+        if (newState.rewardTier === RewardTier.LEGENDARY && Math.random() < 0.3) {
+          availablePatterns.push(MarketPattern.SUPER_SPIKE);
         }
       }
-    }
-    // Late game (decision phase)
-    else {
-      // Higher chance of decisive movement
+    } else {
+      // Late game - decision phase
       if (newState.rugPullPending && Math.random() < 0.5) {
-        // Execute the rug pull if pending
         newState.currentPattern = MarketPattern.RUG_PULL;
         newState.rugPullPending = false;
-      } 
-      else if (newState.currentMultiplier < tierMultiplierRange.min) {
-        // Final push to get into tier range
-        newState.currentPattern = MarketPattern.BULL_RUN;
-      }
-      else {
-        // Random selection with higher chance of dramatic pattern
-        const lateGamePatterns = [
-          MarketPattern.BULL_RUN, 
+      } else {
+        availablePatterns.push(
           MarketPattern.BULL_RUN,
+          MarketPattern.PARABOLIC,
+          MarketPattern.DISTRIBUTION,
           MarketPattern.FAKEOUT,
-          MarketPattern.SUPER_SPIKE
-        ];
-        
-        newState.currentPattern = lateGamePatterns[
-          Math.floor(Math.random() * lateGamePatterns.length)
-        ];
+          MarketPattern.WHIPSAW
+        );
       }
     }
     
-    // Reset pattern duration
-    newState.patternDuration = 0;
-    newState.maxPatternDuration = getRandomInt(5, 15);
+    if (availablePatterns.length > 0) {
+      newState.currentPattern = availablePatterns[Math.floor(Math.random() * availablePatterns.length)];
+    }
     
-    // Reset rug pull pending if we just executed one
+    newState.patternDuration = 0;
+    newState.maxPatternDuration = getRandomInt(3, 12); // More varied pattern durations
+    
     if (newState.currentPattern === MarketPattern.RUG_PULL) {
       newState.rugPullPending = false;
       newState.playerBetsSum = 0;
@@ -426,68 +381,8 @@ export const updateGameState = (state: TradingState): TradingState => {
     }
   }
   
-  // Update momentum and volatility based on pattern and reward tier
-  switch (newState.currentPattern) {
-    case MarketPattern.NORMAL:
-      // Mean-reverting momentum with slight upward bias
-      newState.momentum = newState.momentum * 0.8 + (Math.random() - 0.45) * 0.3;
-      newState.volatility = 0.3;
-      break;
-      
-    case MarketPattern.BULL_RUN:
-      // Strong positive momentum, strength varies by tier
-      const tierBoost = 
-        newState.rewardTier === RewardTier.LEGENDARY ? 0.5 :
-        newState.rewardTier === RewardTier.EPIC ? 0.4 :
-        newState.rewardTier === RewardTier.RARE ? 0.3 :
-        newState.rewardTier === RewardTier.UNCOMMON ? 0.25 : 0.2;
-        
-      newState.momentum = newState.momentum * 0.7 + (Math.random() * 0.4 + tierBoost);
-      newState.volatility = 0.4;
-      break;
-      
-    case MarketPattern.ACCUMULATION:
-      // Low momentum, mostly sideways
-      newState.momentum = newState.momentum * 0.5 + (Math.random() - 0.5) * 0.15;
-      newState.volatility = 0.2;
-      break;
-      
-    case MarketPattern.DISTRIBUTION:
-      // Slightly negative momentum
-      newState.momentum = newState.momentum * 0.7 + (Math.random() - 0.6) * 0.3;
-      newState.volatility = 0.35;
-      break;
-      
-    case MarketPattern.FAKEOUT:
-      // Start positive then reverse
-      if (newState.patternDuration < 3) {
-        newState.momentum = newState.momentum * 0.6 + (Math.random() * 0.5 + 0.2);
-      } else {
-        newState.momentum = newState.momentum * 0.5 + (Math.random() - 0.8) * 0.5;
-      }
-      newState.volatility = 0.45;
-      break;
-      
-    case MarketPattern.RUG_PULL:
-      // Strong negative momentum
-      newState.momentum = newState.momentum * 0.3 + (Math.random() - 1.2) * 0.7;
-      newState.volatility = 0.6;
-      break;
-      
-    case MarketPattern.SUPER_SPIKE:
-      // Extreme positive momentum - stronger for higher tiers
-      const spikeMultiplier = 
-        newState.rewardTier === RewardTier.LEGENDARY ? 1.5 :
-        newState.rewardTier === RewardTier.EPIC ? 1.3 :
-        newState.rewardTier === RewardTier.RARE ? 1.1 : 1.0;
-        
-      newState.momentum = newState.momentum * 0.6 + (Math.random() * 0.7 + 0.4) * spikeMultiplier;
-      newState.volatility = 0.5;
-      break;
-  }
-  
-  // Clamp momentum
-  newState.momentum = Math.max(-1, Math.min(1, newState.momentum));
+  // Update momentum, volatility, and other parameters based on pattern
+  updateMarketParameters(newState);
   
   // Update high watermark
   if (newState.currentMultiplier > newState.highWatermark) {
@@ -497,202 +392,364 @@ export const updateGameState = (state: TradingState): TradingState => {
   return newState;
 };
 
-// Calculate next multiplier value based on current state
-export const calculateNextMultiplier = (state: TradingState): number => {
-  // If we're in a forced rug pull, create a dramatic crash
-  if (state.forceRug && state.currentPattern === MarketPattern.RUG_PULL) {
-    // Dramatic crash with a long red candle - make more drastic
-    return Math.max(0.1, state.currentMultiplier * (0.05 + Math.random() * 0.25));
-  }
+// Enhanced market parameter updates
+function updateMarketParameters(state: TradingState): void {
+  const baseVolatility = 0.5;
+  const tierVolatilityMultiplier = 
+    state.rewardTier === RewardTier.LEGENDARY ? 1.5 :
+    state.rewardTier === RewardTier.EPIC ? 1.3 :
+    state.rewardTier === RewardTier.RARE ? 1.1 : 1.0;
   
-  // Target multiplier range for current reward tier
-  const { min: targetMin, max: targetMax } = getMultiplierRange(state.rewardTier);
-  const tierRange = targetMax - targetMin;
-  
-  // Game progression percentage
-  const progressPct = state.currentCandle / state.gameDuration;
-  
-  // Base percentage change with logarithmic scaling
-  // Higher multipliers = smaller percentage changes on average
-  const logScale = Math.log10(Math.max(1.1, state.currentMultiplier));
-  let basePercentChange = (state.volatility * 0.05) / logScale; 
-  
-  // Add occasional "jumps" for unpredictability - rare sudden movements
-  // More frequent for higher tiers
-  const jumpChance = 
-    state.rewardTier === RewardTier.LEGENDARY ? 0.15 :
-    state.rewardTier === RewardTier.EPIC ? 0.1 :
-    state.rewardTier === RewardTier.RARE ? 0.08 :
-    state.rewardTier === RewardTier.UNCOMMON ? 0.05 : 0.03;
-    
-  const jumpFactor = Math.random() < jumpChance ? 
-    (Math.random() * 0.2) * (Math.random() > 0.5 ? 1 : -1) : 0;
-  
-  // Momentum impact (directional bias) with logarithmic dampening
-  const momentumImpact = (state.momentum * state.volatility * 0.1) / Math.sqrt(logScale);
-  
-  // Target gravity - pull toward target range more strongly as game progresses
-  let targetGravity = 0;
-  
-  // After 30% of the game, start applying target gravity
-  if (progressPct > 0.3) {
-    const gravityStrength = Math.min(0.05, (progressPct - 0.3) * 0.1); // Increases with game progress
-    
-    if (state.currentMultiplier < targetMin) {
-      // Below target, pull up
-      targetGravity = gravityStrength;
-    } else if (state.currentMultiplier > targetMax && !state.rugPullPending) {
-      // Above target and not planning a rug pull, pull down gently
-      targetGravity = -gravityStrength * 0.5;
-    }
-  }
-  
-  // Pattern-specific multipliers with more extreme values
-  let patternMultiplier = 1.0;
   switch (state.currentPattern) {
-    case MarketPattern.RUG_PULL:
-      // More dramatic crash for rug pull
-      patternMultiplier = -6.0 * (1 + Math.random() * 0.5);
-      break;
-      
-    case MarketPattern.SUPER_SPIKE:
-      // More dramatic rise for super spike - additional boost for higher tiers
-      const spikeBoost = 
-        state.rewardTier === RewardTier.LEGENDARY ? 1.5 :
-        state.rewardTier === RewardTier.EPIC ? 1.3 : 1.0;
-      patternMultiplier = 4.0 * (1 + Math.random() * 0.5) * spikeBoost;
+    case MarketPattern.NORMAL:
+      state.momentum = state.momentum * 0.7 + (Math.random() - 0.45) * 0.4;
+      state.volatility = baseVolatility * 0.8 * tierVolatilityMultiplier;
+      state.microTrend = getRandomFloat(-0.2, 0.3);
+      state.noiseLevel = 0.3;
+      state.consolidationPhase = false;
       break;
       
     case MarketPattern.BULL_RUN:
-      patternMultiplier = 1.5 + Math.random() * 0.5;
+      const tierBoost = 
+        state.rewardTier === RewardTier.LEGENDARY ? 0.6 :
+        state.rewardTier === RewardTier.EPIC ? 0.5 :
+        state.rewardTier === RewardTier.RARE ? 0.4 : 0.3;
+      state.momentum = state.momentum * 0.6 + (Math.random() * 0.5 + tierBoost);
+      state.volatility = baseVolatility * 1.2 * tierVolatilityMultiplier;
+      state.microTrend = getRandomFloat(0.1, 0.5);
+      state.noiseLevel = 0.4;
+      state.consolidationPhase = false;
+      break;
+      
+    case MarketPattern.ACCUMULATION:
+      state.momentum = state.momentum * 0.9 + (Math.random() - 0.5) * 0.1;
+      state.volatility = baseVolatility * 0.4 * tierVolatilityMultiplier;
+      state.microTrend = getRandomFloat(-0.1, 0.1);
+      state.noiseLevel = 0.2;
+      state.consolidationPhase = true;
+      break;
+      
+    case MarketPattern.DISTRIBUTION:
+      state.momentum = state.momentum * 0.6 + (Math.random() - 0.7) * 0.4;
+      state.volatility = baseVolatility * 1.6 * tierVolatilityMultiplier;
+      state.microTrend = getRandomFloat(-0.4, 0.2);
+      state.noiseLevel = 0.6;
+      state.consolidationPhase = false;
       break;
       
     case MarketPattern.FAKEOUT:
-      // If in second half of fakeout pattern, amplify downward movement
-      if (state.patternDuration > 2) {
-        patternMultiplier = -2.5 - Math.random();
+      if (state.patternDuration < 2) {
+        state.momentum = state.momentum * 0.5 + (Math.random() * 0.6 + 0.3);
+        state.microTrend = 0.4;
       } else {
-        patternMultiplier = 2.0 + Math.random() * 0.5;
+        state.momentum = state.momentum * 0.4 + (Math.random() - 1.0) * 0.8;
+        state.microTrend = -0.6;
       }
+      state.volatility = baseVolatility * 1.8 * tierVolatilityMultiplier;
+      state.noiseLevel = 0.7;
+      state.consolidationPhase = false;
+      break;
+      
+    case MarketPattern.RUG_PULL:
+      state.momentum = state.momentum * 0.2 + (Math.random() - 1.3) * 0.9;
+      state.volatility = baseVolatility * 2.0 * tierVolatilityMultiplier;
+      state.microTrend = -0.8;
+      state.noiseLevel = 0.9;
+      state.consolidationPhase = false;
+      break;
+      
+    case MarketPattern.SUPER_SPIKE:
+      const spikeMultiplier = 
+        state.rewardTier === RewardTier.LEGENDARY ? 1.8 :
+        state.rewardTier === RewardTier.EPIC ? 1.5 : 1.2;
+      state.momentum = state.momentum * 0.5 + (Math.random() * 0.8 + 0.5) * spikeMultiplier;
+      state.volatility = baseVolatility * 1.4 * tierVolatilityMultiplier;
+      state.microTrend = 0.7;
+      state.noiseLevel = 0.5;
+      state.consolidationPhase = false;
+      break;
+      
+    case MarketPattern.CONSOLIDATION:
+      state.momentum = state.momentum * 0.95 + (Math.random() - 0.5) * 0.05;
+      state.volatility = baseVolatility * 0.3 * tierVolatilityMultiplier;
+      state.microTrend = getRandomFloat(-0.05, 0.05);
+      state.noiseLevel = 0.15;
+      state.consolidationPhase = true;
+      break;
+      
+    case MarketPattern.BREAKOUT:
+      state.momentum = state.momentum * 0.4 + (Math.random() * 0.7 + 0.4);
+      state.volatility = baseVolatility * 1.5 * tierVolatilityMultiplier;
+      state.microTrend = getRandomFloat(0.3, 0.6);
+      state.noiseLevel = 0.5;
+      state.consolidationPhase = false;
+      break;
+      
+    case MarketPattern.PULLBACK:
+      state.momentum = state.momentum * 0.6 + (Math.random() - 0.8) * 0.3;
+      state.volatility = baseVolatility * 1.1 * tierVolatilityMultiplier;
+      state.microTrend = getRandomFloat(-0.3, -0.1);
+      state.noiseLevel = 0.4;
+      state.consolidationPhase = false;
+      break;
+      
+    case MarketPattern.WHIPSAW:
+      state.momentum = (Math.random() - 0.5) * 1.2; // Completely random momentum
+      state.volatility = baseVolatility * 1.9 * tierVolatilityMultiplier;
+      state.microTrend = getRandomFloat(-0.5, 0.5);
+      state.noiseLevel = 0.8;
+      state.consolidationPhase = false;
+      break;
+      
+    case MarketPattern.PARABOLIC:
+      state.momentum = state.momentum * 0.3 + (Math.random() * 0.6 + 0.6);
+      state.volatility = baseVolatility * 1.3 * tierVolatilityMultiplier;
+      state.microTrend = getRandomFloat(0.4, 0.8);
+      state.noiseLevel = 0.4;
+      state.consolidationPhase = false;
       break;
   }
   
-  // Random noise component with occasional spikes
-  const noiseBase = (Math.random() - 0.5) * state.volatility * 0.08;
-  const noiseSpike = Math.random() < 0.1 ? (Math.random() - 0.5) * 0.1 : 0;
-  const noise = noiseBase + noiseSpike;
+  // Clamp values
+  state.momentum = Math.max(-1.2, Math.min(1.2, state.momentum));
+  state.volatility = Math.max(0.1, Math.min(2.0, state.volatility));
+  state.microTrend = Math.max(-1.0, Math.min(1.0, state.microTrend));
+  state.noiseLevel = Math.max(0.1, Math.min(1.0, state.noiseLevel));
+}
+
+// Enhanced multiplier calculation with realistic trading movements
+export const calculateNextMultiplier = (state: TradingState): number => {
+  if (state.forceRug && state.currentPattern === MarketPattern.RUG_PULL) {
+    return Math.max(0.1, state.currentMultiplier * (0.03 + Math.random() * 0.15));
+  }
+  
+  const { min: targetMin, max: targetMax } = getMultiplierRange(state.rewardTier);
+  const progressPct = state.currentCandle / state.gameDuration;
+  
+  // Enhanced volatility scaling with logarithmic dampening
+  const logScale = Math.log10(Math.max(1.01, state.currentMultiplier));
+  const volatilityScale = 1 / Math.sqrt(logScale);
+  
+  // Base percentage change with higher volatility
+  let basePercentChange = (state.volatility * 0.08) * volatilityScale;
+  
+  // Micro trend influence (short-term bias)
+  const microTrendImpact = state.microTrend * 0.02 * volatilityScale;
+  
+  // Momentum impact with enhanced scaling
+  const momentumImpact = (state.momentum * state.volatility * 0.15) * volatilityScale;
+  
+  // High-frequency noise for realistic price action
+  const highFreqNoise = (Math.random() - 0.5) * state.noiseLevel * 0.04;
+  const mediumFreqNoise = (Math.random() - 0.5) * state.volatility * 0.02;
+  
+  // Support and resistance interactions
+  let supportResistanceImpact = 0;
+  const nearestSupport = state.supportLevels.find(level => Math.abs(state.currentMultiplier - level) < 0.05);
+  const nearestResistance = state.resistanceLevels.find(level => Math.abs(state.currentMultiplier - level) < 0.05);
+  
+  if (nearestSupport && state.momentum < 0) {
+    // Bounce off support
+    supportResistanceImpact = Math.random() * 0.03;
+  } else if (nearestResistance && state.momentum > 0) {
+    // Rejection at resistance
+    supportResistanceImpact = -Math.random() * 0.02;
+  }
+  
+  // Occasional jump moves for unpredictability
+  const jumpChance = 
+    state.rewardTier === RewardTier.LEGENDARY ? 0.20 :
+    state.rewardTier === RewardTier.EPIC ? 0.15 :
+    state.rewardTier === RewardTier.RARE ? 0.12 : 0.08;
+    
+  const jumpFactor = Math.random() < jumpChance ? 
+    (Math.random() * 0.15 - 0.075) * (Math.random() > 0.6 ? 2 : 1) : 0;
+  
+  // Target gravity (pull toward target range)
+  let targetGravity = 0;
+  if (progressPct > 0.3) {
+    const gravityStrength = Math.min(0.03, (progressPct - 0.3) * 0.08);
+    
+    if (state.currentMultiplier < targetMin) {
+      targetGravity = gravityStrength;
+    } else if (state.currentMultiplier > targetMax && !state.rugPullPending) {
+      targetGravity = -gravityStrength * 0.6;
+    }
+  }
+  
+  // Pattern-specific multipliers
+  let patternMultiplier = 1.0;
+  switch (state.currentPattern) {
+    case MarketPattern.RUG_PULL:
+      patternMultiplier = -8.0 * (1 + Math.random() * 0.7);
+      break;
+    case MarketPattern.SUPER_SPIKE:
+      const spikeBoost = 
+        state.rewardTier === RewardTier.LEGENDARY ? 2.0 :
+        state.rewardTier === RewardTier.EPIC ? 1.7 : 1.3;
+      patternMultiplier = 5.0 * (1 + Math.random() * 0.8) * spikeBoost;
+      break;
+    case MarketPattern.PARABOLIC:
+      patternMultiplier = 3.0 + Math.random() * 1.5;
+      break;
+    case MarketPattern.BULL_RUN:
+      patternMultiplier = 1.8 + Math.random() * 0.7;
+      break;
+    case MarketPattern.BREAKOUT:
+      patternMultiplier = 2.2 + Math.random() * 0.8;
+      break;
+    case MarketPattern.FAKEOUT:
+      if (state.patternDuration > 2) {
+        patternMultiplier = -3.5 - Math.random() * 1.5;
+      } else {
+        patternMultiplier = 2.5 + Math.random() * 0.8;
+      }
+      break;
+    case MarketPattern.WHIPSAW:
+      patternMultiplier = (Math.random() - 0.5) * 6.0; // Extreme volatility
+      break;
+    case MarketPattern.PULLBACK:
+      patternMultiplier = -1.5 - Math.random() * 0.8;
+      break;
+    case MarketPattern.DISTRIBUTION:
+      patternMultiplier = -0.5 - Math.random() * 1.0;
+      break;
+    default:
+      patternMultiplier = 1.0;
+  }
   
   // Combine all factors
-  const totalPercentChange = (basePercentChange + momentumImpact + noise + jumpFactor + targetGravity) * patternMultiplier;
+  const totalPercentChange = (
+    basePercentChange + 
+    microTrendImpact + 
+    momentumImpact + 
+    highFreqNoise + 
+    mediumFreqNoise + 
+    jumpFactor + 
+    targetGravity + 
+    supportResistanceImpact
+  ) * patternMultiplier;
   
-  // Calculate next multiplier with percentage change
+  // Calculate next multiplier
   let nextMultiplier = state.currentMultiplier * (1 + totalPercentChange);
   
-  // Ensure multiplier doesn't go below 0.1 (game crashed)
+  // Ensure minimum value
   nextMultiplier = Math.max(0.1, nextMultiplier);
   
-  // During rug pulls, ensure the crash happens definitively
-  if (
-    state.currentPattern === MarketPattern.RUG_PULL && 
-    state.patternDuration > 1
-  ) {
-    // Force a crash by dropping to minimum multiplier - more dramatic
-    nextMultiplier = Math.min(nextMultiplier, state.currentMultiplier * (0.3 - (state.patternDuration * 0.1)));
+  // Enhanced rug pull mechanics
+  if (state.currentPattern === MarketPattern.RUG_PULL && state.patternDuration > 1) {
+    nextMultiplier = Math.min(nextMultiplier, state.currentMultiplier * (0.2 - (state.patternDuration * 0.05)));
     
-    // If we're deep into the rug pull, crash completely
-    if (state.patternDuration > 2) {
+    if (state.patternDuration > 3) {
       nextMultiplier = 0.1;
     }
   }
   
-  // Apply house edge if this is the final value
+  // Apply 40% house edge at game end
   if (state.currentCandle >= state.gameDuration - 1 && !state.houseEdgeApplied) {
-    nextMultiplier = applyHouseEdge(nextMultiplier, state.rewardTier);
+    nextMultiplier = applyHouseEdge(nextMultiplier);
     state.houseEdgeApplied = true;
   }
   
   return nextMultiplier;
 };
 
-// Generate a new candle based on the current state
+// Enhanced candle generation with realistic trading patterns
 export const generateCandle = (state: TradingState): { candle: Candle, newState: TradingState } => {
-  // Update game state
   const updatedState = updateGameState(state);
-  
-  // Calculate next multiplier
   const multiplier = calculateNextMultiplier(updatedState);
   
-  // Base candle data
   const open = updatedState.prevCandleClose || 1.0;
   const close = multiplier;
   
-  // Generate wick length based on volatility and pattern
-  const wickFactor = updatedState.volatility * (
-    updatedState.currentPattern === MarketPattern.RUG_PULL ? 2.0 :
-    updatedState.currentPattern === MarketPattern.SUPER_SPIKE ? 1.8 :
-    1.2
+  // Enhanced wick calculation based on pattern and volatility
+  const baseWickFactor = updatedState.volatility * (
+    updatedState.currentPattern === MarketPattern.RUG_PULL ? 3.0 :
+    updatedState.currentPattern === MarketPattern.WHIPSAW ? 2.5 :
+    updatedState.currentPattern === MarketPattern.DISTRIBUTION ? 2.2 :
+    updatedState.currentPattern === MarketPattern.SUPER_SPIKE ? 2.0 :
+    updatedState.currentPattern === MarketPattern.FAKEOUT ? 1.8 :
+    1.3
   );
   
-  // Determine high and low with asymmetric distribution based on direction
   let highWick, lowWick;
   
-  // Special case for forced rug pull - make a VERY long red candle starting from the last candle
   if (updatedState.forceRug && updatedState.currentPattern === MarketPattern.RUG_PULL) {
-    // Create a dramatic long red candle starting from the last open price
-    highWick = Math.abs(open - close) * 0.1; // Minimal upper wick
-    lowWick = Math.abs(open - close) * 4.0;  // Very long lower wick - more dramatic
+    // Dramatic rug pull candle
+    highWick = Math.abs(open - close) * 0.05;
+    lowWick = Math.abs(open - close) * 6.0;
+  } else if (updatedState.currentPattern === MarketPattern.WHIPSAW) {
+    // Extreme wicks for whipsaw pattern
+    highWick = Math.abs(close - open) * (2 + Math.random() * baseWickFactor * 2);
+    lowWick = Math.abs(close - open) * (2 + Math.random() * baseWickFactor * 2);
   } else if (close > open) {
-    // Uptrend - longer upper wick
-    highWick = Math.abs(close - open) * (1 + Math.random() * wickFactor * 1.5);
-    lowWick = Math.abs(close - open) * (0.4 + Math.random() * wickFactor * 0.7);
+    // Bullish candle with asymmetric wicks
+    highWick = Math.abs(close - open) * (0.5 + Math.random() * baseWickFactor * 1.8);
+    lowWick = Math.abs(close - open) * (0.2 + Math.random() * baseWickFactor * 0.9);
   } else {
-    // Downtrend - longer lower wick
-    highWick = Math.abs(close - open) * (0.4 + Math.random() * wickFactor * 0.7);
-    lowWick = Math.abs(close - open) * (1 + Math.random() * wickFactor * 1.5);
+    // Bearish candle with asymmetric wicks
+    highWick = Math.abs(close - open) * (0.2 + Math.random() * baseWickFactor * 0.9);
+    lowWick = Math.abs(close - open) * (0.5 + Math.random() * baseWickFactor * 1.8);
   }
   
-  // Calculate final high and low while ensuring they make sense
+  // Add extra volatility for certain patterns
+  if (updatedState.currentPattern === MarketPattern.DISTRIBUTION || 
+      updatedState.currentPattern === MarketPattern.FAKEOUT) {
+    highWick *= (1 + Math.random() * 0.5);
+    lowWick *= (1 + Math.random() * 0.5);
+  }
+  
   const high = Math.max(open, close) + highWick;
   const low = Math.max(0.1, Math.min(open, close) - lowWick);
   
-  // Update state with new close price
   updatedState.prevCandleClose = close;
   updatedState.currentMultiplier = close;
   
-  // Create candle
   const candle: Candle = {
     timestamp: new Date().toISOString(),
-    open,
-    high,
-    low,
-    close,
-    volume: Math.random() * 1000 + 500 // Fake volume
+    open: Number(open.toFixed(4)),
+    high: Number(high.toFixed(4)),
+    low: Number(low.toFixed(4)),
+    close: Number(close.toFixed(4)),
+    volume: Math.random() * 1500 + 700 // Higher volume variance
   };
   
   return { candle, newState: updatedState };
 };
 
-// Check if the game has crashed (for triggering reset)
+// Other utility functions remain the same but with updated house edge
+export const addPlayerBet = (state: TradingState, betAmount: number, walletBalance: number): TradingState => {
+  const newState = { ...state };
+  newState.playerBetsSum += betAmount;
+  newState.betsSinceLastRug += 1;
+  
+  newState.traderProfile = determineTraderProfile(betAmount, walletBalance, newState.consecutiveLosses);
+  
+  const rugPullModifier = newState.traderProfile === TraderProfile.YOLO ? 1.5 : 
+                          newState.traderProfile === TraderProfile.TILT ? 2.0 : 1.0;
+                          
+  if (newState.playerBetsSum > newState.rugPullThreshold * rugPullModifier || 
+      newState.betsSinceLastRug > 10) {
+    newState.rugPullPending = Math.random() < (
+      (newState.playerBetsSum / (newState.rugPullThreshold * 2)) * rugPullModifier + 
+      newState.betsSinceLastRug / 20
+    );
+  }
+  
+  return newState;
+};
+
 export const hasGameCrashed = (state: TradingState): boolean => {
   return (
-    state.currentMultiplier <= 0.2 || // Multiplier below threshold
-    (state.currentPattern === MarketPattern.RUG_PULL && state.patternDuration >= 3) || // Completed rug pull
-    (state.forceRug && state.currentPattern === MarketPattern.RUG_PULL) // Forced rug pull
+    state.currentMultiplier <= 0.2 || 
+    (state.currentPattern === MarketPattern.RUG_PULL && state.patternDuration >= 3) || 
+    (state.forceRug && state.currentPattern === MarketPattern.RUG_PULL)
   );
 };
 
-// Get final game outcome
 export const getFinalGameOutcome = (state: TradingState, betAmount: number): GameOutcome => {
-  // Calculate house edge
-  const houseEdgePercent = state.rewardTier === RewardTier.LEGENDARY ? 15 :
-                         state.rewardTier === RewardTier.EPIC ? 10 :
-                         state.rewardTier === RewardTier.RARE ? 8 :
-                         state.rewardTier === RewardTier.UNCOMMON ? 5 : 2;
-                         
-  // Apply house edge to final payout
-  const finalMultiplier = applyHouseEdge(state.currentMultiplier, state.rewardTier);
-  
-  // Calculate final payout
+  const houseEdgePercent = 40; // Fixed 40% house edge
+  const finalMultiplier = applyHouseEdge(state.currentMultiplier);
   const finalPayout = betAmount * finalMultiplier;
   
   return {
@@ -706,7 +763,6 @@ export const getFinalGameOutcome = (state: TradingState, betAmount: number): Gam
   };
 };
 
-// Reset game state for a new round
 export const resetGameState = (betAmount = 0, walletBalance = 1, consecutiveLosses = 0): TradingState => {
   const state = createInitialTradingState(betAmount, walletBalance);
   state.consecutiveLosses = consecutiveLosses;

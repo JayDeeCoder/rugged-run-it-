@@ -32,6 +32,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   const [userBet, setUserBet] = useState<number>(0);
   const [betEntryMultiplier, setBetEntryMultiplier] = useState<number>(1.0);
   const [lastGameNumber, setLastGameNumber] = useState<number>(0);
+  const [userCashedOut, setUserCashedOut] = useState<boolean>(false); // NEW: Track if user cashed out
   
   // Create a reference to the chart container
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -148,6 +149,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     if (currentGame.gameNumber !== lastGameNumber) {
       setUserBet(0);
       setBetEntryMultiplier(1.0);
+      setUserCashedOut(false); // Reset cashout flag for new game
       setLastGameNumber(currentGame.gameNumber);
     }
 
@@ -174,6 +176,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         // Reset user bet
         setUserBet(0);
         setBetEntryMultiplier(1.0);
+        setUserCashedOut(false); // Reset cashout flag
       }
     }
   }, [currentGame, lastGameNumber, userBet]);
@@ -304,6 +307,9 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         // Calculate payout if not provided by server
         const finalPayout = payout || (userBet * currentMultiplier * 0.6); // 40% house edge
         
+        // Mark that user cashed out
+        setUserCashedOut(true);
+        
         // Create sell order for local tracking
         const order: Order = {
           side: 'sell',
@@ -329,6 +335,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         // Reset user bet since we cashed out
         setUserBet(0);
         setBetEntryMultiplier(1.0);
+        setUserCashedOut(false); // Reset cashout flag for next bet
         
         const profit = finalPayout - userBet;
         toast.success(`Cashed out: +${profit.toFixed(3)} SOL (${finalPayout.toFixed(3)} total)`);
@@ -362,12 +369,12 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   
   const gameStats = calculateGameStats();
 
-  // Calculate chart height based on viewport size - SMALLER for mobile
+  // Calculate chart height based on viewport size - COMPACT SIZE
   const getChartHeight = () => {
     if (useMobileHeight && isMobile) {
-      return 240; // Reduced from 300
+      return 240; // Back to 240px - perfect UI size
     }
-    return isMobile ? 280 : 500; // Reduced mobile from 350
+    return isMobile ? 260 : 500; // Mobile max 260px
   };
 
   // Real game data from server
@@ -480,6 +487,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
             serverMultiplier={currentMultiplier}
             serverGameStatus={gameStatus}
             isServerConnected={isConnected}
+            didCashOut={userCashedOut} // NEW: Pass cashout flag
           />
 
           {triggerSellEffect && (

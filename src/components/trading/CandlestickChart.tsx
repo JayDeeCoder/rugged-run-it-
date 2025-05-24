@@ -37,38 +37,9 @@ const calculateYScale = (candles: Candle[], currentMultiplier: number) => {
   const maxValue = Math.max(...allValues);
   const minValue = Math.min(...allValues);
   
-  // Smart scaling to keep older candlesticks visible
-  let min, max;
-  
-  if (maxValue <= 10) {
-    // Low multipliers: use standard scaling
-    const padding = 0.2;
-    max = maxValue * (1 + padding);
-    min = Math.max(minValue * (1 - padding), 0.5);
-  } else if (maxValue <= 50) {
-    // Medium-high multipliers: use progressive scaling
-    // Ensure minimum range covers at least first few multipliers
-    const minRange = Math.max(minValue * 0.7, 0.8);
-    const maxRange = maxValue * 1.15;
-    
-    // Keep at least 25% of chart for lower values
-    const chartRatio = 0.25;
-    const adjustedMin = Math.max(minRange, maxRange * chartRatio / 4);
-    
-    min = adjustedMin;
-    max = maxRange;
-  } else {
-    // Very high multipliers: logarithmic-style scaling
-    // Always reserve bottom 30% of chart for 1x-10x range
-    const baseRange = 10; // Always show up to 10x clearly
-    const chartReserveRatio = 0.3;
-    
-    // Calculate what 30% of max should be to fit baseRange
-    const scaledMax = baseRange / chartReserveRatio;
-    
-    min = 0.8;
-    max = Math.max(scaledMax, maxValue * 1.1);
-  }
+  const padding = 0.2;
+  const max = maxValue * (1 + padding);
+  const min = Math.max(minValue * (1 - padding), 0.5);
   
   return { min, max };
 };
@@ -162,74 +133,21 @@ const CandlestickSVG: FC<{
         </>
       )}
       
-      {/* Y-axis labels with dynamic scaling */}
-      {(() => {
-        const labelCount = 8; // More labels for better reference
-        const labels = [];
-        
-        for (let i = 0; i <= labelCount; i++) {
-          const ratio = i / labelCount;
-          const yPos = height * ratio;
-          const priceValue = minValue + (maxValue - minValue) * (1 - ratio);
-          
-          // Color code labels based on value ranges
-          let labelColor = 'rgba(255, 255, 255, 0.6)';
-          let labelWeight = 'normal';
-          
-          if (priceValue <= 1.1 && priceValue >= 0.9) {
-            labelColor = '#FFFFFF'; // White for 1x range
-            labelWeight = 'bold';
-          } else if (priceValue >= 2 && priceValue <= 10) {
-            labelColor = '#22D3EE'; // Cyan for early multipliers
-          } else if (priceValue > 10) {
-            labelColor = '#F97316'; // Orange for high multipliers
-          }
-          
-          labels.push(
-            <text 
-              key={`price-${i}`}
-              x={5} 
-              y={yPos + 4} 
-              fontSize={10} 
-              fontWeight={labelWeight}
-              fill={labelColor}
-            >
-              {priceValue >= 10 ? priceValue.toFixed(0) : priceValue.toFixed(2)}x
-            </text>
-          );
-        }
-        
-        return labels;
-      })()}
-      
-      {/* Special markers for key multiplier levels */}
-      {[2, 5, 10, 20, 50].map((multiplier) => {
-        if (multiplier >= minValue && multiplier <= maxValue) {
-          const yPos = height - ((multiplier - minValue) / (maxValue - minValue)) * height;
-          return (
-            <g key={`marker-${multiplier}`}>
-              <line 
-                x1={0} 
-                y1={yPos} 
-                x2={width} 
-                y2={yPos} 
-                stroke={multiplier <= 10 ? "rgba(34, 211, 238, 0.3)" : "rgba(249, 115, 22, 0.3)"} 
-                strokeWidth={1}
-                strokeDasharray="2,4"
-              />
-              <text 
-                x={width - 35} 
-                y={yPos - 3} 
-                fontSize={9} 
-                fontWeight="bold"
-                fill={multiplier <= 10 ? "#22D3EE" : "#F97316"}
-              >
-                {multiplier}x
-              </text>
-            </g>
-          );
-        }
-        return null;
+      {/* Y-axis labels */}
+      {[0.2, 0.4, 0.6, 0.8, 1].map((ratio, i) => {
+        const yPos = height * ratio;
+        const priceValue = minValue + (maxValue - minValue) * (1 - ratio);
+        return (
+          <text 
+            key={`price-${i}`}
+            x={5} 
+            y={yPos - 5} 
+            fontSize={10} 
+            fill="rgba(255, 255, 255, 0.6)"
+          >
+            {priceValue.toFixed(2)}x
+          </text>
+        );
       })}
       
       {/* Candles */}
@@ -490,20 +408,8 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
       
       setCandleData(prev => {
         const updatedCandles = [...prev, candle];
-        
-        // ✨ IMPROVED: Keep more historical data for better chart context
-        // Instead of fixed maxCandles, use dynamic management
-        const maxHistoricalCandles = Math.max(maxCandles * 2, 30); // Keep at least 30 candles
-        
-        if (updatedCandles.length > maxHistoricalCandles) {
-          // Remove older candles but keep some early ones for context
-          const keepEarly = Math.floor(maxHistoricalCandles * 0.2); // Keep 20% of early candles
-          const keepRecent = maxHistoricalCandles - keepEarly;
-          
-          const earlyCandles = updatedCandles.slice(0, keepEarly);
-          const recentCandles = updatedCandles.slice(-keepRecent);
-          
-          return [...earlyCandles, ...recentCandles];
+        if (updatedCandles.length > maxCandles) {
+          return updatedCandles.slice(-maxCandles);
         }
         return updatedCandles;
       });

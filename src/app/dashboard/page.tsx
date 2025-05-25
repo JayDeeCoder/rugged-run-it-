@@ -413,7 +413,7 @@ const Dashboard: FC = () => {
                 className="block w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors text-center"
               >
                 <GamepadIcon size={20} className="inline mr-2" />
-                Play Crash Game
+                Play RUGGED 
               </Link>
               <Link 
                 href="/leaderboard" 

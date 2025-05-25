@@ -230,7 +230,7 @@ const MiniCandlestickChart: FC<MiniCandlestickChartProps> = ({ multiplier, candl
       {/* Crash marker */}
       {isCrash && (
         <text x="20" y="20" textAnchor="middle" fontSize="8" fill="#ef4444" fontWeight="bold">
-          CRASH
+          RUGGED
         </text>
       )}
       

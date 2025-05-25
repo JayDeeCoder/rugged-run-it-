@@ -85,7 +85,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
     // Enhanced connection with automatic reconnection
     useEffect(() => {
-        const serverUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'wss://cb85-3-16-49-236.ngrok-free.app';
+        const serverUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'wss://db61-3-16-49-236.ngrok-free.app';
         console.log('🔍 Connecting to enhanced game server:', serverUrl);
         
         const newSocket = io(serverUrl, {

@@ -173,7 +173,7 @@ const CompactGameInfo: FC<{
           </div>
           <div>
             <span className="block text-gray-500">Total</span>
-            <span className="text-white">{(game.totalBets || 0).toFixed(2)} SOL</span>
+            <span className="text-white">{(game.totalBets || 0).toFixed(2)} liq</span>
           </div>
         </div>
       )}
@@ -181,7 +181,7 @@ const CompactGameInfo: FC<{
       {showCountdown && countdown > 0 && (
         <div className="text-center mt-2 p-2 bg-blue-900 bg-opacity-30 rounded">
           <div className="text-blue-400 text-sm">Starting in {Math.ceil(countdown / 1000)}s</div>
-          <div className="text-xs text-gray-400">Pre-game betting open!</div>
+          <div className="text-xs text-gray-400">Snipe Now!</div>
         </div>
       )}
     </div>
@@ -404,7 +404,7 @@ const AutoCashoutSection: FC<{
       >
         <div className="flex items-center space-x-2">
           <div className={`h-3 w-3 rounded-full ${autoCashoutEnabled ? 'bg-green-500' : 'bg-gray-600'}`}></div>
-          <span className="text-gray-300 text-sm">Auto Cashout</span>
+          <span className="text-gray-300 text-sm">Auto RUG</span>
         </div>
         <div className="flex items-center space-x-2">
           <span className="text-gray-400 text-sm">
@@ -417,7 +417,7 @@ const AutoCashoutSection: FC<{
       {showExpanded && (
         <div className="bg-gray-800 p-3 rounded-lg mt-1">
           <div className="flex items-center justify-between mb-3">
-            <label className="text-gray-300 text-sm">Enable Auto Cashout</label>
+            <label className="text-gray-300 text-sm">Enable Auto RUG</label>
             <div className="relative inline-block w-10 h-5">
               <input
                 type="checkbox"
@@ -443,7 +443,7 @@ const AutoCashoutSection: FC<{
           
           <div className="mb-3">
             <label className="block text-gray-300 text-sm mb-1">
-              Cashout at Multiplier
+              RUG at Multiplier
             </label>
             <div className="flex">
               <input
@@ -499,7 +499,7 @@ const ActiveBetDisplay: FC<{
   return (
     <div className="bg-blue-900 bg-opacity-30 p-3 rounded-lg mb-3">
       <div className="text-center">
-        <div className="text-sm text-blue-400 mb-1">Active Bet</div>
+        <div className="text-sm text-blue-400 mb-1">Active Buy</div>
         <div className="text-lg font-bold text-blue-300">
           {bet.amount} SOL @ {bet.entryMultiplier.toFixed(2)}x
         </div>
@@ -662,7 +662,7 @@ const BettingSection: FC<{
                 className="py-2.5 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
               >
                 <Coins className="mr-1 h-4 w-4" />
-                Bet Active
+                Buy Active
               </button>
               <button
                 onClick={onCashout}
@@ -702,7 +702,7 @@ const BettingSection: FC<{
         <>
           <div className="mb-3">
             <label className="block text-gray-400 text-xs mb-1">
-              Bet Amount ({currentToken}) - Min: {minBetAmount}, Max: {maxBetAmount}
+              Buy Amount ({currentToken}) - Min: {minBetAmount}, Max: {maxBetAmount}
             </label>
             <div className="flex">
               <input
@@ -792,7 +792,7 @@ const BettingSection: FC<{
               className="py-3 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
             >
               <Coins className="mr-2 h-4 w-4" />
-              Bet Placed
+              Buy Placed
             </button>
             <button
               onClick={onCashout}

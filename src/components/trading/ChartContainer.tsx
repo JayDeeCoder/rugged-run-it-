@@ -452,7 +452,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs'} text-gray-400`}>
           <div className="flex justify-between">
             <span>Players: {currentGame.totalPlayers || 0}</span>
-            <span>Total Bets: {(currentGame.totalBets || 0).toFixed(3)} SOL</span>
+            <span>Total Liq: {(currentGame.totalBets || 0).toFixed(3)} SOL</span>
             {showCountdown && <span className="text-blue-400">Next: {countdownSeconds}s</span>}
           </div>
         </div>

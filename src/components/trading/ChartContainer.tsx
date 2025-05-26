@@ -408,7 +408,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
           }`}>
             {!isConnected ? 'OFFLINE' :
              gameStatus === 'active' ? 'ACTIVE' : 
-             gameStatus === 'crashed' ? 'CRASHED' : 
+             gameStatus === 'crashed' ? 'RUGGED' : 
              gameStatus === 'waiting' ? 'WAITING' : 'UNKNOWN'}
           </span>
         </div>
@@ -428,7 +428,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
           <span className="text-green-400 ml-1 font-bold">{walletBalance.toFixed(3)}</span>
         </div>
         <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
-          <span className="text-gray-400">Bet:</span>
+          <span className="text-gray-400">Ape:</span>
           <span className={`ml-1 font-bold ${userBet > 0 ? 'text-blue-400' : 'text-gray-400'}`}>
             {userBet > 0 ? userBet.toFixed(3) : '0.000'}
           </span>

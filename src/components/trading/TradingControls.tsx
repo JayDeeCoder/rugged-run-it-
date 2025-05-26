@@ -643,7 +643,7 @@ const BettingSection: FC<{
                 ) : (
                   <>
                     <Coins className="mr-1 h-4 w-4" />
-                    {isWaitingPeriod ? 'SNIPE' : 'Bet'}
+                    {isWaitingPeriod ? 'SNIPE' : 'BUY'}
                   </>
                 )}
               </button>

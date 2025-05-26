@@ -129,7 +129,7 @@ const CompactGameInfo: FC<{
             <span>#{game.gameNumber}</span>
             <div className="flex space-x-3">
               <span>{game.totalPlayers || 0} players</span>
-              <span>{(game.totalBets || 0).toFixed(2)} SOL</span>
+              <span>{(game.totalBets || 0).toFixed(2)} LIQ</span>
             </div>
           </div>
         )}

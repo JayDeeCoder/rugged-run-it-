@@ -228,8 +228,8 @@ export const useEmbeddedWallet = () => {
       toast.success(`Bet of ${amount} SOL placed successfully!`);
       return result;
     } catch (error) {
-      console.error('Error placing bet:', error);
-      toast.error('Failed to place bet');
+      console.error('Error placing buy:', error);
+      toast.error('Failed to place buy');
       throw error;
     }
   };

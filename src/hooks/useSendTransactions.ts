@@ -102,7 +102,7 @@ export const useSendTransaction = () => {
       // For now, we'll just simulate by sending SOL to the game contract address
       return await sendSol(gameContractAddress, amount);
     } catch (error) {
-      console.error('Failed to place bet:', error);
+      console.error('Failed to place buy:', error);
       throw error;
     }
   };

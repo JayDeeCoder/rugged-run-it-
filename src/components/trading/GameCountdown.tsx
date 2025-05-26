@@ -124,7 +124,7 @@ const GameCountdown: FC<GameCountdownProps> = ({
           {isServerSynced && countdown > 0 && countdown <= 8 && (
             <div className="mt-3 text-center">
               <div className="text-lg text-green-400 font-dynapuff">
-                🎯 Pre-Game Betting Open!
+                🎯 Snipe Now!
               </div>
             </div>
           )}

@@ -193,7 +193,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (!gameState.isActive || !gameState.gameId) {
-      toast.error('No active game to cash out from!');
+      toast.error('No active game to RUG from!');
       return;
     }
 
@@ -232,8 +232,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       toast.success(`Cashed out at ${gameState.currentMultiplier.toFixed(2)}x!`);
     } catch (err) {
-      setError(err instanceof Error ? err : new Error('Failed to cash out'));
-      toast.error('Failed to cash out!');
+      setError(err instanceof Error ? err : new Error('Failed to RUG'));
+      toast.error('Failed to RUG!');
     } finally {
       setIsLoading(false);
     }

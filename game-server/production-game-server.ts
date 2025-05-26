@@ -713,7 +713,7 @@ async function placeBet(walletAddress: string, betAmount: number, userId?: strin
     }
 
     if (currentGame.status === 'waiting' && countdownTimeRemaining <= 2) {
-        return { success: false, reason: 'Too late to place bet - game starting soon' };
+        return { success: false, reason: 'Too late to Buy - game starting soon' };
     }
 
     if (betAmount < GAME_CONFIG.MIN_BET || betAmount > GAME_CONFIG.MAX_BET) {

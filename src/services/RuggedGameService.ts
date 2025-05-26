@@ -175,9 +175,9 @@ export class RuggedGameService {
       
       // Show error notification
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      toast.error(`Failed to place bet: ${errorMessage}`);
+      toast.error(`Failed to place buy: ${errorMessage}`);
       
-      throw new Error(`Failed to place bet: ${errorMessage}`);
+      throw new Error(`Failed to place buy: ${errorMessage}`);
     }
   }
   
@@ -253,8 +253,8 @@ export class RuggedGameService {
     } catch (error) {
       console.error('Error cashing out:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      toast.error(`Failed to cash out: ${errorMessage}`);
-      throw new Error(`Failed to cash out: ${errorMessage}`);
+      toast.error(`Failed to RUG: ${errorMessage}`);
+      throw new Error(`Failed to RUG: ${errorMessage}`);
     }
   }
   

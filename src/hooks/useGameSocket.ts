@@ -398,21 +398,21 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     const placeBet = useCallback(async (walletAddress: string, amount: number, userId?: string): Promise<boolean> => {
         return new Promise((resolve) => {
             if (!socket || !isConnected || !currentGame) {
-                console.log('Cannot place bet: no socket, connection, or game');
+                console.log('Cannot place buy: no socket, connection, or game');
                 resolve(false);
                 return;
             }
 
             // NEW: Allow betting during waiting period and active games
             if (currentGame.status !== 'active' && currentGame.status !== 'waiting') {
-                console.log('Cannot place bet: game status is', currentGame.status);
+                console.log('Cannot place buy: game status is', currentGame.status);
                 resolve(false);
                 return;
             }
 
             // NEW: Check if betting is allowed (not in last 2 seconds of countdown)
             if (!canBet) {
-                console.log('Cannot place bet: betting not allowed (too close to game start)');
+                console.log('Cannot place buy: betting not allowed (too close to game start)');
                 resolve(false);
                 return;
             }

@@ -643,7 +643,7 @@ const BettingSection: FC<{
                 ) : (
                   <>
                     <Coins className="mr-1 h-4 w-4" />
-                    {isWaitingPeriod ? 'Pre-Bet' : 'Bet'}
+                    {isWaitingPeriod ? 'SNIPE' : 'Bet'}
                   </>
                 )}
               </button>
@@ -652,7 +652,7 @@ const BettingSection: FC<{
                 className="py-2.5 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
               >
                 <Sparkles className="mr-1 h-4 w-4" />
-                Cash Out
+                RUG
               </button>
             </>
           ) : (
@@ -681,7 +681,7 @@ const BettingSection: FC<{
                 ) : (
                   <>
                     <Sparkles className="mr-1 h-4 w-4" />
-                    Cash Out
+                    RUG
                   </>
                 )}
               </button>
@@ -695,7 +695,7 @@ const BettingSection: FC<{
   return (
     <div className="border-t border-gray-800 pt-3">
       <h3 className="text-sm font-bold text-gray-400 mb-3">
-        {activeBet ? 'ACTIVE BET' : 'PLACE BET'}
+        {activeBet ? 'ACTIVE BET' : 'PLACE BUY'}
       </h3>
       
       {!activeBet && (
@@ -773,7 +773,7 @@ const BettingSection: FC<{
               ) : (
                 <>
                   <Coins className="mr-2 h-4 w-4" />
-                  {isWaitingPeriod ? 'Pre-Bet' : 'Place Bet'}
+                  {isWaitingPeriod ? 'SNIPE' : 'BUY'}
                 </>
               )}
             </button>
@@ -782,7 +782,7 @@ const BettingSection: FC<{
               className="py-3 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
             >
               <Sparkles className="mr-2 h-4 w-4" />
-              Cash Out
+              RUG
             </button>
           </>
         ) : (
@@ -811,7 +811,7 @@ const BettingSection: FC<{
               ) : (
                 <>
                   <Sparkles className="mr-2 h-4 w-4" />
-                  Cash Out ({currentMultiplier.toFixed(2)}x)
+                  RUG ({currentMultiplier.toFixed(2)}x)
                 </>
               )}
             </button>
@@ -866,15 +866,15 @@ const StatusMessages: FC<{
     }
     
     if (isWaitingPeriod && canBet) {
-      return { text: `Pre-game betting open - ${countdownSeconds}s remaining`, icon: Timer, color: 'text-blue-500' };
+      return { text: `SNIPE NOW - ${countdownSeconds}s remaining`, icon: Timer, color: 'text-blue-500' };
     }
     
     if (isWaitingPeriod && !canBet) {
-      return { text: 'Too late to bet - Game starting now!', icon: AlertCircle, color: 'text-red-500' };
+      return { text: 'Too late to buy - Game starting now!', icon: AlertCircle, color: 'text-red-500' };
     }
     
     if (gameStatus === 'active' && !activeBet) {
-      return { text: `Game active - Place bet now at ${currentMultiplier.toFixed(2)}x`, icon: Timer, color: 'text-green-500' };
+      return { text: `Game active - Place buy now at ${currentMultiplier.toFixed(2)}x`, icon: Timer, color: 'text-green-500' };
     }
     
     if (gameStatus === 'crashed') {
@@ -1040,13 +1040,13 @@ const TradingControls: FC<TradingControlsProps> = ({
         toast.success('Cashed out successfully!');
         if (onSell) onSell(100);
       } else {
-        setServerError('Failed to cash out');
-        toast.error('Failed to cash out');
+        setServerError('Failed to RUG');
+        toast.error('Failed to RUG');
       }
     } catch (error) {
       console.error('Error cashing out:', error);
-      setServerError('Failed to cash out');
-      toast.error('Failed to cash out');
+      setServerError('Failed to RUG');
+      toast.error('Failed to RUG');
     } finally {
       setIsCashingOut(false);
     }
@@ -1110,7 +1110,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     // Clear previous errors
     setServerError('');
     
-    console.log('🎯 Attempting to place bet:', {
+    console.log('🎯 Attempting to place buy:', {
       amount: amountNum,
       walletAddress,
       userId,
@@ -1207,14 +1207,14 @@ const TradingControls: FC<TradingControlsProps> = ({
         
         if (onBuy) onBuy(amountNum);
       } else {
-        const errorMsg = 'Failed to place bet - server returned false';
+        const errorMsg = 'Failed to place buy - server returned false';
         console.log('❌ Bet placement failed:', errorMsg);
         setServerError(errorMsg);
         toast.error(errorMsg);
       }
     } catch (error) {
       console.error('❌ Error placing bet:', error);
-      const errorMsg = `Failed to place bet: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      const errorMsg = `Failed to place buy: ${error instanceof Error ? error.message : 'Unknown error'}`;
       setServerError(errorMsg);
       toast.error(errorMsg);
     } finally {

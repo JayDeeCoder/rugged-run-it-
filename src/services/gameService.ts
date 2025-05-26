@@ -102,7 +102,7 @@ class GameService {
       return gameState;
     } catch (error) {
       logger.error('Error placing bet:', error);
-      throw new Error('Failed to place bet');
+      throw new Error('Failed to place buy');
     }
   }
 

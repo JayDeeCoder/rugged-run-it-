@@ -193,13 +193,13 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   // ENHANCED: Real server bet placement with result tracking
   const handleBuy = useCallback(async (amount: number) => {
     if (amount <= 0 || amount > walletBalance || !currentGame || !isMountedRef.current) {
-      toast.error('Cannot place bet right now');
+      toast.error('Cannot buy right now');
       return;
     }
 
     // Allow betting during waiting period OR active game
     if (currentGame.status !== 'active' && currentGame.status !== 'waiting') {
-      toast.error('Game not available for betting');
+      toast.error('Game not available');
       return;
     }
 
@@ -252,11 +252,11 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         const betType = currentGame.status === 'waiting' ? 'Pre-game bet' : 'Live bet';
         toast.success(`${betType} placed: ${amount} SOL @ ${entryMultiplier.toFixed(2)}x`);
       } else {
-        toast.error(reason || 'Failed to place bet on server');
+        toast.error(reason || 'Failed to place buy on server');
       }
     } catch (error) {
-      console.error('Failed to place bet:', error);
-      toast.error('Failed to place bet');
+      console.error('Failed to place buy:', error);
+      toast.error('Failed to place buy');
     } finally {
       if (isMountedRef.current) {
         setIsPlacingBet(false);
@@ -267,7 +267,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   // ENHANCED: Real server cashout with server result tracking
   const handleSell = useCallback(async (percentage: number) => {
     if (userBet <= 0 || !currentGame || currentGame.status !== 'active' || !isMountedRef.current) {
-      toast.error('No active bet to cash out');
+      toast.error('No active bet to RUG');
       return;
     }
 
@@ -342,11 +342,11 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         const profit = finalPayout - userBet;
         toast.success(`Cashed out: +${profit.toFixed(3)} SOL (${finalPayout.toFixed(3)} total)`);
       } else {
-        toast.error(reason || 'Failed to cash out on server');
+        toast.error(reason || 'Failed to RUG on server');
       }
     } catch (error) {
-      console.error('Failed to cash out:', error);
-      toast.error('Failed to cash out');
+      console.error('Failed to RUG:', error);
+      toast.error('Failed to RUG');
     } finally {
       if (isMountedRef.current) {
         setIsCashingOut(false);

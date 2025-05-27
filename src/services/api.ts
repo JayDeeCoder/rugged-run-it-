@@ -14,7 +14,7 @@ if (!supabaseUrl || !supabaseKey) {
 export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseKey);
 
 // Game server WebSocket connection
-const GAME_SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'wss://cb85-3-16-49-236.ngrok-free.app';
+const GAME_SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL || '';
 
 // Types
 export interface GameState {

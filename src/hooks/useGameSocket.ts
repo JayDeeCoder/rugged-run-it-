@@ -1,4 +1,5 @@
 // Enhanced useGameSocket hook with pre-game betting and countdown support
+// + Fixed connection issues
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
@@ -54,6 +55,10 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     const [isWaitingPeriod, setIsWaitingPeriod] = useState<boolean>(false);
     const [canBet, setCanBet] = useState<boolean>(false);
     
+    // NEW: Connection debugging state
+    const [connectionError, setConnectionError] = useState<string | null>(null);
+    const [connectionAttempts, setConnectionAttempts] = useState(0);
+    
     // Existing sync state
     const [serverTimeOffset, setServerTimeOffset] = useState(0);
     const gameStateRef = useRef<GameState | null>(null);
@@ -85,27 +90,90 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
     // Enhanced connection with automatic reconnection
     useEffect(() => {
+        // FIXED: Better URL resolution and debugging
         const serverUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'wss://1741-3-16-49-236.ngrok-free.app';
-        console.log('🔍 Connecting to enhanced game server:', serverUrl);
+        
+        // FIXED: Add detailed logging
+        console.log('🔍 Environment check:');
+        console.log('  - NODE_ENV:', process.env.NODE_ENV);
+        console.log('  - NEXT_PUBLIC_GAME_SERVER_URL:', process.env.NEXT_PUBLIC_GAME_SERVER_URL);
+        console.log('  - Final server URL:', serverUrl);
+        console.log('  - Wallet Address:', walletAddress);
+        
+        setConnectionAttempts(prev => prev + 1);
+        setConnectionError(null);
         
         const newSocket = io(serverUrl, {
-            transports: ['websocket'],
-            timeout: 10000,
+            // FIXED: Add polling as fallback transport
+            transports: ['websocket', 'polling'],
+            timeout: 20000, // FIXED: Increased timeout
             reconnection: true,
             reconnectionAttempts: 5,
             reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            // FIXED: Add additional options for better compatibility
+            forceNew: true,
+            upgrade: true,
+            rememberUpgrade: false, // Always try websocket first
         });
 
-        // Enhanced connection handler
+        // Enhanced connection handler with better error handling
         newSocket.on('connect', () => {
-            console.log('Connected to enhanced game server');
+            console.log('✅ Connected to enhanced game server');
+            console.log('  - Transport:', newSocket.io.engine.transport.name);
+            console.log('  - Socket ID:', newSocket.id);
             setIsConnected(true);
+            setConnectionError(null);
+            setConnectionAttempts(0);
             newSocket.emit('requestGameSync');
+        });
+
+        // FIXED: Enhanced error handling
+        newSocket.on('connect_error', (error) => {
+            console.error('❌ Connection error:', error);
+            console.error('  - Error message:', error.message);
+            console.error('  - Error type:', (error as any).type || 'unknown');
+            console.error('  - Connection attempts:', connectionAttempts);
+            
+            setIsConnected(false);
+            setCanBet(false);
+            setConnectionError(`Connection failed: ${error.message}`);
+            
+            // FIXED: Try different transports on repeated failures
+            if (connectionAttempts >= 2) {
+                console.log('🔄 Switching to polling transport only...');
+                newSocket.io.opts.transports = ['polling'];
+            }
+        });
+
+        // FIXED: Better disconnect handling
+        newSocket.on('disconnect', (reason, details) => {
+            console.log('🔌 Disconnected from game server');
+            console.log('  - Reason:', reason);
+            console.log('  - Details:', details);
+            setIsConnected(false);
+            setCanBet(false);
+            
+            if (reason === 'io server disconnect') {
+                // Server-initiated disconnect, don't auto-reconnect immediately
+                setConnectionError('Server disconnected - manual reconnection required');
+            } else {
+                setConnectionError(`Disconnected: ${reason}`);
+            }
+        });
+
+        // FIXED: Add transport change detection
+        newSocket.on('upgrade', () => {
+            console.log('📶 Upgraded to websocket transport');
+        });
+
+        newSocket.on('upgradeError', (error) => {
+            console.warn('⚠️ Websocket upgrade failed, using polling:', error);
         });
 
         // Enhanced game state handler with countdown support
         newSocket.on('gameState', (gameState: any) => {
-            console.log('Received enhanced game state:', gameState);
+            console.log('📊 Received enhanced game state:', gameState);
             
             if (gameState.serverTime) {
                 syncServerTime(gameState.serverTime);
@@ -138,7 +206,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
         // NEW: Handle waiting period start
         newSocket.on('gameWaiting', (data: any) => {
-            console.log('Game waiting period started:', data);
+            console.log('⏳ Game waiting period started:', data);
             
             if (data.serverTime) {
                 syncServerTime(data.serverTime);
@@ -217,14 +285,14 @@ export function useGameSocket(walletAddress: string, userId?: string) {
                 setCurrentGame(updatedGame);
                 gameStateRef.current = updatedGame;
             } else {
-                console.warn('Received multiplier update for different game, requesting sync...');
+                console.warn('⚠️ Received multiplier update for different game, requesting sync...');
                 newSocket.emit('requestGameSync');
             }
         });
 
         // Enhanced game started handler
         newSocket.on('gameStarted', (data: any) => {
-            console.log('Enhanced game started with pre-game bets:', data);
+            console.log('🚀 Enhanced game started with pre-game bets:', data);
             
             if (data.serverTime) {
                 syncServerTime(data.serverTime);
@@ -256,7 +324,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
         // Enhanced game crashed handler
         newSocket.on('gameCrashed', (data: any) => {
-            console.log('Game crashed:', data);
+            console.log('💥 Game crashed:', data);
             
             // Reset countdown and betting state
             setCountdown(0);
@@ -296,14 +364,14 @@ export function useGameSocket(walletAddress: string, userId?: string) {
                 setCurrentGame(syncedGame);
                 gameStateRef.current = syncedGame;
             } else if (data.gameNumber) {
-                console.log('Game out of sync, requesting fresh state...');
+                console.log('🔄 Game out of sync, requesting fresh state...');
                 newSocket.emit('requestGameSync');
             }
         });
 
         // Handle game sync responses
         newSocket.on('gameSync', (data: any) => {
-            console.log('Received game sync:', data);
+            console.log('📥 Received game sync:', data);
             
             if (data.serverTime) {
                 syncServerTime(data.serverTime);
@@ -363,25 +431,14 @@ export function useGameSocket(walletAddress: string, userId?: string) {
             }
         });
 
-        // Error handlers
-        newSocket.on('disconnect', () => {
-            console.log('Disconnected from game server');
-            setIsConnected(false);
-            setCanBet(false);
-        });
-
-        newSocket.on('connect_error', (error) => {
-            console.error('Connection error:', error);
-            setIsConnected(false);
-            setCanBet(false);
-        });
-
         setSocket(newSocket);
 
-        // Periodic sync check
+        // Periodic sync check with connection validation
         const syncInterval = setInterval(() => {
             if (newSocket.connected && gameStateRef.current) {
                 newSocket.emit('requestGameSync');
+            } else if (!newSocket.connected) {
+                console.warn('⚠️ Socket disconnected during sync check');
             }
         }, 30000);
 
@@ -398,27 +455,27 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     const placeBet = useCallback(async (walletAddress: string, amount: number, userId?: string): Promise<boolean> => {
         return new Promise((resolve) => {
             if (!socket || !isConnected || !currentGame) {
-                console.log('Cannot place buy: no socket, connection, or game');
+                console.log('❌ Cannot place bet: no socket, connection, or game');
                 resolve(false);
                 return;
             }
 
             // NEW: Allow betting during waiting period and active games
             if (currentGame.status !== 'active' && currentGame.status !== 'waiting') {
-                console.log('Cannot place buy: game status is', currentGame.status);
+                console.log('❌ Cannot place bet: game status is', currentGame.status);
                 resolve(false);
                 return;
             }
 
             // NEW: Check if betting is allowed (not in last 2 seconds of countdown)
             if (!canBet) {
-                console.log('Cannot place buy: betting not allowed (too close to game start)');
+                console.log('❌ Cannot place bet: betting not allowed (too close to game start)');
                 resolve(false);
                 return;
             }
 
             const timeout = setTimeout(() => {
-                console.log('Bet timeout after 10 seconds');
+                console.log('⏰ Bet timeout after 10 seconds');
                 resolve(false);
             }, 10000);
 
@@ -426,7 +483,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
             
             socket.once('betResult', (data: BetResult) => {
                 clearTimeout(timeout);
-                console.log('Bet result:', data);
+                console.log('🎯 Bet result:', data);
                 resolve(data.success);
                 
                 // Update local state if bet was successful
@@ -460,7 +517,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
             
             socket.once('cashOutResult', (data: CashOutResult) => {
                 clearTimeout(timeout);
-                console.log('Cashout result:', data);
+                console.log('💰 Cashout result:', data);
                 resolve({
                     success: data.success,
                     payout: data.payout,
@@ -481,6 +538,9 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         // NEW: Countdown and waiting period state
         countdown,
         isWaitingPeriod,
-        canBet
+        canBet,
+        // NEW: Debug information
+        connectionError,
+        connectionAttempts
     };
 }

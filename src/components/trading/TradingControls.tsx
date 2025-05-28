@@ -1,4 +1,4 @@
-// src/components/trading/TradingControls.tsx - Fixed Version
+// src/components/trading/TradingControls.tsx - Custodial SOL + SPL RUGGED Integration
 import { FC, useState, useEffect, useContext, useCallback } from 'react';
 import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon, Timer, Users, Settings, Wallet, TrendingUp } from 'lucide-react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
@@ -12,10 +12,10 @@ import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 // Import from barrel file instead of direct imports
 import { AirdropModal, DepositModal, WithdrawModal } from './index';
 
-// Define TokenType locally if not available
+// TokenType: SOL = custodial game balance, RUGGED = SPL token
 export enum TokenType {
-  SOL = 'SOL',
-  RUGGED = 'RUGGED'
+  SOL = 'SOL',      // Custodial game balance (primary)
+  RUGGED = 'RUGGED' // SPL token (secondary)
 }
 
 // Enhanced bet tracking interface
@@ -26,6 +26,7 @@ interface ActiveBet {
   timestamp: number;
   gameId: string;
   transactionId?: string;
+  tokenType?: TokenType; // Track which token was used
 }
 
 interface TradingControlsProps {
@@ -41,11 +42,11 @@ interface TradingControlsProps {
   isMobile?: boolean;
 }
 
-// Solana connection for balance checks (using correct Alchemy RPC)
+// Solana connection for external wallet operations (deposits/withdrawals only)
 const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
 const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
-// Enhanced wallet balance hook (auto-refresh only)
+// External wallet balance hook (for deposit reference only)
 const useWalletBalance = (walletAddress: string) => {
   const [balance, setBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -61,15 +62,14 @@ const useWalletBalance = (walletAddress: string) => {
       const solBalance = balanceResponse / LAMPORTS_PER_SOL;
       setBalance(solBalance);
       setLastUpdated(Date.now());
-      console.log(`💰 Wallet balance updated: ${solBalance.toFixed(3)} SOL`);
+      console.log(`💰 External wallet balance updated: ${solBalance.toFixed(3)} SOL`);
     } catch (error) {
-      console.error('Failed to fetch wallet balance:', error);
+      console.error('Failed to fetch external wallet balance:', error);
     } finally {
       setLoading(false);
     }
   }, [walletAddress]);
 
-  // Auto-update balance every 30 seconds
   useEffect(() => {
     if (walletAddress) {
       updateBalance();
@@ -81,7 +81,77 @@ const useWalletBalance = (walletAddress: string) => {
   return { balance, loading, lastUpdated };
 };
 
-// Compact Game Info Component
+// Custodial SOL balance hook (primary gaming balance)
+const useCustodialBalance = (userId: string) => {
+  const [custodialBalance, setCustodialBalance] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [lastUpdated, setLastUpdated] = useState<number>(0);
+
+  const updateCustodialBalance = useCallback(async () => {
+    if (!userId) return;
+    
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/custodial/balance/${userId}`);
+      const data = await response.json();
+      
+      if (data.custodialBalance !== undefined) {
+        setCustodialBalance(data.custodialBalance);
+        setLastUpdated(Date.now());
+        console.log(`💎 Custodial SOL balance updated: ${data.custodialBalance.toFixed(3)} SOL`);
+      }
+    } catch (error) {
+      console.error('Failed to fetch custodial balance:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    if (userId) {
+      updateCustodialBalance();
+      const interval = setInterval(updateCustodialBalance, 10000); // Update frequently for gaming
+      return () => clearInterval(interval);
+    }
+  }, [userId, updateCustodialBalance]);
+
+  return { custodialBalance, loading, lastUpdated, updateCustodialBalance };
+};
+
+// RUGGED SPL token balance hook (existing functionality)
+const useRuggedBalance = (walletAddress: string) => {
+  const [ruggedBalance, setRuggedBalance] = useState<number>(1000); // Default or fetch from SPL token
+  const [loading, setLoading] = useState<boolean>(false);
+
+  // TODO: Implement actual SPL token balance fetching
+  const updateRuggedBalance = useCallback(async () => {
+    if (!walletAddress) return;
+    
+    setLoading(true);
+    try {
+      // TODO: Fetch actual RUGGED SPL token balance
+      // For now, keeping existing logic
+      console.log(`🎯 RUGGED balance check for: ${walletAddress}`);
+      // setRuggedBalance(actualBalance);
+    } catch (error) {
+      console.error('Failed to fetch RUGGED balance:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [walletAddress]);
+
+  useEffect(() => {
+    if (walletAddress) {
+      updateRuggedBalance();
+      const interval = setInterval(updateRuggedBalance, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [walletAddress, updateRuggedBalance]);
+
+  return { ruggedBalance, loading, updateRuggedBalance };
+};
+
+// Compact Game Info Component (unchanged)
 const CompactGameInfo: FC<{
   game: any;
   countdown: number;
@@ -188,10 +258,11 @@ const CompactGameInfo: FC<{
   );
 };
 
-// Balance Display Component (auto-refresh only)
+// UPDATED: Balance Display Component - SOL = custodial, RUGGED = SPL token
 const BalanceDisplay: FC<{
   currentToken: TokenType;
-  activeBalance: number;
+  custodialSolBalance: number;
+  ruggedBalance: number;
   onTokenChange: (token: TokenType) => void;
   onDepositClick: () => void;
   onWithdrawClick: () => void;
@@ -202,7 +273,8 @@ const BalanceDisplay: FC<{
   isLoading: boolean;
 }> = ({ 
   currentToken, 
-  activeBalance, 
+  custodialSolBalance,
+  ruggedBalance,
   onTokenChange, 
   onDepositClick, 
   onWithdrawClick, 
@@ -212,11 +284,14 @@ const BalanceDisplay: FC<{
   onToggleExpanded,
   isLoading
 }) => {
+  // SOL = custodial balance, RUGGED = SPL token balance
+  const activeBalance = currentToken === TokenType.SOL ? custodialSolBalance : ruggedBalance;
+  
   const formatBalance = (balance: number, token: TokenType) => {
     if (token === TokenType.SOL) {
-      return balance.toFixed(3);
+      return balance.toFixed(3); // Custodial SOL balance with decimals
     } else {
-      return balance.toFixed(0);
+      return balance.toFixed(0); // RUGGED token as whole numbers
     }
   };
 
@@ -266,7 +341,7 @@ const BalanceDisplay: FC<{
               <button
                 onClick={() => {
                   onTokenChange(TokenType.RUGGED);
-                  if (activeBalance < 10) {
+                  if (ruggedBalance < 10) {
                     onAirdropClick();
                   }
                 }}
@@ -339,7 +414,7 @@ const BalanceDisplay: FC<{
           <button
             onClick={() => {
               onTokenChange(TokenType.RUGGED);
-              if (activeBalance < 10) {
+              if (ruggedBalance < 10) {
                 onAirdropClick();
               }
             }}
@@ -374,7 +449,7 @@ const BalanceDisplay: FC<{
   );
 };
 
-// Auto Cashout Component
+// Auto Cashout Component (unchanged)
 const AutoCashoutSection: FC<{
   autoCashoutEnabled: boolean;
   autoCashoutValue: string;
@@ -480,7 +555,7 @@ const AutoCashoutSection: FC<{
   );
 };
 
-// Active Bet Display Component
+// Active Bet Display Component (unchanged)
 const ActiveBetDisplay: FC<{
   bet: ActiveBet;
   currentMultiplier: number;
@@ -501,13 +576,13 @@ const ActiveBetDisplay: FC<{
       <div className="text-center">
         <div className="text-sm text-blue-400 mb-1">Active Buy</div>
         <div className="text-lg font-bold text-blue-300">
-          {bet.amount} SOL @ {bet.entryMultiplier.toFixed(2)}x
+          {bet.amount} {bet.tokenType || 'SOL'} @ {bet.entryMultiplier.toFixed(2)}x
         </div>
         <div className={`text-sm mt-1 ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
-          Potential: {calculatePotentialWin().toFixed(3)} SOL
+          Potential: {calculatePotentialWin().toFixed(3)} {bet.tokenType || 'SOL'}
         </div>
         <div className={`text-xs mt-1 ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
-          P&L: {profit >= 0 ? '+' : ''}{profit.toFixed(3)} SOL
+          P&L: {profit >= 0 ? '+' : ''}{profit.toFixed(3)} {bet.tokenType || 'SOL'}
         </div>
         {isMobile && (
           <div className="text-xs text-gray-400 mt-1">
@@ -519,7 +594,7 @@ const ActiveBetDisplay: FC<{
   );
 };
 
-// Enhanced Betting Section Component
+// UPDATED: Betting Section Component - Smart routing based on token type
 const BettingSection: FC<{
   activeBet: ActiveBet | null;
   amount: string;
@@ -563,6 +638,8 @@ const BettingSection: FC<{
 }) => {
   const amountNum = parseFloat(amount);
   const amountValid = !isNaN(amountNum) && amountNum > 0 && amountNum <= activeBalance;
+  
+  // Different min/max based on token type
   const minBetAmount = currentToken === TokenType.SOL ? 0.001 : 1;
   const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
   
@@ -822,7 +899,7 @@ const BettingSection: FC<{
   );
 };
 
-// Enhanced Status Messages Component
+// Status Messages Component (unchanged)
 const StatusMessages: FC<{
   isWalletReady: boolean;
   isConnected: boolean;
@@ -899,6 +976,7 @@ const StatusMessages: FC<{
   );
 };
 
+// MAIN COMPONENT - Dual token system integration
 const TradingControls: FC<TradingControlsProps> = ({ 
   onBuy, 
   onSell, 
@@ -923,8 +1001,10 @@ const TradingControls: FC<TradingControlsProps> = ({
   // Enhanced game server connection (compatible with existing hook)
   const { currentGame, isConnected, placeBet, cashOut, countdown, isWaitingPeriod, canBet } = useGameSocket(walletAddress, userId || undefined);
   
-  // Real wallet balance integration (auto-refresh only)
-  const { balance: realSolBalance, loading: balanceLoading } = useWalletBalance(walletAddress);
+  // UPDATED: Dual balance system
+  const { balance: externalSolBalance, loading: externalSolLoading } = useWalletBalance(walletAddress); // For deposit reference
+  const { custodialBalance, loading: custodialBalanceLoading, updateCustodialBalance } = useCustodialBalance(userId || ''); // Primary gaming balance
+  const { ruggedBalance, loading: ruggedBalanceLoading, updateRuggedBalance } = useRuggedBalance(walletAddress); // SPL token
   
   // Calculate countdown values
   const countdownSeconds = countdown ? Math.ceil(countdown / 1000) : 0;
@@ -933,9 +1013,8 @@ const TradingControls: FC<TradingControlsProps> = ({
   // Enhanced bet tracking
   const [activeBet, setActiveBet] = useState<ActiveBet | null>(null);
   
-  // Token context and wallet balance
+  // UPDATED: Token context - Default to SOL (custodial balance) as primary
   const [currentToken, setCurrentToken] = useState<TokenType>(TokenType.SOL);
-  const [ruggedBalance, setRuggedBalance] = useState<number>(1000); // Default RUGGED balance
   
   // Check if wallet is ready
   const isWalletReady = authenticated && walletAddress !== '';
@@ -970,8 +1049,8 @@ const TradingControls: FC<TradingControlsProps> = ({
   const activeCurrentMultiplier = activeCurrentGame?.multiplier || propCurrentMultiplier;
   const gameStatus = activeCurrentGame?.status || 'waiting';
 
-  // Calculate balance and effective betting permissions
-  const activeBalance = currentToken === TokenType.SOL ? realSolBalance : ruggedBalance;
+  // UPDATED: Calculate balance based on selected token
+  const activeBalance = currentToken === TokenType.SOL ? custodialBalance : ruggedBalance;
   const effectiveCanBet = gameStatus === 'active' ? true : canBet;
 
   // Validation error message
@@ -1025,19 +1104,51 @@ const TradingControls: FC<TradingControlsProps> = ({
     setCurrentToken(token);
   };
 
-  // Enhanced cashout (compatible with existing hook)
+  // UPDATED: Enhanced cashout with dual token support
   const handleCashout = useCallback(async () => {
-    if (!authenticated || !walletAddress || !isConnected || !activeBet) {
+    if (!authenticated || !walletAddress || !isConnected || !activeBet || !userId) {
       return;
     }
 
     setIsCashingOut(true);
     try {
-      const success = await cashOut(walletAddress);
-      
+      let success = false;
+
+      // Route cashout based on bet token type
+      if (activeBet.tokenType === TokenType.SOL) {
+        // Custodial SOL cashout
+        success = await new Promise<boolean>((resolve) => {
+          const socket = (window as any).gameSocket;
+          if (socket) {
+            socket.emit('custodialCashOut', { userId, walletAddress });
+            socket.once('custodialCashOutResult', (result: any) => {
+              if (result.success) {
+                updateCustodialBalance(); // Refresh custodial balance
+                resolve(true);
+              } else {
+                resolve(false);
+              }
+            });
+          } else {
+            resolve(false);
+          }
+        });
+
+        if (success) {
+          toast.success('Cashed out to SOL game balance!');
+        }
+      } else {
+        // RUGGED token cashout (existing logic)
+        const cashoutResult = await cashOut(walletAddress);
+        success = cashoutResult.success || false;
+        if (success) {
+          updateRuggedBalance(); // Refresh RUGGED balance
+          toast.success('Cashed out RUGGED tokens!');
+        }
+      }
+
       if (success) {
         setActiveBet(null);
-        toast.success('Cashed out successfully!');
         if (onSell) onSell(100);
       } else {
         setServerError('Failed to RUG');
@@ -1050,7 +1161,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     } finally {
       setIsCashingOut(false);
     }
-  }, [authenticated, walletAddress, isConnected, activeBet, cashOut, onSell]);
+  }, [authenticated, walletAddress, isConnected, activeBet, cashOut, onSell, userId, updateCustodialBalance, updateRuggedBalance]);
 
   // Auto cashout effect
   useEffect(() => {
@@ -1081,7 +1192,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     }
   };
 
-  // Quick amount buttons
+  // UPDATED: Quick amount buttons based on token type
   const quickAmounts = currentToken === TokenType.SOL 
     ? [0.01, 0.05, 0.1, 0.5] 
     : [10, 50, 100, 500];
@@ -1103,7 +1214,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     setAutoCashoutValue(value.toString());
   };
 
-  // Enhanced bet placement with detailed debugging
+  // UPDATED: Enhanced bet placement with dual token routing
   const handleBuy = async () => {
     const amountNum = parseFloat(amount);
     
@@ -1119,7 +1230,8 @@ const TradingControls: FC<TradingControlsProps> = ({
       canBet: effectiveCanBet,
       isWaitingPeriod,
       activeBalance,
-      currentToken
+      currentToken,
+      tokenType: currentToken
     });
     
     // Enhanced validation
@@ -1152,7 +1264,7 @@ const TradingControls: FC<TradingControlsProps> = ({
       return;
     }
     
-    // Enhanced game availability check (ignore canBet during active games)
+    // Enhanced game availability check
     if (!activeIsGameActive) {
       console.log('❌ Game not available:', { activeIsGameActive, canBet: effectiveCanBet, isWaitingPeriod, countdownSeconds });
       setServerError('Game is not available');
@@ -1160,7 +1272,7 @@ const TradingControls: FC<TradingControlsProps> = ({
       return;
     }
     
-    // For waiting period, respect the server's canBet flag (2 second cutoff)
+    // For waiting period, respect the server's canBet flag
     if (isWaitingPeriod && !effectiveCanBet) {
       console.log('❌ Waiting period ended:', { isWaitingPeriod, canBet: effectiveCanBet, countdownSeconds });
       setServerError('Game starting now!');
@@ -1180,22 +1292,51 @@ const TradingControls: FC<TradingControlsProps> = ({
     
     setIsPlacingBet(true);
     try {
-      // Compatible bet placement with existing hook
-      console.log('📡 Calling placeBet function...');
-      const success = await placeBet(walletAddress, amountNum, userId || undefined);
-      
-      console.log('📡 placeBet response:', success);
+      let success = false;
+      let entryMultiplier = gameStatus === 'waiting' ? 1.0 : activeCurrentMultiplier;
+
+      // UPDATED: Route betting based on token type
+      if (currentToken === TokenType.SOL) {
+        console.log('📡 Using custodial SOL betting system...');
+        
+        success = await new Promise<boolean>((resolve) => {
+          const socket = (window as any).gameSocket;
+          if (socket) {
+            socket.emit('custodialBet', { userId, betAmount: amountNum });
+            socket.once('custodialBetResult', (result: any) => {
+              console.log('📡 Custodial SOL bet response:', result);
+              if (result.success) {
+                entryMultiplier = result.entryMultiplier;
+                updateCustodialBalance(); // Refresh custodial balance
+                resolve(true);
+              } else {
+                setServerError(result.reason || 'Failed to place custodial bet');
+                resolve(false);
+              }
+            });
+          } else {
+            setServerError('Socket connection not available');
+            resolve(false);
+          }
+        });
+      } else {
+        // Use existing RUGGED token betting
+        console.log('📡 Using RUGGED token betting system...');
+        success = await placeBet(walletAddress, amountNum, userId || undefined);
+        if (success) {
+          updateRuggedBalance(); // Refresh RUGGED balance
+        }
+      }
       
       if (success) {
-        // Store bet with calculated entry multiplier
-        const entryMultiplier = gameStatus === 'waiting' ? 1.0 : activeCurrentMultiplier;
-        
+        // Store bet with token type
         const newBet: ActiveBet = {
           id: `bet_${Date.now()}`,
           amount: amountNum,
           entryMultiplier,
           timestamp: Date.now(),
-          gameId: activeCurrentGame?.id || 'unknown'
+          gameId: activeCurrentGame?.id || 'unknown',
+          tokenType: currentToken
         };
         
         setActiveBet(newBet);
@@ -1203,13 +1344,14 @@ const TradingControls: FC<TradingControlsProps> = ({
         console.log('✅ Bet placed successfully:', newBet);
         
         const betType = gameStatus === 'waiting' ? 'Pre-game bet' : 'Bet';
-        toast.success(`${betType} placed: ${amountNum} SOL (Entry: ${entryMultiplier.toFixed(2)}x)`);
+        const tokenDisplay = currentToken === TokenType.SOL ? 'SOL (game balance)' : 'RUGGED tokens';
+        toast.success(`${betType} placed: ${amountNum} ${tokenDisplay} (Entry: ${entryMultiplier.toFixed(2)}x)`);
         
         if (onBuy) onBuy(amountNum);
       } else {
-        const errorMsg = 'Failed to place buy - server returned false';
+        const errorMsg = serverError || 'Failed to place buy - server returned false';
         console.log('❌ Bet placement failed:', errorMsg);
-        setServerError(errorMsg);
+        if (!serverError) setServerError(errorMsg);
         toast.error(errorMsg);
       }
     } catch (error) {
@@ -1268,7 +1410,8 @@ const TradingControls: FC<TradingControlsProps> = ({
 
         <BalanceDisplay
           currentToken={currentToken}
-          activeBalance={activeBalance}
+          custodialSolBalance={custodialBalance}
+          ruggedBalance={ruggedBalance}
           onTokenChange={handleTokenChange}
           onDepositClick={() => setShowDepositModal(true)}
           onWithdrawClick={() => setShowWithdrawModal(true)}
@@ -1276,7 +1419,7 @@ const TradingControls: FC<TradingControlsProps> = ({
           isMobile={isMobile}
           showExpanded={showBalanceExpanded}
           onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
-          isLoading={balanceLoading}
+          isLoading={custodialBalanceLoading || ruggedBalanceLoading}
         />
 
         <AutoCashoutSection
@@ -1339,7 +1482,8 @@ const TradingControls: FC<TradingControlsProps> = ({
 
       <BalanceDisplay
         currentToken={currentToken}
-        activeBalance={activeBalance}
+        custodialSolBalance={custodialBalance}
+        ruggedBalance={ruggedBalance}
         onTokenChange={handleTokenChange}
         onDepositClick={() => setShowDepositModal(true)}
         onWithdrawClick={() => setShowWithdrawModal(true)}
@@ -1347,7 +1491,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         isMobile={isMobile}
         showExpanded={showBalanceExpanded}
         onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
-        isLoading={balanceLoading}
+        isLoading={custodialBalanceLoading || ruggedBalanceLoading}
       />
 
       <AutoCashoutSection

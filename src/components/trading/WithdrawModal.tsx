@@ -1,6 +1,6 @@
-// src/components/modals/WithdrawModal.tsx - Enhanced with Custodial + Transfer
+// src/components/modals/WithdrawModal.tsx - Fixed Embedded Wallet Connection
 import { FC, useState, useRef, useEffect } from 'react';
-import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
+import { usePrivy } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
@@ -18,6 +18,7 @@ interface WithdrawModalProps {
   onSuccess?: () => void;
   currentToken: TokenType;
   balance: number; // This will be the active balance (custodial or embedded based on context)
+  walletAddress: string; // Add walletAddress prop like DepositModal
 }
 
 // Tab types for different actions
@@ -35,13 +36,11 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   onClose, 
   onSuccess, 
   currentToken,
-  balance 
+  balance,
+  walletAddress // Use walletAddress prop instead of getting from hooks
 }) => {
-  // Privy wallet setup
+  // Privy wallet setup - simplified since we get walletAddress as prop
   const { authenticated, user } = usePrivy();
-  const { wallets } = useSolanaWallets();
-  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
-  const walletAddress = embeddedWallet?.address || '';
   
   // User context
   const { currentUser } = useContext(UserContext);
@@ -72,29 +71,79 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   
   const modalRef = useRef<HTMLDivElement>(null);
   
-  // Fetch both balances
+  // Fetch both balances - Fixed implementation
   const fetchBalances = async () => {
-    if (!userId || !walletAddress) return;
+    if (!userId || !walletAddress) {
+      console.log('Missing userId or walletAddress:', { userId, walletAddress });
+      return;
+    }
     
     setBalances(prev => ({ ...prev, loading: true }));
     
     try {
       // Fetch custodial balance
       const custodialResponse = await fetch(`/api/custodial/balance/${userId}`);
-      const custodialData = await custodialResponse.json();
       
-      // Fetch embedded wallet balance (Privy)
-      const embeddedResponse = await fetch(`/api/privy/${userId}`);
-      const embeddedData = await embeddedResponse.json();
+      if (!custodialResponse.ok) {
+        throw new Error(`Custodial API error: ${custodialResponse.status}`);
+      }
+      
+      const custodialData = await custodialResponse.json();
+      console.log('Custodial balance response:', custodialData);
+      
+      // Fetch embedded wallet balance using the walletAddress
+      // Try different API endpoints that might work with your backend
+      let embeddedBalance = 0;
+      
+      try {
+        // Option 1: Try the existing endpoint
+        const embeddedResponse = await fetch(`/api/privy/${userId}`);
+        if (embeddedResponse.ok) {
+          const embeddedData = await embeddedResponse.json();
+          console.log('Embedded balance response (Option 1):', embeddedData);
+          embeddedBalance = embeddedData.success ? embeddedData.wallet?.balance || 0 : 0;
+        } else {
+          // Option 2: Try using wallet address directly
+          const walletResponse = await fetch(`/api/wallet/balance/${walletAddress}`);
+          if (walletResponse.ok) {
+            const walletData = await walletResponse.json();
+            console.log('Embedded balance response (Option 2):', walletData);
+            embeddedBalance = walletData.balance || 0;
+          } else {
+            // Option 3: Try Solana RPC call directly
+            const rpcResponse = await fetch('/api/solana/balance', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ address: walletAddress })
+            });
+            if (rpcResponse.ok) {
+              const rpcData = await rpcResponse.json();
+              console.log('Embedded balance response (Option 3):', rpcData);
+              embeddedBalance = rpcData.balance || 0;
+            }
+          }
+        }
+      } catch (embeddedError) {
+        console.error('Failed to fetch embedded balance:', embeddedError);
+        // Don't throw, just use 0 balance
+      }
       
       setBalances({
-        custodial: custodialData.custodialBalance || 0,
-        embedded: embeddedData.success ? embeddedData.wallet.balance : 0,
+        custodial: custodialData.custodialBalance || custodialData.balance || 0,
+        embedded: embeddedBalance,
         loading: false
       });
+      
+      console.log('Final balances set:', {
+        custodial: custodialData.custodialBalance || custodialData.balance || 0,
+        embedded: embeddedBalance
+      });
+      
     } catch (error) {
       console.error('Failed to fetch balances:', error);
       setBalances(prev => ({ ...prev, loading: false }));
+      // Optionally set an error state
+      setError('Failed to load balances. Please try refreshing.');
     }
   };
   
@@ -110,7 +159,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       setActiveTab('withdraw');
       fetchBalances();
     }
-  }, [isOpen]);
+  }, [isOpen, userId, walletAddress]); // Add dependencies
   
   // Handle outside clicks
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
@@ -205,16 +254,18 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           setSuccess(true);
           setSuccessMessage(`Successfully withdrew ${withdrawAmount} SOL from game balance`);
           fetchBalances();
+          if (onSuccess) onSuccess();
         } else {
           throw new Error(result.error || 'Withdrawal failed');
         }
       } else {
-        // Withdraw from embedded wallet (Privy)
+        // Withdraw from embedded wallet (Privy) - include walletAddress
         const response = await fetch('/api/privy/withdraw', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userId,
+            walletAddress, // Include wallet address
             amount: withdrawAmount,
             destinationAddress
           })
@@ -226,6 +277,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           setSuccess(true);
           setSuccessMessage(`Successfully withdrew ${withdrawAmount} SOL from embedded wallet`);
           fetchBalances();
+          if (onSuccess) onSuccess();
         } else {
           throw new Error(result.error || 'Withdrawal failed');
         }
@@ -265,6 +317,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userId,
+            walletAddress, // Include wallet address
             amount: transferAmount
           })
         });
@@ -275,6 +328,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           setSuccess(true);
           setSuccessMessage(`Successfully transferred ${transferAmount} SOL to embedded wallet`);
           fetchBalances();
+          if (onSuccess) onSuccess();
         } else {
           throw new Error(result.error || 'Transfer failed');
         }
@@ -285,6 +339,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userId,
+            walletAddress, // Include wallet address
             amount: transferAmount
           })
         });
@@ -295,6 +350,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           setSuccess(true);
           setSuccessMessage(`Successfully transferred ${transferAmount} SOL to game balance`);
           fetchBalances();
+          if (onSuccess) onSuccess();
         } else {
           throw new Error(result.error || 'Transfer failed');
         }
@@ -347,6 +403,16 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           </div>
         ) : (
           <>
+            {/* Debug Info - Remove in production */}
+            {process.env.NODE_ENV === 'development' && (
+              <div className="bg-gray-900 p-2 rounded mb-4 text-xs">
+                <div className="text-gray-400">Debug Info:</div>
+                <div className="text-green-400">UserId: {userId}</div>
+                <div className="text-blue-400">WalletAddress: {walletAddress}</div>
+                <div className="text-yellow-400">Authenticated: {authenticated ? 'Yes' : 'No'}</div>
+              </div>
+            )}
+            
             {/* Balance Display */}
             <div className="bg-gray-800 p-4 rounded-md mb-6">
               <div className="flex justify-between items-center mb-2">
@@ -374,6 +440,15 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                   </span>
                 </div>
               </div>
+              
+              {/* Show wallet address for debugging */}
+              {walletAddress && (
+                <div className="mt-2 pt-2 border-t border-gray-700">
+                  <div className="text-xs text-gray-500">
+                    Wallet: {walletAddress.slice(0, 8)}...{walletAddress.slice(-8)}
+                  </div>
+                </div>
+              )}
             </div>
             
             {/* Tab Navigation */}

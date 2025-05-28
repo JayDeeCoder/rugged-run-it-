@@ -1,4 +1,4 @@
-// src/components/trading/TradingControls.tsx - Custodial SOL + SPL RUGGED Integration
+// src/components/trading/TradingControls.tsx - Custodial SOL + SPL RUGGED Integration (Fixed walletAddress prop)
 import { FC, useState, useEffect, useContext, useCallback } from 'react';
 import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon, Timer, Users, Settings, Wallet, TrendingUp } from 'lucide-react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
@@ -1464,6 +1464,7 @@ const TradingControls: FC<TradingControlsProps> = ({
           onClose={() => setShowWithdrawModal(false)}
           currentToken={currentToken}
           balance={activeBalance}
+          walletAddress={walletAddress}
         />
       </div>
     );
@@ -1566,6 +1567,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         onClose={() => setShowWithdrawModal(false)}
         currentToken={currentToken}
         balance={activeBalance}
+        walletAddress={walletAddress}
       />
     </div>
   );

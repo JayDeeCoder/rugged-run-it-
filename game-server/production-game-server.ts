@@ -5043,6 +5043,71 @@ app.get('/api/privy/:userId', async (req, res): Promise<void> => {
     }
 });
 
+
+// Add this endpoint or update your existing Privy withdrawal handler
+app.post('/api/privy/withdraw', async (req, res): Promise<void> => {
+    try {
+        const { userId, walletAddress, amount, destinationAddress } = req.body;
+        
+        if (!userId || !walletAddress || !amount || !destinationAddress) {
+            res.status(400).json({
+                error: 'Missing required fields: userId, walletAddress, amount, destinationAddress'
+            });
+            return;
+        }
+        
+        // Verify the wallet belongs to the user
+        const privyWallet = privyIntegrationManager.privyWallets.get(userId);
+        if (!privyWallet || privyWallet.privyWalletAddress !== walletAddress) {
+            res.status(400).json({
+                error: 'Wallet address does not match user\'s registered Privy wallet'
+            });
+            return;
+        }
+        
+        // Check current balance
+        const currentBalance = await updatePrivyWalletBalance(userId);
+        if (currentBalance < amount + 0.001) { // Include fee buffer
+            res.status(400).json({
+                error: `Insufficient Privy wallet balance: ${currentBalance.toFixed(3)} SOL available`
+            });
+            return;
+        }
+        
+        // Create unsigned transaction for user to sign
+        const userPublicKey = new PublicKey(walletAddress);
+        const destinationPublicKey = new PublicKey(destinationAddress);
+        const transaction = await createTransaction(userPublicKey, destinationPublicKey, amount);
+        
+        const { blockhash } = await solanaConnection.getLatestBlockhash();
+        transaction.recentBlockhash = blockhash;
+        transaction.feePayer = userPublicKey;
+        
+        const serializedTransaction = transaction.serialize({ requireAllSignatures: false });
+        const base64Transaction = serializedTransaction.toString('base64');
+        
+        res.json({
+            success: true,
+            unsignedTransaction: base64Transaction,
+            message: 'Transaction created - please sign with your Privy wallet',
+            withdrawalDetails: {
+                from: walletAddress,
+                to: destinationAddress,
+                amount: amount,
+                currentBalance: currentBalance,
+                estimatedFee: 0.001
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error in /api/privy/withdraw:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Server error during withdrawal preparation'
+        });
+    }
+});
+
 // ===== TRANSFER: CUSTODIAL TO PRIVY =====
 app.post('/api/transfer/custodial-to-privy', async (req, res): Promise<void> => {
     try {
@@ -5665,6 +5730,65 @@ app.get('/api/wallet/balance/:address', async (req, res): Promise<void> => {
     } catch (error) {
         console.error('Error in /api/wallet/balance:', error);
         res.status(400).json({ error: 'Invalid wallet address' });
+    }
+});
+
+app.post('/api/solana/balance', async (req, res): Promise<void> => {
+    try {
+        const { address } = req.body;
+        
+        if (!address) {
+            res.status(400).json({
+                error: 'Missing required field: address'
+            });
+            return;
+        }
+        
+        const balance = await getUserWalletBalance(address);
+        
+        res.json({
+            address,
+            balance,
+            timestamp: Date.now(),
+            source: 'solana_rpc'
+        });
+        
+    } catch (error) {
+        console.error('Error in /api/solana/balance:', error);
+        res.status(400).json({ 
+            error: 'Invalid wallet address or RPC error',
+            address: req.body?.address
+        });
+    }
+});
+
+// Add this endpoint after your existing /api/wallet/balance/:address endpoint
+app.post('/api/solana/balance', async (req, res): Promise<void> => {
+    try {
+        const { address } = req.body;
+        
+        if (!address) {
+            res.status(400).json({
+                error: 'Missing required field: address'
+            });
+            return;
+        }
+        
+        const balance = await getUserWalletBalance(address);
+        
+        res.json({
+            address,
+            balance,
+            timestamp: Date.now(),
+            source: 'solana_rpc'
+        });
+        
+    } catch (error) {
+        console.error('Error in /api/solana/balance:', error);
+        res.status(400).json({ 
+            error: 'Invalid wallet address or RPC error',
+            address: req.body?.address
+        });
     }
 });
 

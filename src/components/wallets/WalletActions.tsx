@@ -231,22 +231,23 @@ const WalletActions = () => {
       />
       
       <WithdrawModal 
-        isOpen={isWithdrawModalOpen} 
-        onClose={() => setIsWithdrawModalOpen(false)}
-        currentToken={currentToken}
-        balance={balance}
-        onSuccess={() => {
-          // Refresh balance after successful withdrawal
-          if (walletAddress && isValidSolanaAddress(walletAddress)) {
-            const publicKey = safeCreatePublicKey(walletAddress);
-            if (publicKey) {
-              connection.getBalance(publicKey).then(newBalance => {
-                setBalance(newBalance / LAMPORTS_PER_SOL);
-              }).catch(console.error);
-            }
-          }
-        }}
-      />
+  isOpen={isWithdrawModalOpen} 
+  onClose={() => setIsWithdrawModalOpen(false)}
+  currentToken={currentToken}
+  balance={balance}
+  walletAddress={walletAddress!}  // 🆕 ADD THIS LINE
+  onSuccess={() => {
+    // Refresh balance after successful withdrawal
+    if (walletAddress && isValidSolanaAddress(walletAddress)) {
+      const publicKey = safeCreatePublicKey(walletAddress);
+      if (publicKey) {
+        connection.getBalance(publicKey).then(newBalance => {
+          setBalance(newBalance / LAMPORTS_PER_SOL);
+        }).catch(console.error);
+      }
+    }
+  }}
+/>
     </div>
   );
 };

@@ -6,6 +6,7 @@ import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
 import { ArrowDownToLine, Wallet, Check, Loader, X, Copy, ExternalLink, ArrowLeftRight, RefreshCw } from 'lucide-react';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { UserAPI } from '../../services/api'; // 🔧 FIXED: Import the same UserAPI as TradingControls
 
 // Define the TokenType enum locally
 enum TokenType {
@@ -175,37 +176,37 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   
   // 🔧 FIXED: Ensure we have a valid userId - fetch it if not provided
   const [internalUserId, setInternalUserId] = useState<string | null>(userId);
+  const [fetchingUserId, setFetchingUserId] = useState<boolean>(false);
   
-  // Fetch userId if not provided as prop
+  // Fetch userId if not provided as prop (same method as TradingControls)
   useEffect(() => {
-    if (authenticated && walletAddress && !userId) {
+    if (authenticated && walletAddress && !userId && !fetchingUserId) {
       const fetchUserId = async () => {
         try {
+          setFetchingUserId(true);
           console.log('🔍 WithdrawModal: Fetching userId for walletAddress:', walletAddress);
-          // Use the same UserAPI as TradingControls (you'll need to import it)
-          const response = await fetch('/api/user/get-or-create', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ walletAddress })
-          });
           
-          if (response.ok) {
-            const userData = await response.json();
-            if (userData.id) {
-              setInternalUserId(userData.id);
-              console.log('✅ WithdrawModal: Got userId:', userData.id);
-            }
+          // 🔧 FIXED: Use the same UserAPI method as TradingControls
+          const userData = await UserAPI.getUserOrCreate(walletAddress);
+          if (userData && userData.id) {
+            setInternalUserId(userData.id);
+            console.log('✅ WithdrawModal: Got userId:', userData.id);
+          } else {
+            console.error('❌ WithdrawModal: No userId in UserAPI response:', userData);
           }
         } catch (error) {
           console.error('❌ WithdrawModal: Failed to fetch userId:', error);
+        } finally {
+          setFetchingUserId(false);
         }
       };
       
       fetchUserId();
     } else if (userId) {
       setInternalUserId(userId);
+      console.log('✅ WithdrawModal: Using provided userId:', userId);
     }
-  }, [authenticated, walletAddress, userId]);
+  }, [authenticated, walletAddress, userId, fetchingUserId]);
   
   // Use the internal userId (either from prop or fetched)
   const effectiveUserId = internalUserId || userId;
@@ -254,6 +255,28 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     updateCustodialBalance();
     updateEmbeddedBalance();
   }, [updateCustodialBalance, updateEmbeddedBalance]);
+  
+  // Manual retry for userId
+  const retryGetUserId = useCallback(async () => {
+    if (!walletAddress || fetchingUserId) return;
+    
+    try {
+      setFetchingUserId(true);
+      console.log('🔄 WithdrawModal: Manual retry fetching userId for:', walletAddress);
+      
+      const userData = await UserAPI.getUserOrCreate(walletAddress);
+      if (userData && userData.id) {
+        setInternalUserId(userData.id);
+        console.log('✅ WithdrawModal: Retry got userId:', userData.id);
+      } else {
+        console.error('❌ WithdrawModal: Retry - No userId in UserAPI response:', userData);
+      }
+    } catch (error) {
+      console.error('❌ WithdrawModal: Retry failed to fetch userId:', error);
+    } finally {
+      setFetchingUserId(false);
+    }
+  }, [walletAddress, fetchingUserId]);
   
   // Validate Solana address
   const validateAddress = (address: string): boolean => {
@@ -643,22 +666,45 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
               <div className="bg-gray-900 p-3 rounded mb-4 text-xs space-y-1">
                 <div className="text-gray-400 font-bold">🔍 Debug Info:</div>
                 <div className="text-green-400">Prop UserId: {userId || 'None'}</div>
-                <div className="text-cyan-400">Effective UserId: {effectiveUserId || 'None'}</div>
+                <div className="text-cyan-400">Internal UserId: {internalUserId || 'None'}</div>
+                <div className="text-lime-400">Effective UserId: {effectiveUserId || 'None'}</div>
                 <div className="text-blue-400">WalletAddress: {walletAddress || 'None'}</div>
                 <div className="text-yellow-400">Authenticated: {authenticated ? 'Yes' : 'No'}</div>
-                <div className="text-purple-400">
+                <div className="text-purple-400">Fetching UserId: {fetchingUserId ? 'Yes' : 'No'}</div>
+                <div className="text-pink-400">
                   RPC URL: {process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.substring(0, 50) || 'Missing'}...
                 </div>
-                <div className="text-pink-400">
+                <div className="text-orange-400">
                   API Key: {process.env.NEXT_PUBLIC_ALCHEMY_API_KEY ? 'Set' : 'Not Set'}
                 </div>
-                <div className="text-orange-400">
+                <div className="text-teal-400">
                   Hook States: Custodial Loading: {custodialLoading ? 'Yes' : 'No'}, 
                   Embedded Loading: {embeddedLoading ? 'Yes' : 'No'}
                 </div>
-                {!effectiveUserId && (
+                {!effectiveUserId && !fetchingUserId && (
                   <div className="text-red-400 font-bold">⚠️ No userId available - transfers will fail!</div>
                 )}
+                {fetchingUserId && (
+                  <div className="text-yellow-400 font-bold">🔄 Fetching userId from UserAPI...</div>
+                )}
+              </div>
+            )}
+            
+            {/* 🔧 ADDED: User ID status notification */}
+            {authenticated && walletAddress && !effectiveUserId && !fetchingUserId && (
+              <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md mb-4 text-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-bold mb-1">⚠️ User Setup Required</div>
+                    <div className="text-xs">Unable to initialize user account. Please retry.</div>
+                  </div>
+                  <button
+                    onClick={retryGetUserId}
+                    className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-xs"
+                  >
+                    Retry
+                  </button>
+                </div>
               </div>
             )}
             
@@ -855,9 +901,9 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                 {/* Withdraw Button */}
                 <button
                   onClick={handleWithdraw}
-                  disabled={isLoading || !amount || !destinationAddress || !effectiveUserId}
+                  disabled={isLoading || !amount || !destinationAddress || (!effectiveUserId && !fetchingUserId)}
                   className={`w-full py-3 rounded-md font-bold flex items-center justify-center ${
-                    isLoading || !amount || !destinationAddress || !effectiveUserId
+                    isLoading || !amount || !destinationAddress || (!effectiveUserId && !fetchingUserId)
                       ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                       : 'bg-blue-600 hover:bg-blue-700 text-white'
                   }`}
@@ -867,10 +913,15 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                       <Loader size={18} className="mr-2 animate-spin" />
                       Processing...
                     </>
+                  ) : fetchingUserId ? (
+                    <>
+                      <Loader size={18} className="mr-2 animate-spin" />
+                      Getting User ID...
+                    </>
                   ) : !effectiveUserId ? (
                     <>
-                      <Loader size={18} className="mr-2" />
-                      Initializing...
+                      <X size={18} className="mr-2" />
+                      User Not Found
                     </>
                   ) : (
                     <>
@@ -962,9 +1013,9 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                 {/* Transfer Button */}
                 <button
                   onClick={handleTransfer}
-                  disabled={isLoading || !amount || !effectiveUserId}
+                  disabled={isLoading || !amount || (!effectiveUserId && !fetchingUserId)}
                   className={`w-full py-3 rounded-md font-bold flex items-center justify-center ${
-                    isLoading || !amount || !effectiveUserId
+                    isLoading || !amount || (!effectiveUserId && !fetchingUserId)
                       ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                       : 'bg-green-600 hover:bg-green-700 text-white'
                   }`}
@@ -974,10 +1025,15 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                       <Loader size={18} className="mr-2 animate-spin" />
                       Transferring...
                     </>
+                  ) : fetchingUserId ? (
+                    <>
+                      <Loader size={18} className="mr-2 animate-spin" />
+                      Getting User ID...
+                    </>
                   ) : !effectiveUserId ? (
                     <>
-                      <Loader size={18} className="mr-2" />
-                      Initializing...
+                      <X size={18} className="mr-2" />
+                      User Not Found
                     </>
                   ) : (
                     <>

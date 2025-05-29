@@ -1,24 +1,48 @@
-// app/api/users/get-or-create/route.ts
+// app/api/users/get-or-create/route.ts - Debug version
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Validate environment variables
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!supabaseUrl) {
-  throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL environment variable');
-}
-
-if (!supabaseServiceKey) {
-  throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY environment variable. Please add it to your .env.local file.');
-}
-
-// Use SERVICE ROLE KEY to bypass RLS
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-
 export async function POST(request: NextRequest) {
+  // 🔍 DEBUG: Log all environment variables (be careful in production)
+  console.log('🔍 Environment Variables Debug:', {
+    NODE_ENV: process.env.NODE_ENV,
+    SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'SET' : 'MISSING',
+    SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'SET' : 'MISSING',
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'MISSING',
+    // Show first few characters to verify it's the right key
+    SERVICE_KEY_PREVIEW: process.env.SUPABASE_SERVICE_ROLE_KEY?.substring(0, 20) + '...' || 'MISSING'
+  });
+
+  // Validate environment variables
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl) {
+    console.error('❌ Missing NEXT_PUBLIC_SUPABASE_URL');
+    return NextResponse.json(
+      { error: 'Missing NEXT_PUBLIC_SUPABASE_URL environment variable' },
+      { status: 500 }
+    );
+  }
+
+  if (!supabaseServiceKey) {
+    console.error('❌ Missing SUPABASE_SERVICE_ROLE_KEY');
+    return NextResponse.json(
+      { 
+        error: 'Missing SUPABASE_SERVICE_ROLE_KEY environment variable. Please add it to your deployment environment variables.',
+        debug: {
+          available_vars: Object.keys(process.env).filter(k => k.includes('SUPABASE')),
+          node_env: process.env.NODE_ENV
+        }
+      },
+      { status: 500 }
+    );
+  }
+
   try {
+    // Use SERVICE ROLE KEY to bypass RLS
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
     const { walletAddress } = await request.json();
     
     if (!walletAddress) {
@@ -78,7 +102,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('❌ API: Unexpected error in getUserOrCreate:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', details: error },
       { status: 500 }
     );
   }

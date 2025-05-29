@@ -832,7 +832,212 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                 Transfer
               </button>
             </div>
-            
+            {/* Tab Content */}
+{activeTab === 'withdraw' ? (
+  // WITHDRAW TAB CONTENT
+  <div className="space-y-4">
+    {/* Source Selection for Withdraw */}
+    <div>
+      <label className="block text-sm text-gray-400 mb-2">Withdraw From</label>
+      <div className="flex space-x-2">
+        <button
+          onClick={() => setWithdrawSource('custodial')}
+          className={`flex-1 py-2 px-3 rounded text-sm transition-colors ${
+            withdrawSource === 'custodial'
+              ? 'bg-green-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+        >
+          🎮 Game Balance
+          <div className="text-xs opacity-75">
+            {custodialBalance.toFixed(6)} SOL
+          </div>
+        </button>
+        <button
+          onClick={() => setWithdrawSource('embedded')}
+          className={`flex-1 py-2 px-3 rounded text-sm transition-colors ${
+            withdrawSource === 'embedded'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+        >
+          💼 Embedded Wallet
+          <div className="text-xs opacity-75">
+            {embeddedBalance.toFixed(6)} SOL
+          </div>
+        </button>
+      </div>
+    </div>
+
+    {/* Amount Input */}
+    <div>
+      <label className="block text-sm text-gray-400 mb-2">Amount ({tokenSymbol})</label>
+      <div className="relative">
+        <input
+          type="text"
+          value={amount}
+          onChange={handleAmountChange}
+          placeholder="0.000000"
+          className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 pr-16 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+        />
+        <button
+          onClick={handleSetMaxAmount}
+          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-blue-400 text-xs hover:text-blue-300"
+        >
+          MAX
+        </button>
+      </div>
+      <div className="text-xs text-gray-500 mt-1">
+        Available: {withdrawSource === 'custodial' ? custodialBalance.toFixed(6) : embeddedBalance.toFixed(6)} SOL
+      </div>
+    </div>
+
+    {/* Destination Address */}
+    <div>
+      <label className="block text-sm text-gray-400 mb-2">Destination Address</label>
+      <input
+        type="text"
+        value={destinationAddress}
+        onChange={(e) => setDestinationAddress(e.target.value)}
+        placeholder="Enter Solana wallet address"
+        className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+      />
+      {addressError && (
+        <div className="text-red-500 text-sm mt-1">{addressError}</div>
+      )}
+    </div>
+
+    {/* Withdraw Button */}
+    <button
+      onClick={handleWithdraw}
+      disabled={isLoading || !effectiveUserId || !amount || !destinationAddress}
+      className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-md transition-colors flex items-center justify-center"
+    >
+      {isLoading ? (
+        <>
+          <Loader size={16} className="animate-spin mr-2" />
+          Processing Withdrawal...
+        </>
+      ) : (
+        <>
+          <ArrowDownToLine size={16} className="mr-2" />
+          Withdraw {amount || '0'} SOL
+        </>
+      )}
+    </button>
+  </div>
+) : (
+  // TRANSFER TAB CONTENT
+  <div className="space-y-4">
+    {/* Transfer Direction */}
+    <div>
+      <label className="block text-sm text-gray-400 mb-2">Transfer Direction</label>
+      <div className="space-y-2">
+        <button
+          onClick={() => setTransferDirection('custodial-to-embedded')}
+          className={`w-full py-3 px-4 rounded text-sm transition-colors flex items-center justify-between ${
+            transferDirection === 'custodial-to-embedded'
+              ? 'bg-green-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+        >
+          <div className="flex items-center">
+            <span className="mr-3">🎮→💼</span>
+            <div className="text-left">
+              <div className="font-medium">Game → Embedded Wallet</div>
+              <div className="text-xs opacity-75">
+                Move SOL to your embedded wallet
+              </div>
+            </div>
+          </div>
+          <div className="text-xs">
+            {custodialBalance.toFixed(6)} SOL available
+          </div>
+        </button>
+        
+        <button
+          onClick={() => setTransferDirection('embedded-to-custodial')}
+          className={`w-full py-3 px-4 rounded text-sm transition-colors flex items-center justify-between ${
+            transferDirection === 'embedded-to-custodial'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+          }`}
+        >
+          <div className="flex items-center">
+            <span className="mr-3">💼→🎮</span>
+            <div className="text-left">
+              <div className="font-medium">Embedded Wallet → Game</div>
+              <div className="text-xs opacity-75">
+                Move SOL to your game balance
+              </div>
+            </div>
+          </div>
+          <div className="text-xs">
+            {embeddedBalance.toFixed(6)} SOL available
+          </div>
+        </button>
+      </div>
+    </div>
+
+    {/* Amount Input for Transfer */}
+    <div>
+      <label className="block text-sm text-gray-400 mb-2">Amount ({tokenSymbol})</label>
+      <div className="relative">
+        <input
+          type="text"
+          value={amount}
+          onChange={handleAmountChange}
+          placeholder="0.000000"
+          className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 pr-16 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+        />
+        <button
+          onClick={handleSetMaxAmount}
+          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-blue-400 text-xs hover:text-blue-300"
+        >
+          MAX
+        </button>
+      </div>
+      <div className="text-xs text-gray-500 mt-1">
+        Available: {transferDirection === 'custodial-to-embedded' 
+          ? custodialBalance.toFixed(6) 
+          : embeddedBalance.toFixed(6)} SOL
+      </div>
+    </div>
+
+    {/* Transfer Button */}
+    <button
+      onClick={handleTransfer}
+      disabled={isLoading || !effectiveUserId || !amount}
+      className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-md transition-colors flex items-center justify-center"
+    >
+      {isLoading ? (
+        <>
+          <Loader size={16} className="animate-spin mr-2" />
+          Processing Transfer...
+        </>
+      ) : (
+        <>
+          <ArrowLeftRight size={16} className="mr-2" />
+          Transfer {amount || '0'} SOL
+          <span className="ml-2">
+            {transferDirection === 'custodial-to-embedded' ? '🎮→💼' : '💼→🎮'}
+          </span>
+        </>
+      )}
+    </button>
+
+    {/* Transfer Info */}
+    <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md text-sm">
+      <div className="font-medium mb-1">ℹ️ Transfer Info</div>
+      <div className="text-xs">
+        {transferDirection === 'custodial-to-embedded' 
+          ? 'Moving SOL from your game balance to your embedded wallet for withdrawals or external use.'
+          : 'Moving SOL from your embedded wallet to your game balance for trading and gameplay.'
+        }
+      </div>
+    </div>
+  </div>
+)}
             {/* Rest of the component remains the same... */}
             {/* I'll continue with the rest in a comment since it's very long */}
             

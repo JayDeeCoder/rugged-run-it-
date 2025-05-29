@@ -3,20 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, TransactionInstruction } from '@solana/web3.js';
 import { createClient } from '@supabase/supabase-js';
 
-// Environment variables
-const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL!;
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-// Initialize services
-const solanaConnection = new Connection(SOLANA_RPC_URL, 'confirmed');
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-
 // Daily withdrawal limits (same as custodial)
 const DAILY_WITHDRAWAL_LIMIT = 20.0; // 20 SOL per day
 const MIN_WITHDRAWAL = 0.001;
 
-async function checkDailyWithdrawalLimit(userId: string, amount: number): Promise<{ allowed: boolean; used: number; remaining: number }> {
+async function checkDailyWithdrawalLimit(supabase: any, userId: string, amount: number): Promise<{ allowed: boolean; used: number; remaining: number }> {
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
   
   // Get today's withdrawals (both custodial and privy count toward same limit)
@@ -34,7 +25,7 @@ async function checkDailyWithdrawalLimit(userId: string, amount: number): Promis
     throw new Error('Failed to check daily withdrawal limit');
   }
   
-  const usedToday = todayWithdrawals?.reduce((sum, tx) => sum + parseFloat(tx.amount.toString()), 0) || 0;
+  const usedToday = todayWithdrawals?.reduce((sum: number, tx: any) => sum + parseFloat(tx.amount.toString()), 0) || 0;
   const remaining = DAILY_WITHDRAWAL_LIMIT - usedToday;
   
   return {
@@ -47,6 +38,27 @@ async function checkDailyWithdrawalLimit(userId: string, amount: number): Promis
 export async function POST(request: NextRequest) {
   try {
     console.log('🔄 Privy wallet withdrawal request received');
+    
+    // Initialize services inside the handler
+    const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+    const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    // Validate environment variables
+    if (!SOLANA_RPC_URL || !SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+      console.error('❌ Missing environment variables:', {
+        hasSolanaRpc: !!SOLANA_RPC_URL,
+        hasSupabaseUrl: !!SUPABASE_URL,
+        hasSupabaseKey: !!SUPABASE_SERVICE_KEY
+      });
+      return NextResponse.json(
+        { error: 'Server configuration error' },
+        { status: 500 }
+      );
+    }
+
+    const solanaConnection = new Connection(SOLANA_RPC_URL, 'confirmed');
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     
     const body = await request.json();
     const { userId, walletAddress, amount, destinationAddress, signedTransaction } = body;
@@ -83,7 +95,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Check daily withdrawal limit
-    const dailyCheck = await checkDailyWithdrawalLimit(userId, amount);
+    const dailyCheck = await checkDailyWithdrawalLimit(supabase, userId, amount);
     if (!dailyCheck.allowed) {
       return NextResponse.json(
         { 
@@ -258,7 +270,7 @@ export async function POST(request: NextRequest) {
       }
       
       // Get updated daily limit info
-      const updatedDailyCheck = await checkDailyWithdrawalLimit(userId, 0);
+      const updatedDailyCheck = await checkDailyWithdrawalLimit(supabase, userId, 0);
       
       console.log(`✅ Privy withdrawal completed: ${amount} SOL to ${destinationAddress}, New balance: ${finalBalance.toFixed(3)} SOL`);
       

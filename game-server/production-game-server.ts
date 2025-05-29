@@ -3959,6 +3959,71 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
+
+    // ===== AUTO-INITIALIZE USER WITH PRIVY WALLET =====
+    socket.on('initializeUser', async (data) => {
+        const { userId, walletAddress } = data;
+        
+        try {
+            if (!userId || !walletAddress) {
+                socket.emit('userInitializeResult', {
+                    success: false,
+                    error: 'Missing userId or walletAddress'
+                });
+                return;
+            }
+            
+            console.log(`🔗 Auto-initializing user ${userId} with Privy wallet: ${walletAddress}`);
+            
+            // Auto-register the Privy embedded wallet
+            const privyResult = await registerPrivyWallet(userId, walletAddress, undefined);
+            
+            // Ensure hybrid wallet exists
+            let userWallet = hybridUserWallets.get(userId);
+            if (!userWallet) {
+                userWallet = {
+                    userId,
+                    externalWalletAddress: walletAddress, // Use the Privy wallet as external wallet
+                    custodialBalance: 0,
+                    custodialTotalDeposited: 0,
+                    lastCustodialDeposit: 0,
+                    embeddedWalletId: undefined,
+                    embeddedBalance: 0,
+                    lastEmbeddedWithdrawal: 0,
+                    lastTransferBetweenWallets: 0,
+                    totalTransfersToEmbedded: 0,
+                    totalTransfersToCustodial: 0,
+                    createdAt: Date.now()
+                };
+                
+                hybridUserWallets.set(userId, userWallet);
+                await saveHybridWallet(userWallet);
+            }
+            
+            // Update Privy wallet balance
+            const privyBalance = await updatePrivyWalletBalance(userId);
+            
+            socket.emit('userInitializeResult', {
+                success: true,
+                userId,
+                walletAddress,
+                custodialBalance: userWallet.custodialBalance,
+                privyBalance: privyBalance,
+                message: 'User wallet initialized successfully with Privy embedded wallet'
+            });
+            
+            console.log(`✅ User ${userId} initialized with Privy wallet: ${walletAddress}`);
+            
+        } catch (error) {
+            console.error('Error initializing user:', error);
+            socket.emit('userInitializeResult', {
+                success: false,
+                error: 'Failed to initialize user wallet'
+            });
+        }
+    });
+
+    
     // ===== GET TRANSFER HISTORY HANDLER =====
     socket.on('getTransferHistory', async (data) => {
         const { userId, limit = 20 } = data;
@@ -5402,53 +5467,6 @@ app.get('/api/privy/stats', (req, res) => {
 // ===== STEP 3.2: UPDATE YOUR server.listen() FUNCTION =====
 // Find your existing server.listen() and UPDATE it like this:
 
-server.listen(PORT, async () => {
-    // ✅ Keep your existing initializations
-    await initializeAnalyticsSystem();
-    await initializeHybridSystem();
-    await initializeGameCounter();
-    await initializePrivyIntegration();
-    
-    // 🆕 ADD THIS: Initialize analytics system
-    await initializeAnalyticsSystem();
-    
-    // ✅ Keep your existing startup code...
-    await updateHouseBalance();
-    const config = getCurrentGameConfig();
-    
-    console.log(`🎮 Enhanced hybrid game server running on port ${PORT}`);
-    console.log(`🏛️ House wallet: ${housePublicKey.toString()}`);
-    console.log(`💰 House balance: ${houseBalance.toFixed(3)} SOL`);
-    console.log(`🔄 Hybrid system: ${hybridSystemStats.totalUsers} users loaded`);
-    console.log(`💎 Custodial balance: ${hybridSystemStats.totalCustodialBalance.toFixed(3)} SOL`);
-    console.log(`💼 Privy wallet balance: ${hybridSystemStats.totalEmbeddedBalance.toFixed(3)} SOL`);
-    console.log(`🔗 Privy integration: ${privyIntegrationManager.totalPrivyWallets} wallets, ${privyIntegrationManager.connectedPrivyWallets} connected`);
-    console.log(`🔐 Privy wallet system: ${privyIntegrationManager.totalPrivyBalance.toFixed(3)} SOL managed`);
-
-    
-    
-    // 🆕 ADD THIS: Log analytics system stats
-    console.log(`📊 Analytics system: ${userAnalyticsCache.size} user profiles, ${gameAnalyticsHistory.length} game records`);
-    console.log(`📈 Financial analytics: ${financialAnalyticsHistory.length} periods tracked`);
-    
-    // ✅ Keep all your existing logging...
-    console.log(`🎮 Enhanced trader-style game server running on port ${PORT}`);
-    
-    // 🆕 ADD THESE: Analytics endpoint URLs
-    console.log(`Health check: http://localhost:${PORT}/api/health`);
-    console.log(`Analytics dashboard: http://localhost:${PORT}/api/analytics/dashboard`);
-    console.log(`User analytics: http://localhost:${PORT}/api/analytics/user/[userId]`);
-    console.log(`Game analytics: http://localhost:${PORT}/api/analytics/games`);
-    console.log(`Financial analytics: http://localhost:${PORT}/api/analytics/financial`);
-    console.log(`Daily report: http://localhost:${PORT}/api/analytics/daily-report`);
-    console.log(`Trends analysis: http://localhost:${PORT}/api/analytics/trends`);
-    console.log(`Leaderboard: http://localhost:${PORT}/api/analytics/users/leaderboard`);
-    console.log(`System metrics: http://localhost:${PORT}/api/analytics/system`);
-    
-    // ✅ Keep your existing game startup
-    console.log(`🚀 Starting game loop...`);
-    startWaitingPeriod();
-});
 
 // ===== CUSTODIAL DEPOSIT API =====
 app.post('/api/custodial/deposit', async (req, res): Promise<void> => {

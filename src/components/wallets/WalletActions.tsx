@@ -235,7 +235,8 @@ const WalletActions = () => {
   onClose={() => setIsWithdrawModalOpen(false)}
   currentToken={currentToken}
   balance={balance}
-  walletAddress={walletAddress!}  // 🆕 ADD THIS LINE
+  walletAddress={walletAddress!}
+  userId={null}// Don't pass userId here - let it fallback to wallet address lookup
   onSuccess={() => {
     // Refresh balance after successful withdrawal
     if (walletAddress && isValidSolanaAddress(walletAddress)) {

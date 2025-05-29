@@ -19,6 +19,7 @@ interface WithdrawModalProps {
   currentToken: TokenType;
   balance: number; // This will be the active balance (custodial or embedded based on context)
   walletAddress: string; // Add walletAddress prop like DepositModal
+  userId: string | null; // 🆕 ADD THIS LINE
 }
 
 // Tab types for different actions
@@ -37,14 +38,14 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   onSuccess, 
   currentToken,
   balance,
-  walletAddress // Use walletAddress prop instead of getting from hooks
+  walletAddress, // Use walletAddress prop instead of getting from hooks
+  userId // 🆕 ADD THIS
 }) => {
   // Privy wallet setup - simplified since we get walletAddress as prop
   const { authenticated, user } = usePrivy();
   
   // User context
-  const { currentUser } = useContext(UserContext);
-  const userId = currentUser?.id || '';
+  const userIdToUse = userId || '';
   
   // Tab state
   const [activeTab, setActiveTab] = useState<ModalTab>('withdraw');

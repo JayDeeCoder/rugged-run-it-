@@ -1,4 +1,4 @@
-// src/components/trading/TradingControls.tsx - Custodial SOL + SPL RUGGED Integration (Fixed walletAddress prop)
+// src/components/trading/TradingControls.tsx - Fixed WithdrawModal userId prop
 import { FC, useState, useEffect, useContext, useCallback } from 'react';
 import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon, Timer, Users, Settings, Wallet, TrendingUp } from 'lucide-react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
@@ -1078,6 +1078,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   `;
 
   // Get or create user when wallet connects
+  // Get or create user when wallet connects
   useEffect(() => {
     if (authenticated && walletAddress) {
       const initUser = async () => {
@@ -1085,6 +1086,26 @@ const TradingControls: FC<TradingControlsProps> = ({
           const userData = await UserAPI.getUserOrCreate(walletAddress);
           if (userData) {
             setUserId(userData.id);
+            
+            // Auto-initialize user with their Privy wallet
+            const socket = (window as any).gameSocket;
+            if (socket) {
+              socket.emit('initializeUser', { 
+                userId: userData.id, 
+                walletAddress 
+              });
+              
+              socket.once('userInitializeResult', (result: any) => {
+                if (result.success) {
+                  console.log(`✅ User ${userData.id} initialized with Privy wallet`);
+                  // Refresh balances
+                  updateCustodialBalance();
+                  updateRuggedBalance();
+                } else {
+                  console.warn('User initialization failed:', result.error);
+                }
+              });
+            }
           }
         } catch (error) {
           console.warn('Could not get user data:', error);
@@ -1092,7 +1113,7 @@ const TradingControls: FC<TradingControlsProps> = ({
       };
       initUser();
     }
-  }, [authenticated, walletAddress]);
+  }, [authenticated, walletAddress, updateCustodialBalance, updateRuggedBalance]);
 
   // Update local amount state when saved amount changes
   useEffect(() => {
@@ -1465,6 +1486,7 @@ const TradingControls: FC<TradingControlsProps> = ({
           currentToken={currentToken}
           balance={activeBalance}
           walletAddress={walletAddress}
+          userId={userId} // 🆕 ADD THIS PROP - MOBILE VERSION
         />
       </div>
     );
@@ -1563,12 +1585,13 @@ const TradingControls: FC<TradingControlsProps> = ({
       />
       
       <WithdrawModal 
-        isOpen={showWithdrawModal}
-        onClose={() => setShowWithdrawModal(false)}
-        currentToken={currentToken}
-        balance={activeBalance}
-        walletAddress={walletAddress}
-      />
+  isOpen={showWithdrawModal}
+  onClose={() => setShowWithdrawModal(false)}
+  currentToken={currentToken}
+  balance={activeBalance}
+  walletAddress={walletAddress}
+  userId={userId || null} // ✅ Only pass userId if it exists
+/>
     </div>
   );
 };

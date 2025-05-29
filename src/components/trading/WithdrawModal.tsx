@@ -218,48 +218,6 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     updateEmbeddedBalance();
   }, [updateCustodialBalance, updateEmbeddedBalance]);
   
-  // Reset state when modal opens/closes
-  useEffect(() => {
-    if (isOpen) {
-      console.log('🚀 WithdrawModal: Modal opened, resetting state and refreshing balances');
-      setAmount('');
-      setDestinationAddress('');
-      setError(null);
-      setSuccess(false);
-      setAddressError(null);
-      setSuccessMessage('');
-      setActiveTab('withdraw');
-      
-      // Trigger immediate balance refresh
-      setTimeout(() => {
-        refreshBalances();
-      }, 500); // Small delay to ensure everything is ready
-    }
-  }, [isOpen, refreshBalances]);
-  
-  // 🔧 ADDED: Log whenever balances change
-  useEffect(() => {
-    console.log('📊 WithdrawModal: Balance state updated:', {
-      custodial: custodialBalance.toFixed(6),
-      embedded: embeddedBalance.toFixed(6),
-      custodialLoading,
-      embeddedLoading,
-      walletAddress: walletAddress?.slice(0, 8) + '...' + walletAddress?.slice(-4),
-      userId
-    });
-  }, [custodialBalance, embeddedBalance, custodialLoading, embeddedLoading, walletAddress, userId]);
-  
-  // Handle outside clicks
-  useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
-    if (isOpen && !isLoading) onClose();
-  });
-  
-  // If not open, don't render
-  if (!isOpen) return null;
-  
-  // Get token symbol
-  const tokenSymbol = currentToken;
-  
   // Validate Solana address
   const validateAddress = (address: string): boolean => {
     const isValidFormat = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
@@ -326,6 +284,8 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       
       if (withdrawSource === 'custodial') {
         // Withdraw from custodial balance
+        console.log('🔄 Withdrawing from custodial balance:', { userId, amount: withdrawAmount, destinationAddress });
+        
         const response = await fetch('/api/custodial/withdraw', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -336,7 +296,16 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           })
         });
         
+        console.log('📡 Custodial withdraw response status:', response.status);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('❌ Custodial withdraw API error:', errorText);
+          throw new Error(`Withdrawal failed: ${response.status} ${response.statusText}`);
+        }
+        
         const result = await response.json();
+        console.log('📡 Custodial withdraw result:', result);
         
         if (result.success) {
           setSuccess(true);
@@ -348,6 +317,8 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         }
       } else {
         // Withdraw from embedded wallet (Privy)
+        console.log('🔄 Withdrawing from embedded wallet:', { userId, walletAddress, amount: withdrawAmount, destinationAddress });
+        
         const response = await fetch('/api/privy/withdraw', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -359,7 +330,16 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           })
         });
         
+        console.log('📡 Privy withdraw response status:', response.status);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('❌ Privy withdraw API error:', errorText);
+          throw new Error(`Withdrawal failed: ${response.status} ${response.statusText}`);
+        }
+        
         const result = await response.json();
+        console.log('📡 Privy withdraw result:', result);
         
         if (result.success) {
           setSuccess(true);
@@ -372,7 +352,9 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       }
       
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Withdrawal failed');
+      console.error('❌ Withdraw error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Withdrawal failed';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -400,6 +382,8 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       
       if (transferDirection === 'custodial-to-embedded') {
         // Transfer from custodial to embedded wallet
+        console.log('🔄 Transferring custodial to embedded:', { userId, amount: transferAmount });
+        
         const response = await fetch('/api/transfer/custodial-to-privy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -409,7 +393,17 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           })
         });
         
+        console.log('📡 Custodial to embedded response status:', response.status);
+        
+        // Check if response is ok before parsing JSON
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('❌ Custodial to embedded API error:', errorText);
+          throw new Error(`Transfer failed: ${response.status} ${response.statusText}`);
+        }
+        
         const result = await response.json();
+        console.log('📡 Custodial to embedded result:', result);
         
         if (result.success) {
           setSuccess(true);
@@ -421,6 +415,8 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         }
       } else {
         // Transfer from embedded wallet to custodial
+        console.log('🔄 Transferring embedded to custodial:', { userId, amount: transferAmount });
+        
         const response = await fetch('/api/transfer/privy-to-custodial', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -430,24 +426,100 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           })
         });
         
-        const result = await response.json();
+        console.log('📡 Embedded to custodial response status:', response.status);
+        console.log('📡 Embedded to custodial response headers:', Object.fromEntries(response.headers));
+        
+        // 🔧 FIXED: Better error handling for JSON parsing
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('❌ Embedded to custodial API error:', errorText);
+          throw new Error(`Transfer failed: ${response.status} ${response.statusText} - ${errorText}`);
+        }
+        
+        // Check content type before parsing JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const responseText = await response.text();
+          console.error('❌ Non-JSON response from embedded to custodial:', responseText);
+          throw new Error('Server returned non-JSON response');
+        }
+        
+        let result;
+        try {
+          const responseText = await response.text();
+          console.log('📡 Embedded to custodial raw response:', responseText);
+          result = JSON.parse(responseText);
+        } catch (jsonError) {
+          console.error('❌ Failed to parse JSON from embedded to custodial:', jsonError);
+          throw new Error('Invalid response format from server');
+        }
+        
+        console.log('📡 Embedded to custodial parsed result:', result);
         
         if (result.success) {
           setSuccess(true);
           setSuccessMessage(`Successfully transferred ${transferAmount} SOL to game balance`);
           refreshBalances();
           if (onSuccess) onSuccess();
+        } else if (result.action === 'signature_required') {
+          // 🔧 ADDED: Handle signature required case
+          console.log('🔐 Signature required for embedded to custodial transfer');
+          setError('This transfer requires wallet signature. Please try again or use a smaller amount.');
         } else {
           throw new Error(result.error || 'Transfer failed');
         }
       }
       
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Transfer failed');
+      console.error('❌ Transfer error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Transfer failed';
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }
   };
+  
+  // Reset state when modal opens/closes
+  useEffect(() => {
+    if (isOpen) {
+      console.log('🚀 WithdrawModal: Modal opened, resetting state and refreshing balances');
+      setAmount('');
+      setDestinationAddress('');
+      setError(null);
+      setSuccess(false);
+      setAddressError(null);
+      setSuccessMessage('');
+      setActiveTab('withdraw');
+      
+      // Trigger immediate balance refresh
+      setTimeout(() => {
+        refreshBalances();
+      }, 500); // Small delay to ensure everything is ready
+    }
+  }, [isOpen, refreshBalances]);
+  
+  // 🔧 ADDED: Log whenever balances change
+  useEffect(() => {
+    console.log('📊 WithdrawModal: Balance state updated:', {
+      custodial: custodialBalance.toFixed(6),
+      embedded: embeddedBalance.toFixed(6),
+      custodialLoading,
+      embeddedLoading,
+      walletAddress: walletAddress?.slice(0, 8) + '...' + walletAddress?.slice(-4),
+      userId
+    });
+  }, [custodialBalance, embeddedBalance, custodialLoading, embeddedLoading, walletAddress, userId]);
+  
+  // Handle outside clicks
+  useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
+    if (isOpen && !isLoading) onClose();
+  });
+  
+  // If not open, don't render
+  if (!isOpen) return null;
+  
+  // Get token symbol
+  const tokenSymbol = currentToken;
   
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">

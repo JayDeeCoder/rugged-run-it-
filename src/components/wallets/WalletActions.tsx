@@ -70,36 +70,49 @@ const WalletActions = () => {
     }
   };
   
-  // 🔧 FIXED: Use same balance fetching method as Navbar
+  // 🔧 FIXED: Use EXACT same balance fetching method as working Navbar
   useEffect(() => {
     const fetchBalance = async () => {
-      if (!authenticated || !walletAddress) {
-        setIsLoading(false);
+      console.log('🔍 WalletActions fetchBalance called:', {
+        embeddedWallet: !!embeddedWallet,
+        walletAddress,
+        authenticated
+      });
+      
+      // EXACT same condition check as Navbar
+      if (!embeddedWallet || !walletAddress || !authenticated) {
+        console.log('❌ WalletActions: Missing required conditions');
+        setBalance(0);
         return;
       }
-      
+
       try {
+        console.log('🚀 WalletActions: Starting balance fetch...');
         setIsLoading(true);
         
-        // Validate wallet address before using
+        // EXACT same validation as Navbar
         if (!isValidSolanaAddress(walletAddress)) {
           console.error('Invalid wallet address:', walletAddress);
-          setIsLoading(false);
+          setBalance(0);
           return;
         }
         
-        // 🔧 FIXED: Use same RPC configuration as Navbar
+        // EXACT same RPC configuration as Navbar
         const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
         const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+        
+        console.log('🔧 WalletActions RPC config:', {
+          rpcUrl: rpcUrl?.substring(0, 50) + '...',
+          hasApiKey: !!apiKey
+        });
         
         if (!rpcUrl) {
           console.error('Missing NEXT_PUBLIC_SOLANA_RPC_URL environment variable');
           setBalance(0);
-          setIsLoading(false);
           return;
         }
         
-        // Same connection config as Navbar
+        // EXACT same connection config as Navbar
         const connectionConfig: any = {
           commitment: 'confirmed',
         };
@@ -110,43 +123,51 @@ const WalletActions = () => {
           };
         }
         
+        console.log('🔗 WalletActions: Creating connection...');
         const connection = new Connection(rpcUrl, connectionConfig);
         
-        // Create PublicKey with error handling (same as Navbar)
+        // EXACT same PublicKey creation as Navbar
+        console.log('🔑 WalletActions: Creating PublicKey...');
         const publicKey = safeCreatePublicKey(walletAddress);
         if (!publicKey) {
-          console.error('Failed to create PublicKey:', walletAddress);
-          setIsLoading(false);
+          console.error('Failed to create PublicKey for address:', walletAddress);
+          setBalance(0);
           return;
         }
         
-        const balanceResponse = await connection.getBalance(publicKey);
-        const solBalance = balanceResponse / LAMPORTS_PER_SOL;
+        // EXACT same balance fetching as Navbar
+        console.log('💰 WalletActions: Fetching balance from RPC...');
+        const lamports = await connection.getBalance(publicKey);
+        const solBalance = lamports / LAMPORTS_PER_SOL;
         
-        console.log(`💰 WalletActions balance fetched: ${solBalance.toFixed(6)} SOL`);
+        console.log(`✅ WalletActions balance fetched: ${solBalance.toFixed(6)} SOL`);
         setBalance(solBalance);
       } catch (error) {
-        console.error('Error fetching balance:', error);
+        console.error('❌ Failed to fetch wallet balance:', error);
         setBalance(0);
       } finally {
         setIsLoading(false);
       }
     };
-    
+
     fetchBalance();
     
-    // Set up polling to refresh balance (same as Navbar)
-    const intervalId = setInterval(fetchBalance, 30000); // Every 30 seconds
-    
+    // EXACT same interval setup as Navbar
+    const intervalId = setInterval(fetchBalance, 30000);
     return () => clearInterval(intervalId);
-  }, [authenticated, walletAddress]);
+  }, [embeddedWallet, walletAddress, authenticated]); // EXACT same dependencies as Navbar
   
-  // 🔧 FIXED: Balance refresh function using same method as Navbar
+  // 🔧 FIXED: Balance refresh function using EXACT same method as Navbar
   const refreshBalance = async () => {
-    if (!walletAddress || !isValidSolanaAddress(walletAddress)) return;
+    if (!embeddedWallet || !walletAddress || !authenticated) return;
     
     try {
-      // Use same RPC configuration as Navbar
+      if (!isValidSolanaAddress(walletAddress)) {
+        console.error('Invalid wallet address:', walletAddress);
+        return;
+      }
+      
+      // EXACT same RPC configuration as Navbar
       const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
       const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
       
@@ -168,11 +189,15 @@ const WalletActions = () => {
       const connection = new Connection(rpcUrl, connectionConfig);
       const publicKey = safeCreatePublicKey(walletAddress);
       
-      if (publicKey) {
-        const newBalance = await connection.getBalance(publicKey);
-        setBalance(newBalance / LAMPORTS_PER_SOL);
-        console.log(`🔄 Balance refreshed: ${(newBalance / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
+      if (!publicKey) {
+        console.error('Failed to create PublicKey for address:', walletAddress);
+        return;
       }
+      
+      const lamports = await connection.getBalance(publicKey);
+      const solBalance = lamports / LAMPORTS_PER_SOL;
+      setBalance(solBalance);
+      console.log(`🔄 Balance refreshed: ${solBalance.toFixed(6)} SOL`);
     } catch (error) {
       console.error('Error refreshing balance:', error);
     }
@@ -252,9 +277,14 @@ const WalletActions = () => {
         <div className="mb-4 bg-gray-900 p-2 rounded text-xs">
           <div className="text-gray-400">Debug Info:</div>
           <div className="text-green-400">UserId: {userId || 'Loading...'}</div>
-          <div className="text-blue-400">WalletAddress: {walletAddress}</div>
+          <div className="text-blue-400">WalletAddress: {walletAddress || 'None'}</div>
+          <div className="text-yellow-400">Authenticated: {authenticated ? 'Yes' : 'No'}</div>
+          <div className="text-orange-400">EmbeddedWallet: {embeddedWallet ? 'Found' : 'None'}</div>
+          <div className="text-cyan-400">Ready: {ready ? 'Yes' : 'No'}</div>
           <div className="text-purple-400">RPC URL: {process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.substring(0, 50)}...</div>
           <div className="text-pink-400">API Key: {process.env.NEXT_PUBLIC_ALCHEMY_API_KEY ? 'Set' : 'Not Set'}</div>
+          <div className="text-red-400">IsLoading: {isLoading ? 'Yes' : 'No'}</div>
+          <div className="text-white">Balance: {balance} SOL</div>
         </div>
       )}
       

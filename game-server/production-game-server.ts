@@ -804,7 +804,7 @@ async function registerPrivyWallet(
     privyWalletId?: string
 ): Promise<{ success: boolean; error?: string }> {
     try {
-        console.log(`🔗 Registering Privy wallet for ${userId}: ${privyWalletAddress}`);
+        console.log(`🔗 Registering embedded wallet for ${userId}: ${privyWalletAddress}`);
         
         // Validate wallet address
         try {
@@ -816,15 +816,23 @@ async function registerPrivyWallet(
         // Check if wallet is already registered
         const existingWallet = privyIntegrationManager.privyWallets.get(userId);
         if (existingWallet) {
-            // Update existing wallet
+            // Update existing wallet - this handles address changes
+            const oldAddress = existingWallet.privyWalletAddress;
             existingWallet.privyWalletAddress = privyWalletAddress;
             existingWallet.privyWalletId = privyWalletId;
             existingWallet.isConnected = true;
             existingWallet.lastUsed = Date.now();
             
-            console.log(`🔄 Updated existing Privy wallet for ${userId}`);
+            if (oldAddress !== privyWalletAddress) {
+                console.log(`🔄 Updated embedded wallet address for ${userId}: ${oldAddress} → ${privyWalletAddress}`);
+                // Reset balance to trigger fresh fetch
+                existingWallet.balance = 0;
+                existingWallet.lastBalanceUpdate = 0;
+            } else {
+                console.log(`✅ Reconnected existing embedded wallet for ${userId}`);
+            }
         } else {
-            // Create new wallet
+            // Create new wallet registration
             const privyWallet: PrivyWallet = {
                 userId,
                 privyWalletAddress,
@@ -837,7 +845,7 @@ async function registerPrivyWallet(
             };
             
             privyIntegrationManager.privyWallets.set(userId, privyWallet);
-            console.log(`✅ Registered new Privy wallet for ${userId}`);
+            console.log(`✅ Registered new embedded wallet for ${userId}: ${privyWalletAddress}`);
         }
         
         // Update balance from blockchain
@@ -853,7 +861,7 @@ async function registerPrivyWallet(
         return { success: true };
         
     } catch (error) {
-        console.error('❌ Privy wallet registration failed:', error);
+        console.error('❌ Embedded wallet registration failed:', error);
         return { 
             success: false, 
             error: error instanceof Error ? error.message : 'Registration failed' 
@@ -865,30 +873,49 @@ async function updatePrivyWalletBalance(userId: string): Promise<number> {
     try {
         const privyWallet = privyIntegrationManager.privyWallets.get(userId);
         if (!privyWallet) {
-            console.warn(`⚠️ Privy wallet not found for user ${userId}`);
+            console.warn(`⚠️ No embedded wallet found for user ${userId}`);
             return 0;
         }
         
-        // Get balance from blockchain
-        const publicKey = new PublicKey(privyWallet.privyWalletAddress);
-        const balanceResponse = await solanaConnection.getBalance(publicKey);
-        const balance = balanceResponse / LAMPORTS_PER_SOL;
+        // Get balance from blockchain with retry logic
+        let balance = 0;
+        let retries = 3;
+        
+        while (retries > 0) {
+            try {
+                const publicKey = new PublicKey(privyWallet.privyWalletAddress);
+                const balanceResponse = await solanaConnection.getBalance(publicKey);
+                balance = balanceResponse / LAMPORTS_PER_SOL;
+                break; // Success, exit retry loop
+            } catch (error) {
+                retries--;
+                if (retries === 0) {
+                    console.error(`❌ Failed to get balance for ${userId} after 3 attempts:`, error);
+                    return privyWallet.balance; // Return cached balance
+                }
+                // Wait a bit before retrying
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
         
         // Update wallet
         privyWallet.balance = balance;
         privyWallet.lastBalanceUpdate = Date.now();
         privyWallet.lastUsed = Date.now();
         
-        // Save to database
-        await savePrivyWalletToDatabase(privyWallet);
+        // Save to database (non-blocking)
+        savePrivyWalletToDatabase(privyWallet).catch(error => {
+            console.warn(`⚠️ Failed to save embedded wallet data for ${userId}:`, error);
+        });
         
         // Update stats
         updatePrivyIntegrationStats();
         
+        console.log(`💰 Updated embedded wallet balance for ${userId}: ${balance.toFixed(6)} SOL`);
         return balance;
         
     } catch (error) {
-        console.error(`❌ Failed to update Privy wallet balance for ${userId}:`, error);
+        console.error(`❌ Failed to update embedded wallet balance for ${userId}:`, error);
         return 0;
     }
 }
@@ -3202,8 +3229,11 @@ async function runGameLoop(duration: number): Promise<void> {
 }
 
 async function startWaitingPeriod(): Promise<void> {
+    // Clear any existing countdown first
+    clearGameCountdown();
+    
     if (gameStartLock) {
-        console.log('Game start lock active, skipping waiting period...');
+        console.log('⚠️ Game start lock active, skipping waiting period...');
         return;
     }
 
@@ -3229,47 +3259,73 @@ async function startWaitingPeriod(): Promise<void> {
             maxPayoutCapacity: calculateMaxPayoutCapacity()
         };
 
-        // Emit waiting state
+        // Emit initial waiting state
         io.emit('gameWaiting', {
             gameId: currentGame.id,
             gameNumber: currentGame.gameNumber,
             status: 'waiting',
             serverTime: Date.now(),
             houseBalance: currentGame.houseBalance,
-            maxPayoutCapacity: currentGame.maxPayoutCapacity
+            maxPayoutCapacity: currentGame.maxPayoutCapacity,
+            countdown: 10000 // 10 seconds in milliseconds
         });
 
-        // Start countdown
+        // Start countdown - FIXED: Initialize properly
         countdownTimeRemaining = 10; // 10 seconds countdown
+        console.log(`⏰ Starting countdown: ${countdownTimeRemaining} seconds`);
         
         const countdownInterval = setInterval(() => {
             countdownTimeRemaining--;
             
+            console.log(`⏰ Countdown: ${countdownTimeRemaining} seconds remaining`);
+            
+            // Emit countdown event
             io.emit('countdown', {
                 gameId: currentGame?.id,
                 gameNumber: currentGame?.gameNumber,
                 timeRemaining: countdownTimeRemaining,
-                status: 'waiting'
+                countdownMs: countdownTimeRemaining * 1000, // Also provide milliseconds
+                status: 'waiting',
+                timestamp: Date.now()
+            });
+            
+            // Also emit server sync with countdown info
+            io.emit('serverSync', {
+                gameId: currentGame?.id,
+                gameNumber: currentGame?.gameNumber,
+                multiplier: 1.0,
+                serverTime: Date.now(),
+                status: 'waiting',
+                countdown: countdownTimeRemaining * 1000,
+                countdownSeconds: countdownTimeRemaining,
+                canBet: countdownTimeRemaining > 2 // Allow betting until 2 seconds left
             });
             
             if (countdownTimeRemaining <= 0) {
+                console.log('⏰ Countdown finished, starting new game...');
                 clearInterval(countdownInterval);
+                gameCountdown = null;
                 startNewGame();
             }
         }, 1000);
 
         gameCountdown = countdownInterval;
+        
+        console.log(`✅ Waiting period started with ${countdownTimeRemaining}s countdown`);
 
     } catch (error) {
-        console.error('Error in waiting period:', error);
+        console.error('❌ Error in waiting period:', error);
         // Retry after delay
         setTimeout(() => {
+            console.log('🔄 Retrying waiting period after error...');
             startWaitingPeriod();
         }, 5000);
     }
 }
+
 function clearGameCountdown(): void {
     if (gameCountdown) {
+        console.log('🛑 Clearing existing game countdown');
         clearInterval(gameCountdown);
         gameCountdown = null;
     }
@@ -3391,8 +3447,11 @@ async function startNewGame(): Promise<void> {
 
 
 // GAME COUNTER FIX: Enhanced startWaitingPeriod with persistent cycling counter
-async function crashGame(): Promise<void> {
-    if (!currentGame) return;
+async function  crashGame(): Promise<void> {
+    if (!currentGame) {
+        console.log('⚠️ No current game to crash');
+        return;
+    }
 
     const config = getCurrentGameConfig();
     const crashTime = Date.now();
@@ -3426,23 +3485,22 @@ async function crashGame(): Promise<void> {
             totalPayouts += bet.cashoutAmount || 0;
         }
     }
-    // ✅ CRITICAL FIX: DEFINE gameProfit HERE, BEFORE ANY USAGE
+    
     const gameProfit = currentGame.totalBets - totalPayouts;
     
-    // Now all the following code can safely use gameProfit
+    // Bootstrap tracking
     if (config._BOOTSTRAP_MODE) {
         trackBootstrapProgress(gameProfit);
     } else {
         updateMultiplierHistory(currentGame, totalPayouts);
     }
 
-    // Record game analytics
+    // Record analytics
     recordGameAnalytics(currentGame, totalPayouts);
 
     // Update user analytics for all players
     for (const [walletAddress, bet] of currentGame.activeBets) {
         if (!bet.cashedOut) {
-            // Player lost - update analytics
             updateUserAnalytics(bet.userId, { gameNumber: currentGame.gameNumber }, {
                 amount: bet.betAmount,
                 payout: 0,
@@ -3451,41 +3509,6 @@ async function crashGame(): Promise<void> {
                 type: 'loss'
             });
         }
-        // Note: Winners are already recorded in cashOut functions
-    }
-
-    // Emit real-time analytics update
-    io.to('analytics_dashboard').emit('liveAnalyticsUpdate', {
-        type: 'game_completed',
-        gameNumber: currentGame.gameNumber,
-        totalProfit: gameProfit, // ← Now properly scoped
-        totalPlayers: currentGame.totalPlayers,
-        crashMultiplier: currentGame.currentMultiplier,
-        timestamp: Date.now()
-    });
-
-    // Check for alerts
-    const recentGames = gameAnalyticsHistory.slice(-10);
-    const recentProfitMargin = recentGames.length > 0 ? 
-        (recentGames.reduce((sum: any, g: any) => sum + g.houseProfit, 0) / 
-         recentGames.reduce((sum: any, g: any) => sum + g.totalWagered, 0)) * 100 : 0;
-
-    if (recentProfitMargin < 10) {
-        io.to('analytics_alerts').emit('analyticsAlert', {
-            type: 'low_profit_margin',
-            message: `Low profit margin detected: ${recentProfitMargin.toFixed(1)}%`,
-            severity: 'warning',
-            timestamp: Date.now()
-        });
-    }
-
-    if (currentGame.totalPlayers === 0) {
-        io.to('analytics_alerts').emit('analyticsAlert', {
-            type: 'no_players',
-            message: `Game ${currentGame.gameNumber} had no players`,
-            severity: 'info',
-            timestamp: Date.now()
-        });
     }
 
     await updateHouseBalance();
@@ -3504,7 +3527,7 @@ async function crashGame(): Promise<void> {
                     total_players: currentGame.totalPlayers,
                     house_balance_end: houseBalance,
                     total_payouts: totalPayouts,
-                    house_profit: gameProfit // ← Now properly scoped
+                    house_profit: gameProfit
                 })
                 .eq('id', currentGame.id);
         }
@@ -3523,7 +3546,7 @@ async function crashGame(): Promise<void> {
         totalBets: currentGame.totalBets,
         totalPlayers: currentGame.totalPlayers,
         totalPayouts,
-        houseProfit: gameProfit, // ← Now properly scoped
+        houseProfit: gameProfit,
         houseBalance: houseBalance,
         tradingState: {
             trend: tradingState.trend,
@@ -3536,10 +3559,14 @@ async function crashGame(): Promise<void> {
         gameHistory = gameHistory.slice(-100);
     }
 
+    console.log(`✅ Game ${currentGame.gameNumber} completed. Starting waiting period...`);
     currentGame = null;
-    await startWaitingPeriod();
+    
+    // FIXED: Add small delay before starting next waiting period
+    setTimeout(() => {
+        startWaitingPeriod();
+    }, 1000); // 1 second delay to ensure clean state
 }
-
 // Enhanced transaction monitoring
 async function monitorTransactionStatus(signature: string): Promise<{
     confirmed: boolean;
@@ -3973,21 +4000,46 @@ io.on('connection', (socket: Socket) => {
                 return;
             }
             
-            console.log(`🔗 Auto-initializing user ${userId} with Privy wallet: ${walletAddress}`);
+            console.log(`🔗 Initializing user ${userId} with existing embedded wallet: ${walletAddress}`);
             
-            // Auto-register the Privy embedded wallet
-            const privyResult = await registerPrivyWallet(userId, walletAddress, undefined);
+            // FIXED: Check if this is an existing Privy wallet first
+            let privyWallet = privyIntegrationManager.privyWallets.get(userId);
+            let privyRegistrationNeeded = false;
             
-            // Ensure hybrid wallet exists
+            if (!privyWallet) {
+                console.log(`📝 No existing Privy wallet found for ${userId}, registering embedded wallet`);
+                privyRegistrationNeeded = true;
+            } else if (privyWallet.privyWalletAddress !== walletAddress) {
+                console.log(`🔄 Privy wallet address changed for ${userId}: ${privyWallet.privyWalletAddress} → ${walletAddress}`);
+                privyRegistrationNeeded = true;
+            } else {
+                console.log(`✅ Using existing Privy wallet for ${userId}: ${walletAddress}`);
+                // Just update connection status and last used time
+                privyWallet.isConnected = true;
+                privyWallet.lastUsed = Date.now();
+                await savePrivyWalletToDatabase(privyWallet);
+            }
+            
+            // Register/update Privy wallet if needed
+            if (privyRegistrationNeeded) {
+                const privyResult = await registerPrivyWallet(userId, walletAddress, undefined);
+                if (!privyResult.success) {
+                    console.warn(`⚠️ Privy wallet registration failed for ${userId}:`, privyResult.error);
+                    // Continue anyway - custodial system can still work
+                }
+            }
+            
+            // Ensure hybrid wallet exists - FIXED: Use embedded wallet as the primary external wallet
             let userWallet = hybridUserWallets.get(userId);
             if (!userWallet) {
+                console.log(`📝 Creating new hybrid wallet for ${userId}`);
                 userWallet = {
                     userId,
-                    externalWalletAddress: walletAddress, // Use the Privy wallet as external wallet
+                    externalWalletAddress: walletAddress, // This IS the embedded wallet
                     custodialBalance: 0,
                     custodialTotalDeposited: 0,
                     lastCustodialDeposit: 0,
-                    embeddedWalletId: undefined,
+                    embeddedWalletId: walletAddress, // Store the embedded wallet address
                     embeddedBalance: 0,
                     lastEmbeddedWithdrawal: 0,
                     lastTransferBetweenWallets: 0,
@@ -3998,32 +4050,52 @@ io.on('connection', (socket: Socket) => {
                 
                 hybridUserWallets.set(userId, userWallet);
                 await saveHybridWallet(userWallet);
+            } else {
+                // Update existing wallet with embedded wallet info if needed
+                if (userWallet.embeddedWalletId !== walletAddress) {
+                    console.log(`🔄 Updating embedded wallet ID for ${userId}: ${userWallet.embeddedWalletId} → ${walletAddress}`);
+                    userWallet.embeddedWalletId = walletAddress;
+                    userWallet.externalWalletAddress = walletAddress; // Keep these in sync
+                    await saveHybridWallet(userWallet);
+                }
             }
             
-            // Update Privy wallet balance
-            const privyBalance = await updatePrivyWalletBalance(userId);
+            // Update embedded wallet balance
+            let embeddedBalance = 0;
+            try {
+                embeddedBalance = await updatePrivyWalletBalance(userId);
+            } catch (error) {
+                console.warn(`⚠️ Could not update embedded balance for ${userId}:`, error);
+            }
+            
+            // Update hybrid system stats
+            updateHybridSystemStats();
+            updatePrivyIntegrationStats();
             
             socket.emit('userInitializeResult', {
                 success: true,
                 userId,
                 walletAddress,
                 custodialBalance: userWallet.custodialBalance,
-                privyBalance: privyBalance,
-                message: 'User wallet initialized successfully with Privy embedded wallet'
+                embeddedBalance: embeddedBalance,
+                isNewUser: !privyWallet,
+                walletType: 'embedded',
+                message: 'User initialized successfully with embedded wallet'
             });
             
-            console.log(`✅ User ${userId} initialized with Privy wallet: ${walletAddress}`);
+            console.log(`✅ User ${userId} initialized - Custodial: ${userWallet.custodialBalance.toFixed(3)} SOL, Embedded: ${embeddedBalance.toFixed(3)} SOL`);
             
         } catch (error) {
-            console.error('Error initializing user:', error);
+            console.error('❌ Error initializing user:', error);
             socket.emit('userInitializeResult', {
                 success: false,
-                error: 'Failed to initialize user wallet'
+                error: 'Failed to initialize user wallet',
+                details: error instanceof Error ? error.message : 'Unknown error'
             });
         }
     });
 
-    
+
     // ===== GET TRANSFER HISTORY HANDLER =====
     socket.on('getTransferHistory', async (data) => {
         const { userId, limit = 20 } = data;
@@ -6084,45 +6156,122 @@ app.use((error: Error, req: express.Request, res: express.Response, next: expres
 // GAME COUNTER FIX: Server startup with game counter initialization
 // UPDATED SERVER STARTUP - Replace your existing server.listen() block with this:
 
+// FIXED: Enhanced server startup sequence
 server.listen(PORT, async () => {
-    // Initialize systems in order
-    await initializeHybridSystem();      // Custodial wallets
-    await initializePrivyIntegration();  // Privy wallets  
-    await initializeGameCounter();       // Game counter
+    console.log('🚀 Starting game server initialization...');
     
-    await updateHouseBalance();
-    const config = getCurrentGameConfig();
+    try {
+        // Initialize systems in order
+        await initializeHybridSystem();      // Custodial wallets
+        await initializePrivyIntegration();  // Privy wallets  
+        await initializeGameCounter();       // Game counter
+        await initializeAnalyticsSystem();   // Analytics system
+        
+        await updateHouseBalance();
+        const config = getCurrentGameConfig();
+        
+        console.log(`🎮 Enhanced hybrid game server running on port ${PORT}`);
+        console.log(`🏛️ House wallet: ${housePublicKey.toString()}`);
+        console.log(`💰 House balance: ${houseBalance.toFixed(3)} SOL`);
+        console.log(`🔄 Hybrid system: ${hybridSystemStats.totalUsers} users loaded`);
+        console.log(`💎 Custodial balance: ${hybridSystemStats.totalCustodialBalance.toFixed(3)} SOL`);
+        console.log(`🔗 Privy integration: ${privyIntegrationManager.totalPrivyWallets} wallets, ${privyIntegrationManager.connectedPrivyWallets} connected`);
+        console.log(`💼 Embedded wallet balance: ${privyIntegrationManager.totalPrivyBalance.toFixed(3)} SOL`);
+        console.log(`🔐 Direct blockchain integration: ENABLED`);
+        console.log(`🎲 Game counter: ${globalGameCounter} (cycles 1-100)`);
+        console.log(`🌍 Environment: ${NODE_ENV}`);
+        
+        if (config._BOOTSTRAP_MODE) {
+            console.log(`🚀 BOOTSTRAP MODE ACTIVE: ${config._BOOTSTRAP_LEVEL.toUpperCase()}`);
+            console.log(`   House edge: ${(config.HOUSE_EDGE * 100).toFixed(0)}%`);
+            console.log(`   Max payout: ${config.MAX_SINGLE_PAYOUT} SOL`);
+            console.log(`   Max bet: ${config.MAX_BET} SOL`);
+            console.log(`   Target balance: ${BOOTSTRAP_CONFIG.EXIT_BOOTSTRAP_THRESHOLD} SOL`);
+            console.log(`   Progress: ${((houseBalance / BOOTSTRAP_CONFIG.EXIT_BOOTSTRAP_THRESHOLD) * 100).toFixed(1)}%`);
+        } else {
+            console.log(`✅ NORMAL MODE ACTIVE`);
+            console.log(`   House edge: ${(config.HOUSE_EDGE * 100).toFixed(0)}%`);
+            console.log(`   Max payout: ${config.MAX_SINGLE_PAYOUT} SOL`);
+            console.log(`   Max bet: ${config.MAX_BET} SOL`);
+        }
+        
+        console.log(`📡 Solana RPC: ${SOLANA_RPC_URL}`);
+        console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
+        console.log(`🔗 Privy integration: http://localhost:${PORT}/api/privy/stats`);
+        console.log(`💼 Wallet overview: http://localhost:${PORT}/api/wallet-overview/[userId]`);
+        
+        // FIXED: Clear any existing game state and start fresh
+        gameStartLock = false;
+        currentGame = null;
+        clearGameCountdown();
+        
+        console.log(`🚀 Starting game loop with countdown...`);
+        
+        // FIXED: Start the waiting period with a small delay to ensure everything is ready
+        setTimeout(() => {
+            console.log('⏰ Initiating first waiting period...');
+            startWaitingPeriod();
+        }, 2000); // 2 second delay to ensure all systems are ready
+        
+    } catch (error) {
+        console.error('❌ Server initialization failed:', error);
+        process.exit(1);
+    }
+});
+
+// FIXED: Add process handlers to ensure clean shutdown
+process.on('SIGTERM', () => {
+    console.log('🛑 SIGTERM received, shutting down gracefully');
+    clearGameCountdown();
+    server.close(() => {
+        console.log('✅ Process terminated');
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('🛑 SIGINT received, shutting down gracefully');
+    clearGameCountdown();
+    server.close(() => {
+        console.log('✅ Process terminated');
+    });
+});
+
+// FIXED: Add unhandled error handlers
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+    // Don't exit the process for unhandled rejections in production
+    if (NODE_ENV !== 'production') {
+        process.exit(1);
+    }
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('❌ Uncaught Exception:', error);
+    clearGameCountdown();
+    process.exit(1);
+});
+
+// FIXED: Add periodic health check for game loop
+setInterval(() => {
+    const now = Date.now();
     
-    console.log(`🎮 Enhanced hybrid game server running on port ${PORT}`);
-    console.log(`🏛️ House wallet: ${housePublicKey.toString()}`);
-    console.log(`💰 House balance: ${houseBalance.toFixed(3)} SOL`);
-    console.log(`🔄 Hybrid system: ${hybridSystemStats.totalUsers} users loaded`);
-    console.log(`💎 Custodial balance: ${hybridSystemStats.totalCustodialBalance.toFixed(3)} SOL`);
-    console.log(`🔗 Privy integration: ${privyIntegrationManager.totalPrivyWallets} wallets, ${privyIntegrationManager.connectedPrivyWallets} connected`);
-    console.log(`💼 Privy wallet balance: ${privyIntegrationManager.totalPrivyBalance.toFixed(3)} SOL`);
-    console.log(`🔐 Direct blockchain integration: ENABLED`);
-    console.log(`🎲 Next game number: ${globalGameCounter >= 100 ? 1 : globalGameCounter + 1}`);
-    console.log(`🌍 Environment: ${NODE_ENV}`);
-    
-    if (config._BOOTSTRAP_MODE) {
-        console.log(`🚀 BOOTSTRAP MODE ACTIVE: ${config._BOOTSTRAP_LEVEL.toUpperCase()}`);
-        console.log(`   House edge: ${(config.HOUSE_EDGE * 100).toFixed(0)}%`);
-        console.log(`   Max payout: ${config.MAX_SINGLE_PAYOUT} SOL`);
-        console.log(`   Max bet: ${config.MAX_BET} SOL`);
-        console.log(`   Target balance: ${BOOTSTRAP_CONFIG.EXIT_BOOTSTRAP_THRESHOLD} SOL`);
-        console.log(`   Progress: ${((houseBalance / BOOTSTRAP_CONFIG.EXIT_BOOTSTRAP_THRESHOLD) * 100).toFixed(1)}%`);
-    } else {
-        console.log(`✅ NORMAL MODE ACTIVE`);
-        console.log(`   House edge: ${(config.HOUSE_EDGE * 100).toFixed(0)}%`);
-        console.log(`   Max payout: ${config.MAX_SINGLE_PAYOUT} SOL`);
-        console.log(`   Max bet: ${config.MAX_BET} SOL`);
+    // Check if we have a game or countdown running
+    if (!currentGame && !gameCountdown && !gameStartLock) {
+        console.warn('⚠️ No active game or countdown detected, restarting waiting period...');
+        startWaitingPeriod();
     }
     
-    console.log(`📡 Solana RPC: ${SOLANA_RPC_URL}`);
-    console.log(`Health check: http://localhost:${PORT}/api/health`);
-    console.log(`Privy integration: http://localhost:${PORT}/api/privy/stats`);
-    console.log(`Wallet overview: http://localhost:${PORT}/api/wallet-overview/[userId]`);
-    console.log(`🚀 Starting game loop...`);
-
-    startWaitingPeriod();
-});
+    // Check for stuck countdown
+    if (gameCountdown && countdownTimeRemaining > 0) {
+        console.log(`⏰ Health check - Countdown: ${countdownTimeRemaining}s remaining`);
+    }
+    
+    // Check for stuck games
+    if (currentGame && currentGame.status === 'active') {
+        const gameAge = now - currentGame.startTime;
+        if (gameAge > 300000) { // 5 minutes
+            console.warn(`⚠️ Game ${currentGame.gameNumber} running for ${Math.round(gameAge/1000)}s, may be stuck`);
+        }
+    }
+    
+}, 30000); // Check every 30 seconds

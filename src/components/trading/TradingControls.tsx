@@ -1,10 +1,10 @@
-// src/components/trading/TradingControls.tsx - Fixed WithdrawModal userId prop
+// src/components/trading/TradingControls.tsx - Enhanced with updated useGameSocket
 import { FC, useState, useEffect, useContext, useCallback } from 'react';
 import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon, Timer, Users, Settings, Wallet, TrendingUp } from 'lucide-react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import useLocalStorage from '../../hooks/useLocalStorage';
 import Button from '../common/Button';
-import { useGameSocket } from '../../hooks/useGameSocket';
+import { useGameSocket, initializeUser } from '../../hooks/useGameSocket';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
@@ -151,7 +151,7 @@ const useRuggedBalance = (walletAddress: string) => {
   return { ruggedBalance, loading, updateRuggedBalance };
 };
 
-// Compact Game Info Component (unchanged)
+// Compact Game Info Component
 const CompactGameInfo: FC<{
   game: any;
   countdown: number;
@@ -258,7 +258,7 @@ const CompactGameInfo: FC<{
   );
 };
 
-// UPDATED: Balance Display Component - SOL = custodial, RUGGED = SPL token
+// Balance Display Component - SOL = custodial, RUGGED = SPL token
 const BalanceDisplay: FC<{
   currentToken: TokenType;
   custodialSolBalance: number;
@@ -449,7 +449,7 @@ const BalanceDisplay: FC<{
   );
 };
 
-// Auto Cashout Component (unchanged)
+// Auto Cashout Component
 const AutoCashoutSection: FC<{
   autoCashoutEnabled: boolean;
   autoCashoutValue: string;
@@ -555,7 +555,7 @@ const AutoCashoutSection: FC<{
   );
 };
 
-// Active Bet Display Component (unchanged)
+// Active Bet Display Component
 const ActiveBetDisplay: FC<{
   bet: ActiveBet;
   currentMultiplier: number;
@@ -594,7 +594,7 @@ const ActiveBetDisplay: FC<{
   );
 };
 
-// UPDATED: Betting Section Component - Smart routing based on token type
+// Betting Section Component - Smart routing based on token type
 const BettingSection: FC<{
   activeBet: ActiveBet | null;
   amount: string;
@@ -899,7 +899,7 @@ const BettingSection: FC<{
   );
 };
 
-// Status Messages Component (unchanged)
+// Status Messages Component
 const StatusMessages: FC<{
   isWalletReady: boolean;
   isConnected: boolean;
@@ -999,9 +999,19 @@ const TradingControls: FC<TradingControlsProps> = ({
   const [userId, setUserId] = useState<string | null>(null);
   
   // Enhanced game server connection (compatible with existing hook)
-  const { currentGame, isConnected, placeBet, cashOut, countdown, isWaitingPeriod, canBet } = useGameSocket(walletAddress, userId || undefined);
+  const { 
+    currentGame, 
+    isConnected, 
+    placeBet, 
+    cashOut, 
+    countdown, 
+    isWaitingPeriod, 
+    canBet,
+    connectionError,
+    connectionAttempts
+  } = useGameSocket(walletAddress, userId || undefined);
   
-  // UPDATED: Dual balance system
+  // Dual balance system
   const { balance: externalSolBalance, loading: externalSolLoading } = useWalletBalance(walletAddress); // For deposit reference
   const { custodialBalance, loading: custodialBalanceLoading, updateCustodialBalance } = useCustodialBalance(userId || ''); // Primary gaming balance
   const { ruggedBalance, loading: ruggedBalanceLoading, updateRuggedBalance } = useRuggedBalance(walletAddress); // SPL token
@@ -1013,7 +1023,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   // Enhanced bet tracking
   const [activeBet, setActiveBet] = useState<ActiveBet | null>(null);
   
-  // UPDATED: Token context - Default to SOL (custodial balance) as primary
+  // Token context - Default to SOL (custodial balance) as primary
   const [currentToken, setCurrentToken] = useState<TokenType>(TokenType.SOL);
   
   // Check if wallet is ready
@@ -1049,7 +1059,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   const activeCurrentMultiplier = activeCurrentGame?.multiplier || propCurrentMultiplier;
   const gameStatus = activeCurrentGame?.status || 'waiting';
 
-  // UPDATED: Calculate balance based on selected token
+  // Calculate balance based on selected token
   const activeBalance = currentToken === TokenType.SOL ? custodialBalance : ruggedBalance;
   const effectiveCanBet = gameStatus === 'active' ? true : canBet;
 
@@ -1077,40 +1087,37 @@ const TradingControls: FC<TradingControlsProps> = ({
     }
   `;
 
-  // Get or create user when wallet connects
-  // Get or create user when wallet connects
+  // Enhanced user initialization with the new initializeUser function
   useEffect(() => {
     if (authenticated && walletAddress) {
       const initUser = async () => {
         try {
+          console.log(`🔗 Initializing user with embedded wallet: ${walletAddress}`);
+          
+          // Get user data
           const userData = await UserAPI.getUserOrCreate(walletAddress);
           if (userData) {
             setUserId(userData.id);
+            console.log(`👤 User ID: ${userData.id}`);
             
-            // Auto-initialize user with their Privy wallet
-            const socket = (window as any).gameSocket;
-            if (socket) {
-              socket.emit('initializeUser', { 
-                userId: userData.id, 
-                walletAddress 
-              });
-              
-              socket.once('userInitializeResult', (result: any) => {
-                if (result.success) {
-                  console.log(`✅ User ${userData.id} initialized with Privy wallet`);
-                  // Refresh balances
-                  updateCustodialBalance();
-                  updateRuggedBalance();
-                } else {
-                  console.warn('User initialization failed:', result.error);
-                }
-              });
-            }
+            // Use the enhanced initialization function
+            setTimeout(() => {
+              initializeUser(
+                walletAddress,
+                userData.id,
+                UserAPI,
+                updateCustodialBalance,
+                updateRuggedBalance,
+                toast
+              );
+            }, 1000); // Delay to ensure socket is connected
           }
         } catch (error) {
-          console.warn('Could not get user data:', error);
+          console.error('❌ Could not initialize user:', error);
+          toast.error('Failed to initialize wallet');
         }
       };
+      
       initUser();
     }
   }, [authenticated, walletAddress, updateCustodialBalance, updateRuggedBalance]);
@@ -1125,7 +1132,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     setCurrentToken(token);
   };
 
-  // UPDATED: Enhanced cashout with dual token support
+  // Enhanced cashout with dual token support
   const handleCashout = useCallback(async () => {
     if (!authenticated || !walletAddress || !isConnected || !activeBet || !userId) {
       return;
@@ -1213,7 +1220,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     }
   };
 
-  // UPDATED: Quick amount buttons based on token type
+  // Quick amount buttons based on token type
   const quickAmounts = currentToken === TokenType.SOL 
     ? [0.01, 0.05, 0.1, 0.5] 
     : [10, 50, 100, 500];
@@ -1235,7 +1242,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     setAutoCashoutValue(value.toString());
   };
 
-  // UPDATED: Enhanced bet placement with dual token routing
+  // Enhanced bet placement with dual token routing
   const handleBuy = async () => {
     const amountNum = parseFloat(amount);
     
@@ -1316,7 +1323,7 @@ const TradingControls: FC<TradingControlsProps> = ({
       let success = false;
       let entryMultiplier = gameStatus === 'waiting' ? 1.0 : activeCurrentMultiplier;
 
-      // UPDATED: Route betting based on token type
+      // Route betting based on token type
       if (currentToken === TokenType.SOL) {
         console.log('📡 Using custodial SOL betting system...');
         
@@ -1486,7 +1493,7 @@ const TradingControls: FC<TradingControlsProps> = ({
           currentToken={currentToken}
           balance={activeBalance}
           walletAddress={walletAddress}
-          userId={userId} // 🆕 ADD THIS PROP - MOBILE VERSION
+          userId={userId}
         />
       </div>
     );
@@ -1585,13 +1592,13 @@ const TradingControls: FC<TradingControlsProps> = ({
       />
       
       <WithdrawModal 
-  isOpen={showWithdrawModal}
-  onClose={() => setShowWithdrawModal(false)}
-  currentToken={currentToken}
-  balance={activeBalance}
-  walletAddress={walletAddress}
-  userId={userId || null} // ✅ Only pass userId if it exists
-/>
+        isOpen={showWithdrawModal}
+        onClose={() => setShowWithdrawModal(false)}
+        currentToken={currentToken}
+        balance={activeBalance}
+        walletAddress={walletAddress}
+        userId={userId || null}
+      />
     </div>
   );
 };

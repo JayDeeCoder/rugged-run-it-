@@ -173,6 +173,43 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   // Privy wallet setup
   const { authenticated, user } = usePrivy();
   
+  // 🔧 FIXED: Ensure we have a valid userId - fetch it if not provided
+  const [internalUserId, setInternalUserId] = useState<string | null>(userId);
+  
+  // Fetch userId if not provided as prop
+  useEffect(() => {
+    if (authenticated && walletAddress && !userId) {
+      const fetchUserId = async () => {
+        try {
+          console.log('🔍 WithdrawModal: Fetching userId for walletAddress:', walletAddress);
+          // Use the same UserAPI as TradingControls (you'll need to import it)
+          const response = await fetch('/api/user/get-or-create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ walletAddress })
+          });
+          
+          if (response.ok) {
+            const userData = await response.json();
+            if (userData.id) {
+              setInternalUserId(userData.id);
+              console.log('✅ WithdrawModal: Got userId:', userData.id);
+            }
+          }
+        } catch (error) {
+          console.error('❌ WithdrawModal: Failed to fetch userId:', error);
+        }
+      };
+      
+      fetchUserId();
+    } else if (userId) {
+      setInternalUserId(userId);
+    }
+  }, [authenticated, walletAddress, userId]);
+  
+  // Use the internal userId (either from prop or fetched)
+  const effectiveUserId = internalUserId || userId;
+  
   // 🔧 FIXED: Use the same working hooks as TradingControls
   const { 
     balance: embeddedBalance, 
@@ -184,7 +221,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     custodialBalance, 
     loading: custodialLoading, 
     updateCustodialBalance 
-  } = useCustodialBalance(userId || '');
+  } = useCustodialBalance(effectiveUserId || '');
   
   // Tab state
   const [activeTab, setActiveTab] = useState<ModalTab>('withdraw');

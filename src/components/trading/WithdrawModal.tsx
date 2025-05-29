@@ -1,4 +1,4 @@
-// src/components/modals/WithdrawModal.tsx - Fixed Embedded Wallet Balance Fetching
+// src/components/modals/WithdrawModal.tsx - Fixed with Navbar Balance Method
 import { FC, useState, useRef, useEffect } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
@@ -32,10 +32,6 @@ interface BalanceInfo {
   embedded: number;
   loading: boolean;
 }
-
-// Solana connection for direct balance fetching
-const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
-const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
 const WithdrawModal: FC<WithdrawModalProps> = ({ 
   isOpen, 
@@ -77,13 +73,38 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   
   const modalRef = useRef<HTMLDivElement>(null);
   
-  // 🔧 FIXED: Direct Solana balance fetching
+  // 🔧 FIXED: Direct Solana balance fetching using Navbar's method
   const fetchEmbeddedBalance = async (address: string): Promise<number> => {
     try {
       console.log(`🔍 Fetching embedded balance for: ${address}`);
+      
+      // Use same validation and connection setup as Navbar
+      const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+      const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+      
+      if (!rpcUrl) {
+        console.error('Missing NEXT_PUBLIC_SOLANA_RPC_URL environment variable');
+        return 0;
+      }
+      
+      // Same connection config as Navbar
+      const connectionConfig: any = {
+        commitment: 'confirmed',
+      };
+      
+      if (apiKey) {
+        connectionConfig.httpHeaders = {
+          'x-api-key': apiKey
+        };
+      }
+      
+      const connection = new Connection(rpcUrl, connectionConfig);
+      
+      // Create PublicKey with error handling (same as Navbar)
       const publicKey = new PublicKey(address);
       const balanceResponse = await connection.getBalance(publicKey);
       const solBalance = balanceResponse / LAMPORTS_PER_SOL;
+      
       console.log(`✅ Embedded balance fetched: ${solBalance.toFixed(6)} SOL`);
       return solBalance;
     } catch (error) {
@@ -114,7 +135,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       const custodialData = await custodialResponse.json();
       console.log('📊 Custodial balance response:', custodialData);
       
-      // 🔧 FIXED: Use direct Solana RPC to fetch embedded wallet balance
+      // 🔧 FIXED: Use same balance fetching method as Navbar
       const embeddedBalance = await fetchEmbeddedBalance(walletAddress);
       
       const finalBalances = {
@@ -397,7 +418,8 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                 <div className="text-green-400">UserId: {userId}</div>
                 <div className="text-blue-400">WalletAddress: {walletAddress}</div>
                 <div className="text-yellow-400">Authenticated: {authenticated ? 'Yes' : 'No'}</div>
-                <div className="text-purple-400">RPC URL: {SOLANA_RPC_URL.substring(0, 50)}...</div>
+                <div className="text-purple-400">RPC URL: {process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.substring(0, 50)}...</div>
+                <div className="text-pink-400">API Key: {process.env.NEXT_PUBLIC_ALCHEMY_API_KEY ? 'Set' : 'Not Set'}</div>
               </div>
             )}
             

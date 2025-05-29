@@ -28,6 +28,15 @@ interface ActiveBet {
   transactionId?: string;
   tokenType?: TokenType; // Track which token was used
 }
+interface ActiveBet {
+  id: string;
+  amount: number;
+  entryMultiplier: number;
+  timestamp: number;
+  gameId: string;
+  transactionId?: string;
+  tokenType?: TokenType; // Track which token was used
+}
 
 interface TradingControlsProps {
   onBuy?: (amount: number) => void;
@@ -42,11 +51,7 @@ interface TradingControlsProps {
   isMobile?: boolean;
 }
 
-// Solana connection for external wallet operations (deposits/withdrawals only)
-const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVF9rWeernULokib0PAr6yh3';
-const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
-
-// External wallet balance hook (for deposit reference only)
+// 🔧 FIXED: External wallet balance hook using Navbar's method
 const useWalletBalance = (walletAddress: string) => {
   const [balance, setBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -57,14 +62,40 @@ const useWalletBalance = (walletAddress: string) => {
     
     setLoading(true);
     try {
+      // Use same validation as Navbar
+      const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+      const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+      
+      if (!rpcUrl) {
+        console.error('Missing NEXT_PUBLIC_SOLANA_RPC_URL environment variable');
+        setBalance(0);
+        return;
+      }
+      
+      // Same connection config as Navbar
+      const connectionConfig: any = {
+        commitment: 'confirmed',
+      };
+      
+      if (apiKey) {
+        connectionConfig.httpHeaders = {
+          'x-api-key': apiKey
+        };
+      }
+      
+      const connection = new Connection(rpcUrl, connectionConfig);
+      
+      // Create PublicKey with error handling
       const publicKey = new PublicKey(walletAddress);
       const balanceResponse = await connection.getBalance(publicKey);
       const solBalance = balanceResponse / LAMPORTS_PER_SOL;
+      
       setBalance(solBalance);
       setLastUpdated(Date.now());
-      console.log(`💰 External wallet balance updated: ${solBalance.toFixed(3)} SOL`);
+      console.log(`💰 External wallet balance updated: ${solBalance.toFixed(6)} SOL`);
     } catch (error) {
       console.error('Failed to fetch external wallet balance:', error);
+      setBalance(0);
     } finally {
       setLoading(false);
     }

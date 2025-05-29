@@ -1,5 +1,5 @@
-// src/components/modals/WithdrawModal.tsx - Fixed with Navbar Balance Method
-import { FC, useState, useRef, useEffect } from 'react';
+// src/components/modals/WithdrawModal.tsx - Fixed with TradingControls Balance Method
+import { FC, useState, useRef, useEffect, useCallback } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
@@ -18,9 +18,9 @@ interface WithdrawModalProps {
   onClose: () => void;
   onSuccess?: () => void;
   currentToken: TokenType;
-  balance: number; // This will be the active balance (custodial or embedded based on context)
-  walletAddress: string; // Add walletAddress prop like DepositModal
-  userId: string | null; // 🆕 ADD THIS LINE
+  balance: number;
+  walletAddress: string;
+  userId: string | null;
 }
 
 // Tab types for different actions
@@ -33,30 +33,161 @@ interface BalanceInfo {
   loading: boolean;
 }
 
+// 🔧 FIXED: Use the SAME working hook pattern as TradingControls
+const useEmbeddedWalletBalance = (walletAddress: string) => {
+  const [balance, setBalance] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [lastUpdated, setLastUpdated] = useState<number>(0);
+
+  const updateBalance = useCallback(async () => {
+    if (!walletAddress) {
+      console.log('🔍 WithdrawModal useEmbeddedWalletBalance: No wallet address provided');
+      return;
+    }
+    
+    console.log('🚀 WithdrawModal useEmbeddedWalletBalance: Starting balance fetch for:', walletAddress);
+    setLoading(true);
+    
+    try {
+      // Use same validation as Navbar and TradingControls
+      const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+      const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+      
+      console.log('🔧 WithdrawModal useEmbeddedWalletBalance RPC config:', {
+        hasRpcUrl: !!rpcUrl,
+        hasApiKey: !!apiKey,
+        rpcUrl: rpcUrl?.substring(0, 50) + '...'
+      });
+      
+      if (!rpcUrl) {
+        console.error('WithdrawModal: Missing NEXT_PUBLIC_SOLANA_RPC_URL environment variable');
+        setBalance(0);
+        return;
+      }
+      
+      // Same connection config as Navbar and TradingControls
+      const connectionConfig: any = {
+        commitment: 'confirmed',
+      };
+      
+      if (apiKey) {
+        connectionConfig.httpHeaders = {
+          'x-api-key': apiKey
+        };
+      }
+      
+      const connection = new Connection(rpcUrl, connectionConfig);
+      
+      // Create PublicKey with error handling
+      const publicKey = new PublicKey(walletAddress);
+      const balanceResponse = await connection.getBalance(publicKey);
+      const solBalance = balanceResponse / LAMPORTS_PER_SOL;
+      
+      console.log(`✅ WithdrawModal useEmbeddedWalletBalance: Balance fetched and SETTING STATE: ${solBalance.toFixed(6)} SOL`);
+      setBalance(solBalance);
+      setLastUpdated(Date.now());
+      
+      // Double-check state was set
+      setTimeout(() => {
+        console.log(`🔍 WithdrawModal useEmbeddedWalletBalance: State check - balance should be ${solBalance.toFixed(6)}`);
+      }, 100);
+      
+    } catch (error) {
+      console.error('❌ WithdrawModal useEmbeddedWalletBalance: Failed to fetch balance:', error);
+      setBalance(0);
+    } finally {
+      setLoading(false);
+    }
+  }, [walletAddress]);
+
+  useEffect(() => {
+    if (walletAddress) {
+      console.log('🔄 WithdrawModal useEmbeddedWalletBalance: useEffect triggered for wallet:', walletAddress);
+      updateBalance();
+      const interval = setInterval(updateBalance, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [walletAddress, updateBalance]);
+
+  // Log whenever balance state changes
+  useEffect(() => {
+    console.log(`📊 WithdrawModal useEmbeddedWalletBalance: Balance state updated to ${balance.toFixed(6)} SOL`);
+  }, [balance]);
+
+  return { balance, loading, lastUpdated, updateBalance };
+};
+
+// 🔧 FIXED: Custodial balance hook (same pattern as TradingControls)
+const useCustodialBalance = (userId: string) => {
+  const [custodialBalance, setCustodialBalance] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [lastUpdated, setLastUpdated] = useState<number>(0);
+
+  const updateCustodialBalance = useCallback(async () => {
+    if (!userId) {
+      console.log('🔍 WithdrawModal useCustodialBalance: No userId provided');
+      return;
+    }
+    
+    console.log('🚀 WithdrawModal useCustodialBalance: Starting balance fetch for userId:', userId);
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/custodial/balance/${userId}`);
+      const data = await response.json();
+      
+      if (data.custodialBalance !== undefined) {
+        setCustodialBalance(data.custodialBalance);
+        setLastUpdated(Date.now());
+        console.log(`💎 WithdrawModal: Custodial SOL balance updated: ${data.custodialBalance.toFixed(3)} SOL`);
+      } else {
+        console.warn('WithdrawModal: No custodialBalance in response:', data);
+      }
+    } catch (error) {
+      console.error('WithdrawModal: Failed to fetch custodial balance:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    if (userId) {
+      console.log('🔄 WithdrawModal useCustodialBalance: useEffect triggered for userId:', userId);
+      updateCustodialBalance();
+      const interval = setInterval(updateCustodialBalance, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [userId, updateCustodialBalance]);
+
+  return { custodialBalance, loading, lastUpdated, updateCustodialBalance };
+};
+
 const WithdrawModal: FC<WithdrawModalProps> = ({ 
   isOpen, 
   onClose, 
   onSuccess, 
   currentToken,
   balance,
-  walletAddress, // Use walletAddress prop instead of getting from hooks
-  userId // 🆕 ADD THIS
+  walletAddress,
+  userId
 }) => {
-  // Privy wallet setup - simplified since we get walletAddress as prop
+  // Privy wallet setup
   const { authenticated, user } = usePrivy();
   
-  // User context
-  const userIdToUse = userId || '';
+  // 🔧 FIXED: Use the same working hooks as TradingControls
+  const { 
+    balance: embeddedBalance, 
+    loading: embeddedLoading, 
+    updateBalance: updateEmbeddedBalance 
+  } = useEmbeddedWalletBalance(walletAddress);
+  
+  const { 
+    custodialBalance, 
+    loading: custodialLoading, 
+    updateCustodialBalance 
+  } = useCustodialBalance(userId || '');
   
   // Tab state
   const [activeTab, setActiveTab] = useState<ModalTab>('withdraw');
-  
-  // Balance state
-  const [balances, setBalances] = useState<BalanceInfo>({
-    custodial: 0,
-    embedded: 0,
-    loading: false
-  });
   
   // Form states
   const [amount, setAmount] = useState<string>('');
@@ -73,102 +204,24 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   
   const modalRef = useRef<HTMLDivElement>(null);
   
-  // 🔧 FIXED: Direct Solana balance fetching using Navbar's method
-  const fetchEmbeddedBalance = async (address: string): Promise<number> => {
-    try {
-      console.log(`🔍 WithdrawModal: Fetching embedded balance for: ${address}`);
-      
-      // Use same validation and connection setup as Navbar
-      const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-      const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
-      
-      console.log('🔧 WithdrawModal RPC config:', {
-        hasRpcUrl: !!rpcUrl,
-        hasApiKey: !!apiKey,
-        rpcUrl: rpcUrl?.substring(0, 50) + '...'
-      });
-      
-      if (!rpcUrl) {
-        console.error('Missing NEXT_PUBLIC_SOLANA_RPC_URL environment variable');
-        return 0;
-      }
-      
-      // Same connection config as Navbar
-      const connectionConfig: any = {
-        commitment: 'confirmed',
-      };
-      
-      if (apiKey) {
-        connectionConfig.httpHeaders = {
-          'x-api-key': apiKey
-        };
-      }
-      
-      const connection = new Connection(rpcUrl, connectionConfig);
-      
-      // Create PublicKey with error handling (same as Navbar)
-      const publicKey = new PublicKey(address);
-      const balanceResponse = await connection.getBalance(publicKey);
-      const solBalance = balanceResponse / LAMPORTS_PER_SOL;
-      
-      console.log(`✅ WithdrawModal: Embedded balance fetched: ${solBalance.toFixed(6)} SOL`);
-      return solBalance;
-    } catch (error) {
-      console.error('❌ WithdrawModal: Failed to fetch embedded balance:', error);
-      return 0;
-    }
+  // 🔧 FIXED: Combined balances from hooks
+  const balances = {
+    custodial: custodialBalance,
+    embedded: embeddedBalance,
+    loading: custodialLoading || embeddedLoading
   };
   
-  // 🔧 FIXED: Improved balance fetching with direct Solana RPC
-  const fetchBalances = async () => {
-    if (!userId || !walletAddress) {
-      console.log('WithdrawModal: Missing userId or walletAddress:', { userId, walletAddress });
-      return;
-    }
-    
-    console.log(`🔄 WithdrawModal: Starting balance fetch for user ${userId} with wallet ${walletAddress}`);
-    setBalances(prev => ({ ...prev, loading: true }));
-    
-    try {
-      // Fetch custodial balance
-      console.log('📊 WithdrawModal: Fetching custodial balance...');
-      const custodialResponse = await fetch(`/api/custodial/balance/${userId}`);
-      
-      if (!custodialResponse.ok) {
-        throw new Error(`Custodial API error: ${custodialResponse.status}`);
-      }
-      
-      const custodialData = await custodialResponse.json();
-      console.log('📊 WithdrawModal: Custodial balance response:', custodialData);
-      
-      // 🔧 FIXED: Use same balance fetching method as Navbar
-      console.log('💼 WithdrawModal: Fetching embedded wallet balance...');
-      const embeddedBalance = await fetchEmbeddedBalance(walletAddress);
-      
-      const finalBalances = {
-        custodial: custodialData.custodialBalance || custodialData.balance || 0,
-        embedded: embeddedBalance,
-        loading: false
-      };
-      
-      console.log('✅ WithdrawModal: SETTING balances state:', finalBalances);
-      setBalances(finalBalances);
-      
-      // Double-check state was set
-      setTimeout(() => {
-        console.log('🔍 WithdrawModal: State check after 100ms - balances should be updated');
-      }, 100);
-      
-    } catch (error) {
-      console.error('❌ WithdrawModal: Failed to fetch balances:', error);
-      setBalances(prev => ({ ...prev, loading: false }));
-      setError('Failed to load balances. Please try refreshing.');
-    }
-  };
+  // Manual refresh function
+  const refreshBalances = useCallback(() => {
+    console.log('🔄 WithdrawModal: Manual balance refresh triggered');
+    updateCustodialBalance();
+    updateEmbeddedBalance();
+  }, [updateCustodialBalance, updateEmbeddedBalance]);
   
   // Reset state when modal opens/closes
   useEffect(() => {
     if (isOpen) {
+      console.log('🚀 WithdrawModal: Modal opened, resetting state and refreshing balances');
       setAmount('');
       setDestinationAddress('');
       setError(null);
@@ -176,18 +229,25 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       setAddressError(null);
       setSuccessMessage('');
       setActiveTab('withdraw');
-      fetchBalances();
+      
+      // Trigger immediate balance refresh
+      setTimeout(() => {
+        refreshBalances();
+      }, 500); // Small delay to ensure everything is ready
     }
-  }, [isOpen, userId, walletAddress]); // Add dependencies
+  }, [isOpen, refreshBalances]);
   
-  // 🔧 ADDED: Log whenever balances state changes
+  // 🔧 ADDED: Log whenever balances change
   useEffect(() => {
-    console.log('📊 WithdrawModal: Balances state updated:', {
-      custodial: balances.custodial.toFixed(6),
-      embedded: balances.embedded.toFixed(6),
-      loading: balances.loading
+    console.log('📊 WithdrawModal: Balance state updated:', {
+      custodial: custodialBalance.toFixed(6),
+      embedded: embeddedBalance.toFixed(6),
+      custodialLoading,
+      embeddedLoading,
+      walletAddress: walletAddress?.slice(0, 8) + '...' + walletAddress?.slice(-4),
+      userId
     });
-  }, [balances]);
+  }, [custodialBalance, embeddedBalance, custodialLoading, embeddedLoading, walletAddress, userId]);
   
   // Handle outside clicks
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
@@ -281,19 +341,19 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         if (result.success) {
           setSuccess(true);
           setSuccessMessage(`Successfully withdrew ${withdrawAmount} SOL from game balance`);
-          fetchBalances();
+          refreshBalances();
           if (onSuccess) onSuccess();
         } else {
           throw new Error(result.error || 'Withdrawal failed');
         }
       } else {
-        // Withdraw from embedded wallet (Privy) - include walletAddress
+        // Withdraw from embedded wallet (Privy)
         const response = await fetch('/api/privy/withdraw', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userId,
-            walletAddress, // Include wallet address
+            walletAddress,
             amount: withdrawAmount,
             destinationAddress
           })
@@ -304,7 +364,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         if (result.success) {
           setSuccess(true);
           setSuccessMessage(`Successfully withdrew ${withdrawAmount} SOL from embedded wallet`);
-          fetchBalances();
+          refreshBalances();
           if (onSuccess) onSuccess();
         } else {
           throw new Error(result.error || 'Withdrawal failed');
@@ -345,7 +405,6 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userId,
-            walletAddress, // Include wallet address
             amount: transferAmount
           })
         });
@@ -355,7 +414,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         if (result.success) {
           setSuccess(true);
           setSuccessMessage(`Successfully transferred ${transferAmount} SOL to embedded wallet`);
-          fetchBalances();
+          refreshBalances();
           if (onSuccess) onSuccess();
         } else {
           throw new Error(result.error || 'Transfer failed');
@@ -367,7 +426,6 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userId,
-            walletAddress, // Include wallet address
             amount: transferAmount
           })
         });
@@ -377,7 +435,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         if (result.success) {
           setSuccess(true);
           setSuccessMessage(`Successfully transferred ${transferAmount} SOL to game balance`);
-          fetchBalances();
+          refreshBalances();
           if (onSuccess) onSuccess();
         } else {
           throw new Error(result.error || 'Transfer failed');
@@ -431,56 +489,65 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           </div>
         ) : (
           <>
-            {/* Debug Info - Remove in production */}
+            {/* Debug Info - Enhanced */}
             {process.env.NODE_ENV === 'development' && (
-              <div className="bg-gray-900 p-2 rounded mb-4 text-xs">
-                <div className="text-gray-400">Debug Info:</div>
-                <div className="text-green-400">UserId: {userId}</div>
-                <div className="text-blue-400">WalletAddress: {walletAddress}</div>
+              <div className="bg-gray-900 p-3 rounded mb-4 text-xs space-y-1">
+                <div className="text-gray-400 font-bold">🔍 Debug Info:</div>
+                <div className="text-green-400">UserId: {userId || 'None'}</div>
+                <div className="text-blue-400">WalletAddress: {walletAddress || 'None'}</div>
                 <div className="text-yellow-400">Authenticated: {authenticated ? 'Yes' : 'No'}</div>
-                <div className="text-purple-400">RPC URL: {process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.substring(0, 50)}...</div>
-                <div className="text-pink-400">API Key: {process.env.NEXT_PUBLIC_ALCHEMY_API_KEY ? 'Set' : 'Not Set'}</div>
+                <div className="text-purple-400">
+                  RPC URL: {process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.substring(0, 50) || 'Missing'}...
+                </div>
+                <div className="text-pink-400">
+                  API Key: {process.env.NEXT_PUBLIC_ALCHEMY_API_KEY ? 'Set' : 'Not Set'}
+                </div>
+                <div className="text-orange-400">
+                  Hook States: Custodial Loading: {custodialLoading ? 'Yes' : 'No'}, 
+                  Embedded Loading: {embeddedLoading ? 'Yes' : 'No'}
+                </div>
               </div>
             )}
             
-            {/* 🔧 ENHANCED: Balance Display with better loading states */}
+            {/* 🔧 ENHANCED: Balance Display with hook-based data */}
             <div className="bg-gray-800 p-4 rounded-md mb-6">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-gray-400 text-sm">Your Balances</span>
                 <button 
-                  onClick={fetchBalances}
+                  onClick={refreshBalances}
                   disabled={balances.loading}
-                  className="text-blue-400 hover:text-blue-300 transition-colors"
+                  className="text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-1"
                   title="Refresh balances"
                 >
                   <RefreshCw size={14} className={balances.loading ? 'animate-spin' : ''} />
+                  <span className="text-xs">Refresh</span>
                 </button>
               </div>
               
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="flex justify-between items-center">
                   <span className="text-green-400 text-sm">🎮 Game Balance</span>
                   <span className="text-white font-bold">
-                    {balances.loading ? (
+                    {custodialLoading ? (
                       <span className="flex items-center">
                         <Loader size={12} className="animate-spin mr-1" />
                         Loading...
                       </span>
                     ) : (
-                      `${balances.custodial.toFixed(6)} SOL`
+                      `${custodialBalance.toFixed(6)} SOL`
                     )}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-blue-400 text-sm">💼 Embedded Wallet</span>
                   <span className="text-white font-bold">
-                    {balances.loading ? (
+                    {embeddedLoading ? (
                       <span className="flex items-center">
                         <Loader size={12} className="animate-spin mr-1" />
                         Loading...
                       </span>
                     ) : (
-                      `${balances.embedded.toFixed(6)} SOL`
+                      `${embeddedBalance.toFixed(6)} SOL`
                     )}
                   </span>
                 </div>
@@ -488,21 +555,31 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
               
               {/* Show wallet address for debugging */}
               {walletAddress && (
-                <div className="mt-2 pt-2 border-t border-gray-700">
+                <div className="mt-3 pt-2 border-t border-gray-700">
                   <div className="text-xs text-gray-500">
                     Wallet: {walletAddress.slice(0, 8)}...{walletAddress.slice(-8)}
                   </div>
                 </div>
               )}
               
-              {/* 🔧 ADDED: Show total balance */}
+              {/* 🔧 ENHANCED: Show total balance */}
               {!balances.loading && (
                 <div className="mt-2 pt-2 border-t border-gray-700">
                   <div className="flex justify-between items-center">
                     <span className="text-gray-400 text-xs">Total Balance</span>
                     <span className="text-yellow-400 text-sm font-bold">
-                      {(balances.custodial + balances.embedded).toFixed(6)} SOL
+                      {(custodialBalance + embeddedBalance).toFixed(6)} SOL
                     </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Loading indicator when fetching */}
+              {balances.loading && (
+                <div className="mt-2 pt-2 border-t border-gray-700">
+                  <div className="flex items-center justify-center">
+                    <Loader size={16} className="animate-spin mr-2" />
+                    <span className="text-sm text-gray-400">Fetching latest balances...</span>
                   </div>
                 </div>
               )}
@@ -553,7 +630,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                     >
                       <div>🎮 Game Balance</div>
                       <div className="text-xs opacity-75">
-                        {balances.custodial.toFixed(3)} SOL
+                        {custodialBalance.toFixed(3)} SOL
                       </div>
                     </button>
                     <button
@@ -566,7 +643,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                     >
                       <div>💼 Embedded Wallet</div>
                       <div className="text-xs opacity-75">
-                        {balances.embedded.toFixed(3)} SOL
+                        {embeddedBalance.toFixed(3)} SOL
                       </div>
                     </button>
                   </div>
@@ -666,7 +743,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                     >
                       <span>🎮 Game Balance → 💼 Embedded Wallet</span>
                       <div className="text-xs">
-                        {balances.custodial.toFixed(3)} → {balances.embedded.toFixed(3)}
+                        {custodialBalance.toFixed(3)} → {embeddedBalance.toFixed(3)}
                       </div>
                     </button>
                     <button
@@ -679,7 +756,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                     >
                       <span>💼 Embedded Wallet → 🎮 Game Balance</span>
                       <div className="text-xs">
-                        {balances.embedded.toFixed(3)} → {balances.custodial.toFixed(3)}
+                        {embeddedBalance.toFixed(3)} → {custodialBalance.toFixed(3)}
                       </div>
                     </button>
                   </div>

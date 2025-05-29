@@ -76,11 +76,17 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   // 🔧 FIXED: Direct Solana balance fetching using Navbar's method
   const fetchEmbeddedBalance = async (address: string): Promise<number> => {
     try {
-      console.log(`🔍 Fetching embedded balance for: ${address}`);
+      console.log(`🔍 WithdrawModal: Fetching embedded balance for: ${address}`);
       
       // Use same validation and connection setup as Navbar
       const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
       const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+      
+      console.log('🔧 WithdrawModal RPC config:', {
+        hasRpcUrl: !!rpcUrl,
+        hasApiKey: !!apiKey,
+        rpcUrl: rpcUrl?.substring(0, 50) + '...'
+      });
       
       if (!rpcUrl) {
         console.error('Missing NEXT_PUBLIC_SOLANA_RPC_URL environment variable');
@@ -105,10 +111,10 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       const balanceResponse = await connection.getBalance(publicKey);
       const solBalance = balanceResponse / LAMPORTS_PER_SOL;
       
-      console.log(`✅ Embedded balance fetched: ${solBalance.toFixed(6)} SOL`);
+      console.log(`✅ WithdrawModal: Embedded balance fetched: ${solBalance.toFixed(6)} SOL`);
       return solBalance;
     } catch (error) {
-      console.error('❌ Failed to fetch embedded balance:', error);
+      console.error('❌ WithdrawModal: Failed to fetch embedded balance:', error);
       return 0;
     }
   };
@@ -116,16 +122,16 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   // 🔧 FIXED: Improved balance fetching with direct Solana RPC
   const fetchBalances = async () => {
     if (!userId || !walletAddress) {
-      console.log('Missing userId or walletAddress:', { userId, walletAddress });
+      console.log('WithdrawModal: Missing userId or walletAddress:', { userId, walletAddress });
       return;
     }
     
+    console.log(`🔄 WithdrawModal: Starting balance fetch for user ${userId} with wallet ${walletAddress}`);
     setBalances(prev => ({ ...prev, loading: true }));
     
     try {
-      console.log(`🔄 Fetching balances for user ${userId} with wallet ${walletAddress}`);
-      
       // Fetch custodial balance
+      console.log('📊 WithdrawModal: Fetching custodial balance...');
       const custodialResponse = await fetch(`/api/custodial/balance/${userId}`);
       
       if (!custodialResponse.ok) {
@@ -133,9 +139,10 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       }
       
       const custodialData = await custodialResponse.json();
-      console.log('📊 Custodial balance response:', custodialData);
+      console.log('📊 WithdrawModal: Custodial balance response:', custodialData);
       
       // 🔧 FIXED: Use same balance fetching method as Navbar
+      console.log('💼 WithdrawModal: Fetching embedded wallet balance...');
       const embeddedBalance = await fetchEmbeddedBalance(walletAddress);
       
       const finalBalances = {
@@ -144,12 +151,16 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         loading: false
       };
       
+      console.log('✅ WithdrawModal: SETTING balances state:', finalBalances);
       setBalances(finalBalances);
       
-      console.log('✅ Final balances set:', finalBalances);
+      // Double-check state was set
+      setTimeout(() => {
+        console.log('🔍 WithdrawModal: State check after 100ms - balances should be updated');
+      }, 100);
       
     } catch (error) {
-      console.error('❌ Failed to fetch balances:', error);
+      console.error('❌ WithdrawModal: Failed to fetch balances:', error);
       setBalances(prev => ({ ...prev, loading: false }));
       setError('Failed to load balances. Please try refreshing.');
     }
@@ -168,6 +179,15 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       fetchBalances();
     }
   }, [isOpen, userId, walletAddress]); // Add dependencies
+  
+  // 🔧 ADDED: Log whenever balances state changes
+  useEffect(() => {
+    console.log('📊 WithdrawModal: Balances state updated:', {
+      custodial: balances.custodial.toFixed(6),
+      embedded: balances.embedded.toFixed(6),
+      loading: balances.loading
+    });
+  }, [balances]);
   
   // Handle outside clicks
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {

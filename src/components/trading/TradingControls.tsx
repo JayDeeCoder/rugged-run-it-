@@ -1,4 +1,4 @@
-// src/components/trading/TradingControls.tsx - Enhanced with updated useGameSocket
+// src/components/trading/TradingControls.tsx - Complete Fixed Version with Balance Updates
 import { FC, useState, useEffect, useContext, useCallback } from 'react';
 import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon, Timer, Users, Settings, Wallet, TrendingUp } from 'lucide-react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
@@ -19,15 +19,6 @@ export enum TokenType {
 }
 
 // Enhanced bet tracking interface
-interface ActiveBet {
-  id: string;
-  amount: number;
-  entryMultiplier: number;
-  timestamp: number;
-  gameId: string;
-  transactionId?: string;
-  tokenType?: TokenType; // Track which token was used
-}
 interface ActiveBet {
   id: string;
   amount: number;
@@ -58,13 +49,24 @@ const useWalletBalance = (walletAddress: string) => {
   const [lastUpdated, setLastUpdated] = useState<number>(0);
 
   const updateBalance = useCallback(async () => {
-    if (!walletAddress) return;
+    if (!walletAddress) {
+      console.log('🔍 useWalletBalance: No wallet address provided');
+      return;
+    }
     
+    console.log('🚀 useWalletBalance: Starting balance fetch for:', walletAddress);
     setLoading(true);
+    
     try {
       // Use same validation as Navbar
       const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
       const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+      
+      console.log('🔧 useWalletBalance RPC config:', {
+        hasRpcUrl: !!rpcUrl,
+        hasApiKey: !!apiKey,
+        rpcUrl: rpcUrl?.substring(0, 50) + '...'
+      });
       
       if (!rpcUrl) {
         console.error('Missing NEXT_PUBLIC_SOLANA_RPC_URL environment variable');
@@ -90,11 +92,17 @@ const useWalletBalance = (walletAddress: string) => {
       const balanceResponse = await connection.getBalance(publicKey);
       const solBalance = balanceResponse / LAMPORTS_PER_SOL;
       
+      console.log(`✅ useWalletBalance: Balance fetched and SETTING STATE: ${solBalance.toFixed(6)} SOL`);
       setBalance(solBalance);
       setLastUpdated(Date.now());
-      console.log(`💰 External wallet balance updated: ${solBalance.toFixed(6)} SOL`);
+      
+      // Double-check state was set
+      setTimeout(() => {
+        console.log(`🔍 useWalletBalance: State check - balance should be ${solBalance.toFixed(6)}`);
+      }, 100);
+      
     } catch (error) {
-      console.error('Failed to fetch external wallet balance:', error);
+      console.error('❌ useWalletBalance: Failed to fetch balance:', error);
       setBalance(0);
     } finally {
       setLoading(false);
@@ -103,11 +111,17 @@ const useWalletBalance = (walletAddress: string) => {
 
   useEffect(() => {
     if (walletAddress) {
+      console.log('🔄 useWalletBalance: useEffect triggered for wallet:', walletAddress);
       updateBalance();
       const interval = setInterval(updateBalance, 30000);
       return () => clearInterval(interval);
     }
   }, [walletAddress, updateBalance]);
+
+  // Log whenever balance state changes
+  useEffect(() => {
+    console.log(`📊 useWalletBalance: Balance state updated to ${balance.toFixed(6)} SOL`);
+  }, [balance]);
 
   return { balance, loading, lastUpdated };
 };
@@ -289,10 +303,11 @@ const CompactGameInfo: FC<{
   );
 };
 
-// Balance Display Component - SOL = custodial, RUGGED = SPL token
+// Balance Display Component - Shows both custodial and embedded for SOL
 const BalanceDisplay: FC<{
   currentToken: TokenType;
-  custodialSolBalance: number;
+  custodialBalance: number; // 🔧 BACK TO: custodialBalance for gaming
+  embeddedWalletBalance: number; // 🔧 ADDED: embedded wallet balance for reference
   ruggedBalance: number;
   onTokenChange: (token: TokenType) => void;
   onDepositClick: () => void;
@@ -304,7 +319,8 @@ const BalanceDisplay: FC<{
   isLoading: boolean;
 }> = ({ 
   currentToken, 
-  custodialSolBalance,
+  custodialBalance, // 🔧 BACK TO: custodial balance for gaming
+  embeddedWalletBalance, // 🔧 ADDED: embedded wallet balance for reference
   ruggedBalance,
   onTokenChange, 
   onDepositClick, 
@@ -315,12 +331,12 @@ const BalanceDisplay: FC<{
   onToggleExpanded,
   isLoading
 }) => {
-  // SOL = custodial balance, RUGGED = SPL token balance
-  const activeBalance = currentToken === TokenType.SOL ? custodialSolBalance : ruggedBalance;
+  // 🔧 FIXED: SOL = custodial balance for gaming, RUGGED = SPL token balance
+  const activeBalance = currentToken === TokenType.SOL ? custodialBalance : ruggedBalance;
   
   const formatBalance = (balance: number, token: TokenType) => {
     if (token === TokenType.SOL) {
-      return balance.toFixed(3); // Custodial SOL balance with decimals
+      return balance.toFixed(6); // SOL balance with decimals
     } else {
       return balance.toFixed(0); // RUGGED token as whole numbers
     }
@@ -342,12 +358,21 @@ const BalanceDisplay: FC<{
               </span>
             </div>
             <div>
-              <div className={`text-sm font-bold ${
-                currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
-              }`}>
-                {formatBalance(activeBalance, currentToken)} {currentToken}
-                {isLoading && <span className="ml-1 text-xs text-gray-400">↻</span>}
-              </div>
+              {currentToken === TokenType.SOL ? (
+                // 🔧 ENHANCED: Show both balances for SOL
+                <div>
+                  <div className="text-sm font-bold text-blue-400">
+                    {formatBalance(custodialBalance, currentToken)} SOL
+                    {isLoading && <span className="ml-1 text-xs text-gray-400">↻</span>}
+                  </div>
+                  <div className="text-xs text-gray-400">Game Balance</div>
+                </div>
+              ) : (
+                <div className="text-sm font-bold text-green-400">
+                  {formatBalance(activeBalance, currentToken)} {currentToken}
+                  {isLoading && <span className="ml-1 text-xs text-gray-400">↻</span>}
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center space-x-2">
@@ -358,6 +383,20 @@ const BalanceDisplay: FC<{
 
         {showExpanded && (
           <div className="bg-gray-800 rounded-lg p-2 mt-1">
+            {/* 🔧 ENHANCED: Show dual balance breakdown for SOL */}
+            {currentToken === TokenType.SOL && (
+              <div className="mb-2 p-2 bg-gray-900 rounded text-xs">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-green-400">🎮 Game Balance:</span>
+                  <span className="text-white font-bold">{custodialBalance.toFixed(6)} SOL</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-blue-400">💼 Wallet Balance:</span>
+                  <span className="text-white font-bold">{embeddedWalletBalance.toFixed(6)} SOL</span>
+                </div>
+              </div>
+            )}
+            
             <div className="flex space-x-2 mb-2">
               <button
                 onClick={() => onTokenChange(TokenType.SOL)}
@@ -421,7 +460,9 @@ const BalanceDisplay: FC<{
           </div>
           
           <div>
-            <div className="text-xs text-gray-400">Balance</div>
+            <div className="text-xs text-gray-400">
+              {currentToken === TokenType.SOL ? 'Game Balance' : 'Balance'}
+            </div>
             <div className={`text-lg font-bold ${
               currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
             }`}>
@@ -459,6 +500,24 @@ const BalanceDisplay: FC<{
           </button>
         </div>
       </div>
+
+      {/* 🔧 ENHANCED: Show dual balance breakdown for SOL */}
+      {currentToken === TokenType.SOL && (
+        <div className="mb-3 p-2 bg-gray-900 rounded-md">
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <div className="text-green-400 text-xs mb-1">🎮 Game Balance</div>
+              <div className="text-white font-bold">{custodialBalance.toFixed(6)} SOL</div>
+              <div className="text-xs text-gray-500">For gaming</div>
+            </div>
+            <div>
+              <div className="text-blue-400 text-xs mb-1">💼 Wallet Balance</div>
+              <div className="text-white font-bold">{embeddedWalletBalance.toFixed(6)} SOL</div>
+              <div className="text-xs text-gray-500">For deposits</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2">
         <button
@@ -1042,8 +1101,8 @@ const TradingControls: FC<TradingControlsProps> = ({
     connectionAttempts
   } = useGameSocket(walletAddress, userId || undefined);
   
-  // Dual balance system
-  const { balance: externalSolBalance, loading: externalSolLoading } = useWalletBalance(walletAddress); // For deposit reference
+  // 🔧 FIXED: Dual balance system with embedded wallet balance
+  const { balance: embeddedWalletBalance, loading: embeddedWalletLoading } = useWalletBalance(walletAddress); // 🔧 RENAMED for clarity
   const { custodialBalance, loading: custodialBalanceLoading, updateCustodialBalance } = useCustodialBalance(userId || ''); // Primary gaming balance
   const { ruggedBalance, loading: ruggedBalanceLoading, updateRuggedBalance } = useRuggedBalance(walletAddress); // SPL token
   
@@ -1090,9 +1149,19 @@ const TradingControls: FC<TradingControlsProps> = ({
   const activeCurrentMultiplier = activeCurrentGame?.multiplier || propCurrentMultiplier;
   const gameStatus = activeCurrentGame?.status || 'waiting';
 
-  // Calculate balance based on selected token
+  // 🔧 FIXED: Calculate balance based on selected token - custodial for gaming
   const activeBalance = currentToken === TokenType.SOL ? custodialBalance : ruggedBalance;
   const effectiveCanBet = gameStatus === 'active' ? true : canBet;
+
+  console.log('💰 TradingControls Balance Debug:', {
+    currentToken,
+    embeddedWalletBalance: embeddedWalletBalance.toFixed(6),
+    custodialBalance: custodialBalance.toFixed(6), 
+    ruggedBalance: ruggedBalance.toFixed(6),
+    activeBalance: activeBalance.toFixed(6),
+    gamingBalance: 'custodial', // Now using custodial for gaming
+    embeddedWalletLoading
+  });
 
   // Validation error message
   const getBetValidationError = () => {
@@ -1469,7 +1538,8 @@ const TradingControls: FC<TradingControlsProps> = ({
 
         <BalanceDisplay
           currentToken={currentToken}
-          custodialSolBalance={custodialBalance}
+          custodialBalance={custodialBalance} // 🔧 FIXED: custodial balance for gaming
+          embeddedWalletBalance={embeddedWalletBalance} // 🔧 ADDED: embedded wallet balance for reference
           ruggedBalance={ruggedBalance}
           onTokenChange={handleTokenChange}
           onDepositClick={() => setShowDepositModal(true)}
@@ -1478,7 +1548,7 @@ const TradingControls: FC<TradingControlsProps> = ({
           isMobile={isMobile}
           showExpanded={showBalanceExpanded}
           onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
-          isLoading={custodialBalanceLoading || ruggedBalanceLoading}
+          isLoading={custodialBalanceLoading || embeddedWalletLoading || ruggedBalanceLoading} // 🔧 FIXED: All loading states
         />
 
         <AutoCashoutSection
@@ -1543,7 +1613,8 @@ const TradingControls: FC<TradingControlsProps> = ({
 
       <BalanceDisplay
         currentToken={currentToken}
-        custodialSolBalance={custodialBalance}
+        custodialBalance={custodialBalance} // 🔧 FIXED: custodial balance for gaming
+        embeddedWalletBalance={embeddedWalletBalance} // 🔧 ADDED: embedded wallet balance for reference
         ruggedBalance={ruggedBalance}
         onTokenChange={handleTokenChange}
         onDepositClick={() => setShowDepositModal(true)}
@@ -1552,7 +1623,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         isMobile={isMobile}
         showExpanded={showBalanceExpanded}
         onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
-        isLoading={custodialBalanceLoading || ruggedBalanceLoading}
+        isLoading={custodialBalanceLoading || embeddedWalletLoading || ruggedBalanceLoading} // 🔧 FIXED: All loading states
       />
 
       <AutoCashoutSection

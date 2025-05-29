@@ -300,6 +300,13 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     try {
       setError(null);
       
+      // 🔧 FIXED: Check for valid userId first
+      if (!effectiveUserId) {
+        setError('User not initialized. Please wait a moment and try again.');
+        console.error('❌ Withdraw failed: No userId available');
+        return;
+      }
+      
       if (!amount || parseFloat(amount) <= 0) {
         setError('Please enter a valid amount');
         return;
@@ -321,13 +328,13 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       
       if (withdrawSource === 'custodial') {
         // Withdraw from custodial balance
-        console.log('🔄 Withdrawing from custodial balance:', { userId, amount: withdrawAmount, destinationAddress });
+        console.log('🔄 Withdrawing from custodial balance:', { userId: effectiveUserId, amount: withdrawAmount, destinationAddress });
         
         const response = await fetch('/api/custodial/withdraw', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            userId,
+            userId: effectiveUserId,
             amount: withdrawAmount,
             destinationAddress
           })
@@ -354,13 +361,13 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         }
       } else {
         // Withdraw from embedded wallet (Privy)
-        console.log('🔄 Withdrawing from embedded wallet:', { userId, walletAddress, amount: withdrawAmount, destinationAddress });
+        console.log('🔄 Withdrawing from embedded wallet:', { userId: effectiveUserId, walletAddress, amount: withdrawAmount, destinationAddress });
         
         const response = await fetch('/api/privy/withdraw', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            userId,
+            userId: effectiveUserId,
             walletAddress,
             amount: withdrawAmount,
             destinationAddress
@@ -402,6 +409,13 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     try {
       setError(null);
       
+      // 🔧 FIXED: Check for valid userId first
+      if (!effectiveUserId) {
+        setError('User not initialized. Please wait a moment and try again.');
+        console.error('❌ Transfer failed: No userId available');
+        return;
+      }
+      
       if (!amount || parseFloat(amount) <= 0) {
         setError('Please enter a valid amount');
         return;
@@ -419,13 +433,13 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       
       if (transferDirection === 'custodial-to-embedded') {
         // Transfer from custodial to embedded wallet
-        console.log('🔄 Transferring custodial to embedded:', { userId, amount: transferAmount });
+        console.log('🔄 Transferring custodial to embedded:', { userId: effectiveUserId, amount: transferAmount });
         
         const response = await fetch('/api/transfer/custodial-to-privy', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            userId,
+            userId: effectiveUserId,
             amount: transferAmount
           })
         });
@@ -452,24 +466,43 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         }
       } else {
         // Transfer from embedded wallet to custodial
-        console.log('🔄 Transferring embedded to custodial:', { userId, amount: transferAmount });
+        console.log('🔄 Transferring embedded to custodial:', { userId: effectiveUserId, amount: transferAmount });
         
-        const response = await fetch('/api/transfer/privy-to-custodial', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId,
-            amount: transferAmount
-          })
-        });
+        // 🔧 ADDED: Try custodial deposit as fallback if transfer endpoint doesn't exist
+        let response;
+        try {
+          response = await fetch('/api/transfer/privy-to-custodial', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: effectiveUserId,
+              amount: transferAmount
+            })
+          });
+        } catch (fetchError) {
+          console.error('❌ Transfer endpoint fetch failed:', fetchError);
+          throw new Error('Transfer service temporarily unavailable');
+        }
         
         console.log('📡 Embedded to custodial response status:', response.status);
         console.log('📡 Embedded to custodial response headers:', Object.fromEntries(response.headers));
+        
+        // 🔧 ENHANCED: Handle 405 Method Not Allowed specifically
+        if (response.status === 405) {
+          console.error('❌ Transfer endpoint not found (405). API route may not be deployed.');
+          throw new Error('Transfer feature temporarily unavailable. Please try again later or contact support.');
+        }
         
         // 🔧 FIXED: Better error handling for JSON parsing
         if (!response.ok) {
           const errorText = await response.text();
           console.error('❌ Embedded to custodial API error:', errorText);
+          
+          // Check if it's HTML (404 page)
+          if (errorText.includes('<html>') || errorText.includes('<!DOCTYPE')) {
+            throw new Error('Transfer service not available. The API endpoint may not be deployed.');
+          }
+          
           throw new Error(`Transfer failed: ${response.status} ${response.statusText} - ${errorText}`);
         }
         
@@ -478,7 +511,13 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         if (!contentType || !contentType.includes('application/json')) {
           const responseText = await response.text();
           console.error('❌ Non-JSON response from embedded to custodial:', responseText);
-          throw new Error('Server returned non-JSON response');
+          
+          // Check if it's HTML (like a 404 page)
+          if (responseText.includes('<html>') || responseText.includes('<!DOCTYPE')) {
+            throw new Error('Transfer endpoint not found. Please contact support.');
+          }
+          
+          throw new Error('Server returned invalid response format');
         }
         
         let result;
@@ -501,7 +540,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         } else if (result.action === 'signature_required') {
           // 🔧 ADDED: Handle signature required case
           console.log('🔐 Signature required for embedded to custodial transfer');
-          setError('This transfer requires wallet signature. Please try again or use a smaller amount.');
+          setError('This transfer requires wallet signature. This feature is coming soon. Please use the deposit method instead.');
         } else {
           throw new Error(result.error || 'Transfer failed');
         }
@@ -543,9 +582,10 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       custodialLoading,
       embeddedLoading,
       walletAddress: walletAddress?.slice(0, 8) + '...' + walletAddress?.slice(-4),
-      userId
+      propUserId: userId,
+      effectiveUserId: effectiveUserId
     });
-  }, [custodialBalance, embeddedBalance, custodialLoading, embeddedLoading, walletAddress, userId]);
+  }, [custodialBalance, embeddedBalance, custodialLoading, embeddedLoading, walletAddress, userId, effectiveUserId]);
   
   // Handle outside clicks
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
@@ -602,7 +642,8 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
             {process.env.NODE_ENV === 'development' && (
               <div className="bg-gray-900 p-3 rounded mb-4 text-xs space-y-1">
                 <div className="text-gray-400 font-bold">🔍 Debug Info:</div>
-                <div className="text-green-400">UserId: {userId || 'None'}</div>
+                <div className="text-green-400">Prop UserId: {userId || 'None'}</div>
+                <div className="text-cyan-400">Effective UserId: {effectiveUserId || 'None'}</div>
                 <div className="text-blue-400">WalletAddress: {walletAddress || 'None'}</div>
                 <div className="text-yellow-400">Authenticated: {authenticated ? 'Yes' : 'No'}</div>
                 <div className="text-purple-400">
@@ -615,6 +656,9 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                   Hook States: Custodial Loading: {custodialLoading ? 'Yes' : 'No'}, 
                   Embedded Loading: {embeddedLoading ? 'Yes' : 'No'}
                 </div>
+                {!effectiveUserId && (
+                  <div className="text-red-400 font-bold">⚠️ No userId available - transfers will fail!</div>
+                )}
               </div>
             )}
             
@@ -811,9 +855,9 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                 {/* Withdraw Button */}
                 <button
                   onClick={handleWithdraw}
-                  disabled={isLoading || !amount || !destinationAddress}
+                  disabled={isLoading || !amount || !destinationAddress || !effectiveUserId}
                   className={`w-full py-3 rounded-md font-bold flex items-center justify-center ${
-                    isLoading || !amount || !destinationAddress
+                    isLoading || !amount || !destinationAddress || !effectiveUserId
                       ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                       : 'bg-blue-600 hover:bg-blue-700 text-white'
                   }`}
@@ -822,6 +866,11 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                     <>
                       <Loader size={18} className="mr-2 animate-spin" />
                       Processing...
+                    </>
+                  ) : !effectiveUserId ? (
+                    <>
+                      <Loader size={18} className="mr-2" />
+                      Initializing...
                     </>
                   ) : (
                     <>
@@ -913,9 +962,9 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                 {/* Transfer Button */}
                 <button
                   onClick={handleTransfer}
-                  disabled={isLoading || !amount}
+                  disabled={isLoading || !amount || !effectiveUserId}
                   className={`w-full py-3 rounded-md font-bold flex items-center justify-center ${
-                    isLoading || !amount
+                    isLoading || !amount || !effectiveUserId
                       ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                       : 'bg-green-600 hover:bg-green-700 text-white'
                   }`}
@@ -924,6 +973,11 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                     <>
                       <Loader size={18} className="mr-2 animate-spin" />
                       Transferring...
+                    </>
+                  ) : !effectiveUserId ? (
+                    <>
+                      <Loader size={18} className="mr-2" />
+                      Initializing...
                     </>
                   ) : (
                     <>

@@ -1,11 +1,13 @@
+// src/components/wallets/WalletActions.tsx
 import { useState, useEffect } from 'react';
-import { ArrowUpToLine, ArrowDownToLine } from 'lucide-react';
+import { ArrowUpToLine, ArrowDownToLine, ArrowRightLeft, Zap } from 'lucide-react';
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
-import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
+import { usePrivy } from '@privy-io/react-auth';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../../utils/walletUtils';
 import { UserAPI } from '../../services/api';
+import { usePrivyAutoTransfer } from '../../hooks/usePrivyAutoTransfer';
 
-// Import the modals - we'll create proper imports
+// Import the modals
 import DepositModal from '../trading/DepositModal';
 import WithdrawModal from '../trading/WithdrawModal';
 
@@ -21,22 +23,32 @@ const WalletActions = () => {
   const [balance, setBalance] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreatingWallet, setIsCreatingWallet] = useState(false);
-  const [userId, setUserId] = useState<string | null>(null); // Add userId state
+  const [userId, setUserId] = useState<string | null>(null);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferAmount, setTransferAmount] = useState<string>('');
   
   // Use Privy hooks for authentication and wallet access
   const { authenticated, user, login, ready, createWallet } = usePrivy();
-  const { wallets } = useSolanaWallets();
   
-  // Find embedded wallet specifically (we don't want external adapters)
-  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
+  // Use the auto-transfer hook
+  const {
+    loading: transferLoading,
+    error: transferError,
+    lastTransfer,
+    embeddedWallet,
+    walletAddress,
+    executeAutoTransfer,
+    executeDirectWithdrawal,
+    checkDailyLimits,
+    getPrivyBalance,
+    registerPrivyWallet,
+    clearError
+  } = usePrivyAutoTransfer();
   
   // Use the locally defined TokenType enum
   const currentToken = TokenType.SOL;
   
-  // Get wallet address from embedded wallet
-  const walletAddress = embeddedWallet?.address || null;
-  
-  // 🔧 FIXED: Get or create user when wallet connects (same as TradingControls)
+  // Get or create user when wallet connects
   useEffect(() => {
     if (authenticated && walletAddress) {
       const initUser = async () => {
@@ -46,6 +58,9 @@ const WalletActions = () => {
           if (userData) {
             setUserId(userData.id);
             console.log(`👤 WalletActions User ID: ${userData.id}`);
+            
+            // Register the Privy wallet
+            await registerPrivyWallet(userData.id);
           }
         } catch (error) {
           console.error('❌ Could not get user data:', error);
@@ -53,7 +68,7 @@ const WalletActions = () => {
       };
       initUser();
     }
-  }, [authenticated, walletAddress]);
+  }, [authenticated, walletAddress, registerPrivyWallet]);
   
   // Handle wallet creation
   const handleCreateWallet = async () => {
@@ -62,7 +77,6 @@ const WalletActions = () => {
     setIsCreatingWallet(true);
     try {
       await createWallet();
-      // Wallet creation should update the wallets array automatically
     } catch (error) {
       console.error('Error creating wallet:', error);
     } finally {
@@ -70,7 +84,7 @@ const WalletActions = () => {
     }
   };
   
-  // 🔧 FIXED: Use EXACT same balance fetching method as working Navbar
+  // Fetch balance from blockchain
   useEffect(() => {
     const fetchBalance = async () => {
       console.log('🔍 WalletActions fetchBalance called:', {
@@ -79,7 +93,6 @@ const WalletActions = () => {
         authenticated
       });
       
-      // EXACT same condition check as Navbar
       if (!embeddedWallet || !walletAddress || !authenticated) {
         console.log('❌ WalletActions: Missing required conditions');
         setBalance(0);
@@ -90,21 +103,14 @@ const WalletActions = () => {
         console.log('🚀 WalletActions: Starting balance fetch...');
         setIsLoading(true);
         
-        // EXACT same validation as Navbar
         if (!isValidSolanaAddress(walletAddress)) {
           console.error('Invalid wallet address:', walletAddress);
           setBalance(0);
           return;
         }
         
-        // EXACT same RPC configuration as Navbar
         const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
         const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
-        
-        console.log('🔧 WalletActions RPC config:', {
-          rpcUrl: rpcUrl?.substring(0, 50) + '...',
-          hasApiKey: !!apiKey
-        });
         
         if (!rpcUrl) {
           console.error('Missing NEXT_PUBLIC_SOLANA_RPC_URL environment variable');
@@ -112,7 +118,6 @@ const WalletActions = () => {
           return;
         }
         
-        // EXACT same connection config as Navbar
         const connectionConfig: any = {
           commitment: 'confirmed',
         };
@@ -123,20 +128,15 @@ const WalletActions = () => {
           };
         }
         
-        console.log('🔗 WalletActions: Creating connection...');
         const connection = new Connection(rpcUrl, connectionConfig);
-        
-        // EXACT same PublicKey creation as Navbar
-        console.log('🔑 WalletActions: Creating PublicKey...');
         const publicKey = safeCreatePublicKey(walletAddress);
+        
         if (!publicKey) {
           console.error('Failed to create PublicKey for address:', walletAddress);
           setBalance(0);
           return;
         }
         
-        // EXACT same balance fetching as Navbar
-        console.log('💰 WalletActions: Fetching balance from RPC...');
         const lamports = await connection.getBalance(publicKey);
         const solBalance = lamports / LAMPORTS_PER_SOL;
         
@@ -152,12 +152,11 @@ const WalletActions = () => {
 
     fetchBalance();
     
-    // EXACT same interval setup as Navbar
     const intervalId = setInterval(fetchBalance, 30000);
     return () => clearInterval(intervalId);
-  }, [embeddedWallet, walletAddress, authenticated]); // EXACT same dependencies as Navbar
+  }, [embeddedWallet, walletAddress, authenticated]);
   
-  // 🔧 FIXED: Balance refresh function using EXACT same method as Navbar
+  // Refresh balance function
   const refreshBalance = async () => {
     if (!embeddedWallet || !walletAddress || !authenticated) return;
     
@@ -167,7 +166,6 @@ const WalletActions = () => {
         return;
       }
       
-      // EXACT same RPC configuration as Navbar
       const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
       const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
       
@@ -200,6 +198,33 @@ const WalletActions = () => {
       console.log(`🔄 Balance refreshed: ${solBalance.toFixed(6)} SOL`);
     } catch (error) {
       console.error('Error refreshing balance:', error);
+    }
+  };
+  
+  // Handle auto-transfer
+  const handleAutoTransfer = async () => {
+    if (!userId || !transferAmount) return;
+    
+    const amount = parseFloat(transferAmount);
+    if (isNaN(amount) || amount <= 0) {
+      alert('Please enter a valid amount');
+      return;
+    }
+    
+    try {
+      const result = await executeAutoTransfer(userId, amount);
+      
+      if (result.success) {
+        alert(`Transfer successful! Transaction: ${result.transactionId}`);
+        setTransferAmount('');
+        setShowTransferModal(false);
+        await refreshBalance();
+      } else {
+        alert(`Transfer failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Transfer error:', error);
+      alert('Transfer failed');
     }
   };
   
@@ -280,11 +305,34 @@ const WalletActions = () => {
           <div className="text-blue-400">WalletAddress: {walletAddress || 'None'}</div>
           <div className="text-yellow-400">Authenticated: {authenticated ? 'Yes' : 'No'}</div>
           <div className="text-orange-400">EmbeddedWallet: {embeddedWallet ? 'Found' : 'None'}</div>
-          <div className="text-cyan-400">Ready: {ready ? 'Yes' : 'No'}</div>
-          <div className="text-purple-400">RPC URL: {process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.substring(0, 50)}...</div>
-          <div className="text-pink-400">API Key: {process.env.NEXT_PUBLIC_ALCHEMY_API_KEY ? 'Set' : 'Not Set'}</div>
-          <div className="text-red-400">IsLoading: {isLoading ? 'Yes' : 'No'}</div>
+          <div className="text-purple-400">TransferLoading: {transferLoading ? 'Yes' : 'No'}</div>
+          <div className="text-pink-400">TransferError: {transferError || 'None'}</div>
           <div className="text-white">Balance: {balance} SOL</div>
+        </div>
+      )}
+      
+      {/* Transfer error display */}
+      {transferError && (
+        <div className="mb-4 bg-red-900 border border-red-600 rounded-lg p-3">
+          <div className="text-red-400 text-sm">Transfer Error:</div>
+          <div className="text-red-200 text-sm">{transferError}</div>
+          <button 
+            onClick={clearError}
+            className="mt-2 text-xs text-red-300 hover:text-red-100 underline"
+          >
+            Clear Error
+          </button>
+        </div>
+      )}
+      
+      {/* Success message */}
+      {lastTransfer && lastTransfer.success && (
+        <div className="mb-4 bg-green-900 border border-green-600 rounded-lg p-3">
+          <div className="text-green-400 text-sm">Transfer Successful!</div>
+          <div className="text-green-200 text-sm">Transaction: {lastTransfer.transactionId}</div>
+          {lastTransfer.newBalance && (
+            <div className="text-green-300 text-xs">New Balance: {lastTransfer.newBalance.toFixed(6)} SOL</div>
+          )}
         </div>
       )}
       
@@ -318,10 +366,11 @@ const WalletActions = () => {
         </div>
       </div>
       
-      <div className="flex gap-3">
+      {/* Action buttons */}
+      <div className="grid grid-cols-2 gap-3 mb-4">
         <button 
           onClick={() => setIsDepositModalOpen(true)}
-          className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium flex items-center justify-center"
+          className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium flex items-center justify-center"
         >
           <ArrowUpToLine size={18} className="mr-2" />
           Deposit
@@ -329,21 +378,87 @@ const WalletActions = () => {
         
         <button 
           onClick={() => setIsWithdrawModalOpen(true)}
-          className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-md font-medium flex items-center justify-center"
+          className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-md font-medium flex items-center justify-center"
         >
           <ArrowDownToLine size={18} className="mr-2" />
           Withdraw
         </button>
       </div>
       
-      {/* 🔧 FIXED: Modals with correct props */}
+      {/* Auto-transfer button */}
+      <button 
+        onClick={() => setShowTransferModal(true)}
+        disabled={transferLoading || !userId}
+        className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-md font-medium flex items-center justify-center mb-2"
+      >
+        {transferLoading ? (
+          <>
+            <Zap size={18} className="mr-2 animate-spin" />
+            Processing...
+          </>
+        ) : (
+          <>
+            <ArrowRightLeft size={18} className="mr-2" />
+            Quick Transfer to Game
+          </>
+        )}
+      </button>
+      
+      {/* Quick transfer modal */}
+      {showTransferModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-6 rounded-lg max-w-md w-full mx-4">
+            <h3 className="text-xl font-bold text-white mb-4">Quick Transfer</h3>
+            <p className="text-gray-300 text-sm mb-4">
+              Transfer SOL from your Privy wallet to your game balance instantly.
+            </p>
+            
+            <div className="mb-4">
+              <label className="block text-gray-300 text-sm mb-2">Amount (SOL)</label>
+              <input
+                type="number"
+                value={transferAmount}
+                onChange={(e) => setTransferAmount(e.target.value)}
+                placeholder="0.0"
+                step="0.001"
+                min="0.001"
+                max={balance}
+                className="w-full p-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-purple-500 focus:outline-none"
+              />
+              <div className="text-xs text-gray-400 mt-1">
+                Available: {balance.toFixed(6)} SOL
+              </div>
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowTransferModal(false);
+                  setTransferAmount('');
+                }}
+                className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAutoTransfer}
+                disabled={transferLoading || !transferAmount}
+                className="flex-1 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded"
+              >
+                {transferLoading ? 'Processing...' : 'Transfer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Modals - FIXED: Removed onDirectWithdrawal prop */}
       <DepositModal 
         isOpen={isDepositModalOpen} 
         onClose={() => setIsDepositModalOpen(false)} 
         currentToken={currentToken}
         walletAddress={walletAddress!}
         onSuccess={() => {
-          // Refresh balance after successful deposit using same method as Navbar
           refreshBalance();
         }}
       />
@@ -354,9 +469,8 @@ const WalletActions = () => {
         currentToken={currentToken}
         balance={balance}
         walletAddress={walletAddress!}
-        userId={userId} // 🔧 FIXED: Now passes the actual userId
+        userId={userId}
         onSuccess={() => {
-          // Refresh balance after successful withdrawal using same method as Navbar
           refreshBalance();
         }}
       />

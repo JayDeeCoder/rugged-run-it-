@@ -1,148 +1,224 @@
 // app/api/transfer/privy-to-custodial/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, TransactionInstruction, Keypair } from '@solana/web3.js';
-import { createClient } from '@supabase/supabase-js';
-import bs58 from 'bs58';
+import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, TransactionInstruction } from '@solana/web3.js';
+import { privyWalletAPI } from '../../../../services/privyWalletAPI';
+import { safeCreatePublicKey, isValidSolanaAddress } from '../../../../utils/walletUtils';
+import logger from '../../../../utils/logger';
 
-// Minimum transfer amount
-const MIN_TRANSFER = 0.001;
+// Constants
+const DAILY_WITHDRAWAL_LIMIT = 20.0; // 20 SOL per day
+const MIN_WITHDRAWAL = 0.001;
+
+// Helper function to create transfer transactions
+async function createTransferTransaction(
+  fromPubkey: PublicKey,
+  toPubkey: PublicKey,
+  amount: number,
+  memo?: string
+): Promise<Transaction> {
+  const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
+  
+  const transaction = new Transaction();
+  
+  // Add transfer instruction
+  transaction.add(
+    SystemProgram.transfer({
+      fromPubkey,
+      toPubkey,
+      lamports
+    })
+  );
+  
+  // Add memo if provided
+  if (memo) {
+    transaction.add(
+      new TransactionInstruction({
+        keys: [],
+        programId: new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'),
+        data: Buffer.from(memo, 'utf8')
+      })
+    );
+  }
+  
+  return transaction;
+}
 
 export async function POST(request: NextRequest) {
   try {
     console.log('🔄 Privy to custodial transfer request received');
     
-    // Initialize services inside the handler
-    const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-    const HOUSE_WALLET_PRIVATE_KEY = process.env.HOUSE_WALLET_PRIVATE_KEY;
-    const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
     // Validate environment variables
-    if (!SOLANA_RPC_URL || !HOUSE_WALLET_PRIVATE_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-      console.error('❌ Missing environment variables:', {
-        hasSolanaRpc: !!SOLANA_RPC_URL,
-        hasHouseWallet: !!HOUSE_WALLET_PRIVATE_KEY,
-        hasSupabaseUrl: !!SUPABASE_URL,
-        hasSupabaseKey: !!SUPABASE_SERVICE_KEY
-      });
+    const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+    const HOUSE_WALLET_ADDRESS = process.env.HOUSE_WALLET_ADDRESS;
+
+    if (!SOLANA_RPC_URL) {
+      console.error('❌ Missing SOLANA_RPC_URL environment variable');
       return NextResponse.json(
-        { error: 'Server configuration error' },
+        { error: 'Server configuration error: Missing Solana RPC URL' },
+        { status: 500 }
+      );
+    }
+
+    if (!HOUSE_WALLET_ADDRESS) {
+      console.error('❌ Missing HOUSE_WALLET_ADDRESS environment variable');
+      return NextResponse.json(
+        { error: 'Server configuration error: Missing house wallet address' },
+        { status: 500 }
+      );
+    }
+
+    // Validate house wallet address
+    if (!isValidSolanaAddress(HOUSE_WALLET_ADDRESS)) {
+      console.error('❌ Invalid HOUSE_WALLET_ADDRESS');
+      return NextResponse.json(
+        { error: 'Server configuration error: Invalid house wallet address' },
         { status: 500 }
       );
     }
 
     const solanaConnection = new Connection(SOLANA_RPC_URL, 'confirmed');
-    const houseWallet = Keypair.fromSecretKey(bs58.decode(HOUSE_WALLET_PRIVATE_KEY));
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     
     const body = await request.json();
-    const { userId, amount, signedTransaction } = body;
+    const { userId, amount, signedTransaction, autoSign = true } = body;
     
-    console.log('📋 Transfer details:', { userId, amount, hasSignedTx: !!signedTransaction });
+    console.log('📋 Transfer details:', { userId, amount, hasSignedTx: !!signedTransaction, autoSign });
     
     // Validate inputs
-    if (!userId || !amount) {
+    if (!userId || typeof userId !== 'string') {
       return NextResponse.json(
-        { error: 'Missing required fields: userId, amount' },
+        { error: 'Invalid or missing userId' },
         { status: 400 }
       );
     }
     
-    if (amount < MIN_TRANSFER) {
+    if (!amount || typeof amount !== 'number' || amount <= 0) {
       return NextResponse.json(
-        { error: `Invalid amount. Must be at least ${MIN_TRANSFER} SOL` },
+        { error: 'Invalid or missing amount' },
         { status: 400 }
       );
     }
     
-    // Get user's Privy wallet info
-    const { data: privyWallet, error: privyError } = await supabase
-      .from('privy_wallets')
-      .select('privy_wallet_address, balance')
-      .eq('user_id', userId)
-      .single();
-    
-    if (privyError || !privyWallet) {
+    if (amount < MIN_WITHDRAWAL || amount > DAILY_WITHDRAWAL_LIMIT) {
       return NextResponse.json(
-        { error: 'Privy wallet not found for user' },
+        { error: `Invalid amount. Must be between ${MIN_WITHDRAWAL} and ${DAILY_WITHDRAWAL_LIMIT} SOL` },
+        { status: 400 }
+      );
+    }
+    
+    const transferId = `privy-to-custodial-${userId}-${Date.now()}`;
+    
+    // Get user's Privy wallet information
+    const wallet = await privyWalletAPI.getPrivyWallet(userId);
+    if (!wallet) {
+      return NextResponse.json(
+        { error: 'Privy wallet not found. Please register your wallet first.' },
         { status: 404 }
       );
     }
     
-    const userPublicKey = new PublicKey(privyWallet.privy_wallet_address);
+    // Update and check current balance
+    const currentBalance = await privyWalletAPI.updateWalletBalance(userId);
     
-    // Check current balance on blockchain
-    const balanceResponse = await solanaConnection.getBalance(userPublicKey);
-    const currentBalance = balanceResponse / LAMPORTS_PER_SOL;
-    
-    if (currentBalance < amount + 0.001) { // Include fee buffer
+    // Check daily withdrawal limit
+    const dailyCheck = await privyWalletAPI.checkDailyWithdrawalLimit(userId, amount);
+    if (!dailyCheck.allowed) {
       return NextResponse.json(
         { 
-          error: `Insufficient Privy wallet balance. Available: ${currentBalance.toFixed(6)} SOL, Required: ${(amount + 0.001).toFixed(6)} SOL (including fees)` 
+          error: `Daily transfer limit exceeded. Used: ${dailyCheck.used.toFixed(3)} SOL, Remaining: ${dailyCheck.remaining.toFixed(3)} SOL, Limit: ${DAILY_WITHDRAWAL_LIMIT} SOL`,
+          dailyLimits: {
+            used: dailyCheck.used,
+            remaining: dailyCheck.remaining,
+            limit: DAILY_WITHDRAWAL_LIMIT
+          }
         },
         { status: 400 }
       );
     }
     
-    if (!signedTransaction) {
-      // Step 1: Create unsigned transaction for user to sign
-      console.log('📝 Creating unsigned transaction for transfer...');
+    // Validate balance
+    if (currentBalance < amount + 0.001) { // Include fee buffer
+      return NextResponse.json(
+        { 
+          error: `Insufficient Privy wallet balance: ${currentBalance.toFixed(3)} SOL available, ${(amount + 0.001).toFixed(3)} SOL required (including fees)` 
+        },
+        { status: 400 }
+      );
+    }
+    
+    // Create PublicKey instances
+    const privyPublicKey = safeCreatePublicKey(wallet.privyWalletAddress);
+    const housePublicKey = safeCreatePublicKey(HOUSE_WALLET_ADDRESS);
+    
+    if (!privyPublicKey || !housePublicKey) {
+      return NextResponse.json(
+        { error: 'Invalid wallet addresses' },
+        { status: 500 }
+      );
+    }
+    
+    if (!signedTransaction && !autoSign) {
+      // Step 1: Create unsigned transaction for external wallets (manual signing)
+      console.log('📝 Creating unsigned transaction for external wallet...');
       
-      const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
-      
-      const transaction = new Transaction().add(
-        SystemProgram.transfer({
-          fromPubkey: userPublicKey,
-          toPubkey: houseWallet.publicKey,
-          lamports: lamports
-        })
+      const transaction = await createTransferTransaction(
+        privyPublicKey,
+        housePublicKey,
+        amount,
+        `privy-to-custodial-${transferId}`
       );
       
-      // Add memo for transaction identification
-      const memo = `privy-to-custodial-${userId}-${Date.now()}`;
-      transaction.add(
-        new TransactionInstruction({
-          keys: [],
-          programId: new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'),
-          data: Buffer.from(memo, 'utf8')
-        })
-      );
-      
-      // Set recent blockhash and fee payer
       const { blockhash } = await solanaConnection.getLatestBlockhash();
       transaction.recentBlockhash = blockhash;
-      transaction.feePayer = userPublicKey;
+      transaction.feePayer = privyPublicKey;
       
-      // Serialize transaction for user to sign
       const serializedTransaction = transaction.serialize({ requireAllSignatures: false });
       const base64Transaction = serializedTransaction.toString('base64');
       
-      return NextResponse.json({
+      return NextResponse.json({ 
         success: false,
-        action: 'signature_required',
+        transferId,
         unsignedTransaction: base64Transaction,
         message: 'Transaction created - please sign with your Privy wallet',
         transferDetails: {
-          from: privyWallet.privy_wallet_address,
-          to: houseWallet.publicKey.toString(),
+          from: wallet.privyWalletAddress,
+          to: HOUSE_WALLET_ADDRESS,
           amount: amount,
           currentBalance: currentBalance,
           estimatedFee: 0.001
         },
-        instructions: [
-          'Use your Privy wallet to sign this transaction',
-          'This will transfer SOL from your embedded wallet to custodial balance',
-          'Send the signed transaction back to complete the transfer'
-        ]
+        dailyLimits: {
+          used: dailyCheck.used,
+          remaining: dailyCheck.remaining,
+          limit: DAILY_WITHDRAWAL_LIMIT
+        }
       });
     }
     
-    // Step 2: Process signed transaction
-    console.log('💸 Processing signed transfer transaction...');
+    // Step 2: Process transaction (either signed or auto-signed)
+    console.log('💸 Processing transfer transaction...');
+    
+    let transactionBuffer: Buffer;
+    
+    if (signedTransaction) {
+      // External wallet - process provided signed transaction
+      console.log('🔐 Processing externally signed transaction...');
+      transactionBuffer = Buffer.from(signedTransaction, 'base64');
+    } else if (autoSign) {
+      // This should not happen with the current implementation
+      // The frontend should always provide a signed transaction
+      console.log('⚠️ Auto-signing requested but not implemented on server side');
+      return NextResponse.json({
+        error: 'Auto-signing not supported. Please sign the transaction on the frontend.',
+        hint: 'Use the unsigned transaction flow and sign with your Privy wallet'
+      }, { status: 400 });
+    } else {
+      return NextResponse.json(
+        { error: 'No signed transaction provided and auto-sign disabled' },
+        { status: 400 }
+      );
+    }
     
     try {
-      const transactionBuffer = Buffer.from(signedTransaction, 'base64');
-      
       // Submit to blockchain
       const signature = await solanaConnection.sendRawTransaction(
         transactionBuffer,
@@ -165,143 +241,73 @@ export async function POST(request: NextRequest) {
       
       console.log(`✅ Transfer transaction confirmed: ${signature}`);
       
-      // Get or create user's hybrid wallet record
-      let { data: userWallet, error: walletError } = await supabase
-        .from('user_hybrid_wallets')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
-      
-      if (walletError && walletError.code === 'PGRST116') {
-        // Create new hybrid wallet record
-        const { data: newWallet, error: createError } = await supabase
-          .from('user_hybrid_wallets')
-          .insert({
-            user_id: userId,
-            external_wallet_address: null,
-            embedded_wallet_id: privyWallet.privy_wallet_address,
-            custodial_balance: amount,
-            embedded_balance: Math.max(0, currentBalance - amount - 0.001),
-            custodial_total_deposited: amount,
-            total_transfers_to_custodial: amount,
-            last_custodial_deposit: new Date().toISOString(),
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .select()
-          .single();
-        
-        if (createError) {
-          console.error('❌ Failed to create hybrid wallet record:', createError);
-          return NextResponse.json(
-            { 
-              error: 'Transfer completed but failed to update balance. Please contact support.',
-              transactionId: signature 
-            },
-            { status: 500 }
-          );
+      // Log the successful transaction
+      await privyWalletAPI.logTransaction(
+        userId,
+        'privy_to_custodial',
+        amount,
+        wallet.privyWalletAddress,
+        HOUSE_WALLET_ADDRESS,
+        signature,
+        'completed',
+        { 
+          transferId,
+          transferType: 'privy_to_custodial',
+          houseWallet: HOUSE_WALLET_ADDRESS
         }
-        
-        userWallet = newWallet;
-      } else if (walletError) {
-        console.error('❌ Failed to get hybrid wallet:', walletError);
-        return NextResponse.json(
-          { 
-            error: 'Transfer completed but failed to update balance. Please contact support.',
-            transactionId: signature 
-          },
-          { status: 500 }
-        );
-      } else {
-        // Update existing wallet record
-        const newCustodialBalance = parseFloat(userWallet.custodial_balance) + amount;
-        const newEmbeddedBalance = Math.max(0, currentBalance - amount - 0.001);
-        const newTotalTransfers = parseFloat(userWallet.total_transfers_to_custodial || '0') + amount;
-        
-        const { error: updateError } = await supabase
-          .from('user_hybrid_wallets')
-          .update({ 
-            custodial_balance: newCustodialBalance,
-            embedded_balance: newEmbeddedBalance,
-            total_transfers_to_custodial: newTotalTransfers,
-            last_custodial_deposit: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .eq('user_id', userId);
-        
-        if (updateError) {
-          console.error('❌ Failed to update hybrid wallet balance:', updateError);
-          return NextResponse.json(
-            { 
-              error: 'Transfer completed but failed to update balance. Please contact support.',
-              transactionId: signature 
-            },
-            { status: 500 }
-          );
-        }
-        
-        userWallet.custodial_balance = newCustodialBalance;
-        userWallet.embedded_balance = newEmbeddedBalance;
-      }
+      );
       
-      // Update Privy wallet balance in database
-      try {
-        await supabase
-          .from('privy_wallets')
-          .update({ 
-            balance: Math.max(0, currentBalance - amount - 0.001),
-            last_balance_update: new Date().toISOString(),
-            last_used: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .eq('user_id', userId);
-      } catch (updateError) {
-        console.warn('⚠️ Failed to update Privy wallet balance in database:', updateError);
-        // Non-critical error, transfer was successful
-      }
+      // Update wallet balance
+      const newBalance = await privyWalletAPI.updateWalletBalance(userId);
       
-      // Log transfer transaction
-      try {
-        await supabase
-          .from('user_transactions')
-          .insert({
-            user_id: userId,
-            transaction_type: 'privy_to_custodial_transfer',
-            amount: amount,
-            source_address: privyWallet.privy_wallet_address,
-            destination_address: houseWallet.publicKey.toString(),
-            transaction_id: signature,
-            status: 'completed',
-            created_at: new Date().toISOString()
-          });
-      } catch (logError) {
-        console.warn('⚠️ Failed to log transfer transaction:', logError);
-        // Non-critical error, transfer was successful
-      }
+      // Get updated daily limits
+      const updatedDailyCheck = await privyWalletAPI.checkDailyWithdrawalLimit(userId, 0);
       
-      console.log(`✅ Privy to custodial transfer completed: ${amount} SOL, New custodial balance: ${userWallet.custodial_balance} SOL`);
+      console.log(`✅ Privy to custodial transfer completed: ${transferId} (${signature})`);
       
       return NextResponse.json({
         success: true,
         message: `Successfully transferred ${amount} SOL from Privy wallet to custodial balance`,
         transactionId: signature,
-        newCustodialBalance: parseFloat(userWallet.custodial_balance),
-        newEmbeddedBalance: parseFloat(userWallet.embedded_balance || '0'),
+        transferId,
         transferDetails: {
           amount,
-          sourceAddress: privyWallet.privy_wallet_address,
-          destinationAddress: houseWallet.publicKey.toString(),
+          sourceAddress: wallet.privyWalletAddress,
+          destinationAddress: HOUSE_WALLET_ADDRESS,
           transactionId: signature,
+          newBalance: newBalance,
           timestamp: new Date().toISOString()
+        },
+        dailyLimits: {
+          used: updatedDailyCheck.used,
+          remaining: updatedDailyCheck.remaining,
+          limit: DAILY_WITHDRAWAL_LIMIT
         }
       });
       
     } catch (transactionError) {
       console.error('❌ Transaction processing failed:', transactionError);
+      
+      // Log failed transaction
+      await privyWalletAPI.logTransaction(
+        userId,
+        'privy_to_custodial',
+        amount,
+        wallet.privyWalletAddress,
+        HOUSE_WALLET_ADDRESS,
+        undefined,
+        'failed',
+        { 
+          transferId,
+          error: transactionError instanceof Error ? transactionError.message : 'Unknown error'
+        }
+      );
+      
       return NextResponse.json(
         { 
-          error: 'Failed to process signed transaction',
-          details: transactionError instanceof Error ? transactionError.message : 'Unknown error'
+          error: 'Failed to process transaction',
+          details: transactionError instanceof Error ? transactionError.message : 'Unknown error',
+          transferId
         },
         { status: 500 }
       );
@@ -309,6 +315,12 @@ export async function POST(request: NextRequest) {
     
   } catch (error) {
     console.error('❌ Privy to custodial transfer error:', error);
+    
+    // Log error if we have enough context
+    if (error instanceof Error) {
+      logger.error('Transfer error:', error);
+    }
+    
     return NextResponse.json(
       { 
         error: 'Transfer failed',
@@ -324,15 +336,54 @@ export async function GET() {
     message: 'Privy to custodial transfer endpoint',
     methods: ['POST'],
     requiredFields: ['userId', 'amount'],
-    optionalFields: ['signedTransaction'],
+    optionalFields: ['signedTransaction', 'autoSign'],
     process: [
       '1. First call without signedTransaction to get unsigned transaction',
-      '2. Sign transaction with Privy wallet',
+      '2. Sign transaction with Privy wallet on frontend',
       '3. Second call with signedTransaction to complete transfer'
     ],
+    features: [
+      'Two-step process for security',
+      'Daily withdrawal limits (20 SOL)',
+      'Balance validation',
+      'Transaction logging',
+      'Real-time balance updates'
+    ],
     limits: {
-      minAmount: MIN_TRANSFER,
-      note: 'Transfers SOL from embedded Privy wallet to custodial balance'
+      minAmount: MIN_WITHDRAWAL,
+      dailyLimit: DAILY_WITHDRAWAL_LIMIT,
+      note: 'Daily limit is shared with custodial withdrawals and resets at midnight UTC'
+    },
+    example: {
+      step1: {
+        method: 'POST',
+        body: {
+          userId: 'user123',
+          amount: 1.5,
+          autoSign: false
+        },
+        response: {
+          success: false,
+          unsignedTransaction: 'base64_transaction_string',
+          message: 'Transaction created - please sign with your Privy wallet'
+        }
+      },
+      step2: {
+        method: 'POST',
+        body: {
+          userId: 'user123',
+          amount: 1.5,
+          signedTransaction: 'base64_signed_transaction_string'
+        },
+        response: {
+          success: true,
+          transactionId: 'blockchain_transaction_signature',
+          transferDetails: {
+            amount: 1.5,
+            newBalance: 3.25
+          }
+        }
+      }
     },
     timestamp: new Date().toISOString()
   });

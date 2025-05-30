@@ -243,7 +243,7 @@ export const useEmbeddedWallet = () => {
     try {
       // In production, this would call the game contract's cashout function
       // For now, we just log the intent since we don't have the actual contract implementation
-      const result = await sendTransaction(gameContract, 0.00001); // Minimal transaction to trigger the cashout
+      const result = await sendTransaction(gameContract, 0.001); // Minimal transaction to trigger the cashout
       toast.success(`Cashout successful`);
       return result;
     } catch (error) {

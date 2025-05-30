@@ -92,13 +92,13 @@ const useWalletBalance = (walletAddress: string) => {
       const balanceResponse = await connection.getBalance(publicKey);
       const solBalance = balanceResponse / LAMPORTS_PER_SOL;
       
-      console.log(`✅ useWalletBalance: Balance fetched and SETTING STATE: ${solBalance.toFixed(6)} SOL`);
+      console.log(`✅ useWalletBalance: Balance fetched and SETTING STATE: ${solBalance.toFixed(3)} SOL`);
       setBalance(solBalance);
       setLastUpdated(Date.now());
       
       // Double-check state was set
       setTimeout(() => {
-        console.log(`🔍 useWalletBalance: State check - balance should be ${solBalance.toFixed(6)}`);
+        console.log(`🔍 useWalletBalance: State check - balance should be ${solBalance.toFixed(3)}`);
       }, 100);
       
     } catch (error) {
@@ -120,7 +120,7 @@ const useWalletBalance = (walletAddress: string) => {
 
   // Log whenever balance state changes
   useEffect(() => {
-    console.log(`📊 useWalletBalance: Balance state updated to ${balance.toFixed(6)} SOL`);
+    console.log(`📊 useWalletBalance: Balance state updated to ${balance.toFixed(3)} SOL`);
   }, [balance]);
 
   return { balance, loading, lastUpdated };
@@ -336,7 +336,7 @@ const BalanceDisplay: FC<{
   
   const formatBalance = (balance: number, token: TokenType) => {
     if (token === TokenType.SOL) {
-      return balance.toFixed(6); // SOL balance with decimals
+      return balance.toFixed(3); // SOL balance with decimals
     } else {
       return balance.toFixed(0); // RUGGED token as whole numbers
     }
@@ -388,11 +388,11 @@ const BalanceDisplay: FC<{
               <div className="mb-2 p-2 bg-gray-900 rounded text-xs">
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-green-400">🎮 Game Balance:</span>
-                  <span className="text-white font-bold">{custodialBalance.toFixed(6)} SOL</span>
+                  <span className="text-white font-bold">{custodialBalance.toFixed(3)} SOL</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-blue-400">💼 Wallet Balance:</span>
-                  <span className="text-white font-bold">{embeddedWalletBalance.toFixed(6)} SOL</span>
+                  <span className="text-white font-bold">{embeddedWalletBalance.toFixed(3)} SOL</span>
                 </div>
               </div>
             )}
@@ -507,12 +507,12 @@ const BalanceDisplay: FC<{
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
               <div className="text-green-400 text-xs mb-1">🎮 Game Balance</div>
-              <div className="text-white font-bold">{custodialBalance.toFixed(6)} SOL</div>
+              <div className="text-white font-bold">{custodialBalance.toFixed(3)} SOL</div>
               <div className="text-xs text-gray-500">For gaming</div>
             </div>
             <div>
               <div className="text-blue-400 text-xs mb-1">💼 Wallet Balance</div>
-              <div className="text-white font-bold">{embeddedWalletBalance.toFixed(6)} SOL</div>
+              <div className="text-white font-bold">{embeddedWalletBalance.toFixed(3)} SOL</div>
               <div className="text-xs text-gray-500">For deposits</div>
             </div>
           </div>

@@ -877,7 +877,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           type="text"
           value={amount}
           onChange={handleAmountChange}
-          placeholder="0.000000"
+          placeholder="0.000"
           className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 pr-16 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
         />
         <button
@@ -987,7 +987,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           type="text"
           value={amount}
           onChange={handleAmountChange}
-          placeholder="0.000000"
+          placeholder="0.000"
           className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 pr-16 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
         />
         <button

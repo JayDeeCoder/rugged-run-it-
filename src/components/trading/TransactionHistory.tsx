@@ -28,7 +28,7 @@ const TransactionHistory: FC<TransactionHistoryProps> = ({ maxItems = 10 }) => {
     } else if (value < 0) {
       return <span className="text-red-500">-{formattedValue.replace('-', '')}</span>;
     } else {
-      return <span className="text-gray-400">0.0000</span>;
+      return <span className="text-gray-400">0.000</span>;
     }
   };
 

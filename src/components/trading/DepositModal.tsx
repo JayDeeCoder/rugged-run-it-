@@ -1,11 +1,19 @@
-// src/components/trading/DepositModal.tsx
-import { FC, useState, useRef, useEffect } from 'react';
+// src/components/trading/DepositModal.tsx - Updated with Custodial Support
+import { FC, useState, useRef, useEffect, useCallback } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
-import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, ExternalLink, QrCode } from 'lucide-react';
+import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, ExternalLink, QrCode, RefreshCw } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+
+// 🚩 ADD: Import feature flags
+import { 
+  isCustodialOnlyMode, 
+  shouldShowEmbeddedWalletUI, 
+  getWalletMode, 
+  getModeDescription 
+} from '../../utils/featureFlags';
 
 // Define the TokenType enum locally
 enum TokenType {
@@ -19,6 +27,21 @@ interface DepositModalProps {
   onSuccess?: () => void;
   currentToken: TokenType;
   walletAddress: string;
+  userId?: string | null; // 🚩 ADD: userId for custodial deposits
+}
+
+// 🚩 ADD: Interface for custodial deposit info
+interface CustodialDepositInfo {
+  depositAddress: string;
+  qrCodeUrl?: string;
+  explorerUrl?: string;
+  instructions: string[];
+  important: string[];
+  timing: {
+    estimatedCreditTime: string;
+    blockchainConfirmations: string;
+    supportContact: string;
+  };
 }
 
 const DepositModal: FC<DepositModalProps> = ({ 
@@ -26,11 +49,22 @@ const DepositModal: FC<DepositModalProps> = ({
   onClose, 
   onSuccess, 
   currentToken,
-  walletAddress
+  walletAddress,
+  userId // 🚩 ADD: userId prop
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
   const [showQR, setShowQR] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  
+  // 🚩 ADD: Custodial-specific state
+  const [custodialDepositInfo, setCustodialDepositInfo] = useState<CustodialDepositInfo | null>(null);
+  const [fetchingDepositInfo, setFetchingDepositInfo] = useState<boolean>(false);
+  const [depositError, setDepositError] = useState<string | null>(null);
+  
+  // 🚩 ADD: Feature flag checks
+  const custodialOnlyMode = isCustodialOnlyMode();
+  const showEmbeddedUI = shouldShowEmbeddedWalletUI();
+  const walletMode = getWalletMode();
   
   // Get token symbol based on currentToken
   const tokenSymbol = currentToken;
@@ -40,29 +74,78 @@ const DepositModal: FC<DepositModalProps> = ({
   
   const modalRef = useRef<HTMLDivElement>(null);
   
+  // 🚩 ADD: Get custodial deposit info
+  const fetchCustodialDepositInfo = useCallback(async () => {
+    if (!custodialOnlyMode || !userId) return;
+    
+    setFetchingDepositInfo(true);
+    setDepositError(null);
+    
+    try {
+      console.log('🏦 Fetching custodial deposit info for user:', userId);
+      
+      const response = await fetch('/api/custodial/deposit-info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to get deposit info: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setCustodialDepositInfo(data);
+        console.log('✅ Custodial deposit info received:', data.depositAddress);
+      } else {
+        throw new Error(data.error || 'Failed to get deposit information');
+      }
+    } catch (error) {
+      console.error('❌ Failed to fetch custodial deposit info:', error);
+      setDepositError(error instanceof Error ? error.message : 'Failed to get deposit information');
+    } finally {
+      setFetchingDepositInfo(false);
+    }
+  }, [custodialOnlyMode, userId]);
+  
   // Reset state when modal opens/closes
   useEffect(() => {
     if (isOpen) {
       setCopied(false);
       setShowQR(false);
       setIsLoading(false);
+      setDepositError(null);
+      setCustodialDepositInfo(null);
+      
+      // 🚩 ADD: Fetch custodial deposit info if needed
+      if (custodialOnlyMode && userId) {
+        fetchCustodialDepositInfo();
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, custodialOnlyMode, userId, fetchCustodialDepositInfo]);
   
   // Handle outside clicks
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
-    if (isOpen && !isLoading) onClose();
+    if (isOpen && !isLoading && !fetchingDepositInfo) onClose();
   });
   
   // If not open, don't render
   if (!isOpen) return null;
   
+  // 🚩 UPDATE: Dynamic address based on mode
+  const displayAddress = custodialOnlyMode && custodialDepositInfo 
+    ? custodialDepositInfo.depositAddress 
+    : walletAddress;
+  
   // Copy wallet address to clipboard
   const copyAddress = async () => {
     try {
-      await navigator.clipboard.writeText(walletAddress);
+      await navigator.clipboard.writeText(displayAddress);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      console.log('📋 Address copied:', displayAddress.slice(0, 8) + '...');
     } catch (error) {
       console.error('Failed to copy address:', error);
     }
@@ -82,28 +165,27 @@ const DepositModal: FC<DepositModalProps> = ({
     }, 3000);
   };
 
-  // Get network info based on token
+  // 🚩 UPDATE: Dynamic network info based on mode
   const getNetworkInfo = () => {
-    switch (currentToken) {
-      case TokenType.SOL:
-        return {
-          network: 'Solana Mainnet',
-          minDeposit: '0.001 SOL',
-          confirmations: '1 confirmation'
-        };
-      case TokenType.RUGGED:
-        return {
-          network: 'Solana (SPL Token)',
-          minDeposit: '1 RUGGED',
-          confirmations: '1 confirmation'
-        };
-      default:
-        return {
-          network: 'Unknown',
-          minDeposit: 'N/A',
-          confirmations: 'N/A'
-        };
+    const baseInfo = {
+      network: currentToken === TokenType.SOL ? 'Solana Mainnet' : 'Solana (SPL Token)',
+      minDeposit: currentToken === TokenType.SOL ? '0.001 SOL' : '1 RUGGED',
+      confirmations: '1 confirmation'
+    };
+    
+    if (custodialOnlyMode) {
+      return {
+        ...baseInfo,
+        depositType: 'Custodial Deposit',
+        processingTime: '1-3 minutes'
+      };
     }
+    
+    return {
+      ...baseInfo,
+      depositType: 'Direct Wallet Deposit',
+      processingTime: 'Instant'
+    };
   };
 
   const networkInfo = getNetworkInfo();
@@ -112,139 +194,229 @@ const DepositModal: FC<DepositModalProps> = ({
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
       <div 
         ref={modalRef} 
-        className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
+        className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto"
       >
-        {/* Header */}
+        {/* 🚩 UPDATE: Header with mode indicator */}
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white flex items-center">
             <ArrowUpToLine size={20} className="mr-2" />
             Deposit {tokenSymbol}
+            {/* Mode indicator */}
+            <span className="ml-2 text-xs bg-green-600 text-white px-2 py-1 rounded">
+              {walletMode.toUpperCase()}
+            </span>
           </h2>
           <button
             onClick={onClose}
-            disabled={isLoading}
+            disabled={isLoading || fetchingDepositInfo}
             className="text-gray-400 hover:text-white transition-colors"
           >
             <X size={20} />
           </button>
         </div>
         
-        {/* Network Info */}
-        <div className="bg-gray-800 p-4 rounded-md mb-6">
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-gray-400">Network:</span>
-            <span className="text-white font-medium">{networkInfo.network}</span>
+        {/* 🚩 ADD: Mode explanation */}
+        {custodialOnlyMode && (
+          <div className="bg-green-900 bg-opacity-20 border border-green-800 text-green-400 p-3 rounded-md mb-4 text-sm">
+            <div className="font-medium mb-1">🏦 Custodial Deposit</div>
+            <div className="text-xs">
+              Send SOL from any wallet to this address. Your game balance will be credited automatically.
+            </div>
           </div>
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-gray-400">Min Deposit:</span>
-            <span className="text-white">{networkInfo.minDeposit}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-gray-400">Confirmations:</span>
-            <span className="text-white">{networkInfo.confirmations}</span>
-          </div>
-        </div>
+        )}
         
-        {/* Wallet Address Section */}
-        <div className="mb-6">
-          <label className="block text-gray-300 mb-2 text-sm">
-            Your Deposit Address
-          </label>
-          
-          {/* Address Display */}
-          <div className="bg-gray-800 p-3 rounded-md mb-3">
-            <div className="flex items-center justify-between">
-              <div className="flex-1 mr-2">
-                <div className="text-white font-mono text-sm break-all">
-                  {walletAddress}
+        {/* 🚩 ADD: Loading state for custodial deposit info */}
+        {custodialOnlyMode && fetchingDepositInfo && (
+          <div className="bg-gray-800 p-4 rounded-md mb-6 text-center">
+            <Loader size={24} className="animate-spin text-green-500 mx-auto mb-2" />
+            <div className="text-white text-sm">Getting deposit address...</div>
+          </div>
+        )}
+        
+        {/* 🚩 ADD: Error state for custodial deposit info */}
+        {custodialOnlyMode && depositError && (
+          <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-500 p-3 rounded-md mb-4 text-sm">
+            <div className="font-medium mb-1">❌ Error</div>
+            <div className="text-xs">{depositError}</div>
+            <button
+              onClick={fetchCustodialDepositInfo}
+              className="mt-2 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+        
+        {/* Show content only if we have the address (embedded mode always has it, custodial needs to fetch) */}
+        {(!custodialOnlyMode || custodialDepositInfo) && (
+          <>
+            {/* Network Info */}
+            <div className="bg-gray-800 p-4 rounded-md mb-6">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-gray-400">Network:</span>
+                <span className="text-white font-medium">{networkInfo.network}</span>
+              </div>
+              {/* 🚩 ADD: Deposit type info */}
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-gray-400">Type:</span>
+                <span className="text-white">{networkInfo.depositType}</span>
+              </div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-gray-400">Min Deposit:</span>
+                <span className="text-white">{networkInfo.minDeposit}</span>
+              </div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-gray-400">Confirmations:</span>
+                <span className="text-white">{networkInfo.confirmations}</span>
+              </div>
+              {/* 🚩 ADD: Processing time for custodial */}
+              {custodialOnlyMode && (
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400">Credit Time:</span>
+                  <span className="text-white">{networkInfo.processingTime}</span>
+                </div>
+              )}
+            </div>
+            
+            {/* Wallet Address Section */}
+            <div className="mb-6">
+              <label className="block text-gray-300 mb-2 text-sm">
+                {/* 🚩 UPDATE: Dynamic label based on mode */}
+                {custodialOnlyMode ? 'Send SOL to this Address' : 'Your Deposit Address'}
+              </label>
+              
+              {/* Address Display */}
+              <div className="bg-gray-800 p-3 rounded-md mb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1 mr-2">
+                    <div className="text-white font-mono text-sm break-all">
+                      {displayAddress}
+                    </div>
+                  </div>
+                  <button
+                    onClick={copyAddress}
+                    className="flex items-center bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded transition-colors"
+                  >
+                    {copied ? (
+                      <>
+                        <Check size={14} className="mr-1" />
+                        Copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={14} className="mr-1" />
+                        Copy
+                      </>
+                    )}
+                  </button>
                 </div>
               </div>
-              <button
-                onClick={copyAddress}
-                className="flex items-center bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded transition-colors"
-              >
-                {copied ? (
+              
+              {/* QR Code Toggle */}
+              <div className="flex justify-center mb-4">
+                <button
+                  onClick={() => setShowQR(!showQR)}
+                  className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors"
+                >
+                  <QrCode size={16} className="mr-2" />
+                  {showQR ? 'Hide QR Code' : 'Show QR Code'}
+                </button>
+              </div>
+              
+              {/* QR Code Display */}
+              {showQR && (
+                <div className="flex justify-center bg-white p-4 rounded-lg mb-4">
+                  <QRCodeSVG 
+                    value={displayAddress} 
+                    size={200}
+                    level="M"
+                    includeMargin={true}
+                  />
+                </div>
+              )}
+            </div>
+            
+            {/* 🚩 UPDATE: Dynamic important notes based on mode */}
+            <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md mb-6 text-sm">
+              <div className="font-medium mb-2">Important Notes:</div>
+              <ul className="list-disc list-inside space-y-1 text-xs">
+                <li>Only send {tokenSymbol} to this address</li>
+                {custodialOnlyMode ? (
                   <>
-                    <Check size={14} className="mr-1" />
-                    Copied
+                    <li>Send from any Solana wallet (Phantom, Solflare, etc.)</li>
+                    <li>Your game balance will be credited automatically</li>
+                    <li>Balance updates in 1-3 minutes after confirmation</li>
                   </>
                 ) : (
                   <>
-                    <Copy size={14} className="mr-1" />
-                    Copy
+                    <li>Deposits will appear after {networkInfo.confirmations}</li>
+                    <li>This is your personal wallet address</li>
+                  </>
+                )}
+                <li>Minimum deposit: {networkInfo.minDeposit}</li>
+                <li>Double-check the address before sending</li>
+              </ul>
+            </div>
+            
+            {/* 🚩 ADD: Custodial-specific instructions */}
+            {custodialOnlyMode && custodialDepositInfo && (
+              <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md mb-6 text-sm">
+                <div className="font-medium mb-2">📱 How to Send:</div>
+                <ol className="list-decimal list-inside space-y-1 text-xs">
+                  {custodialDepositInfo.instructions.map((instruction, index) => (
+                    <li key={index}>{instruction}</li>
+                  ))}
+                </ol>
+              </div>
+            )}
+            
+            {/* Action Buttons */}
+            <div className="flex space-x-3">
+              <button
+                onClick={onClose}
+                disabled={isLoading}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-md transition-colors"
+              >
+                Close
+              </button>
+              
+              <button
+                onClick={handleDepositConfirmation}
+                disabled={isLoading}
+                className={`flex-1 px-4 py-2 rounded-md transition-colors flex items-center justify-center ${
+                  isLoading
+                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                    : 'bg-green-600 hover:bg-green-700 text-white'
+                }`}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader size={16} className="mr-2 animate-spin" />
+                    Checking...
+                  </>
+                ) : (
+                  <>
+                    <Wallet size={16} className="mr-2" />
+                    I've Sent {tokenSymbol}
                   </>
                 )}
               </button>
             </div>
-          </div>
-          
-          {/* QR Code Toggle */}
-          <div className="flex justify-center mb-4">
-            <button
-              onClick={() => setShowQR(!showQR)}
-              className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors"
-            >
-              <QrCode size={16} className="mr-2" />
-              {showQR ? 'Hide QR Code' : 'Show QR Code'}
-            </button>
-          </div>
-          
-          {/* QR Code Display */}
-          {showQR && (
-            <div className="flex justify-center bg-white p-4 rounded-lg mb-4">
-              <QRCodeSVG 
-                value={walletAddress} 
-                size={200}
-                level="M"
-                includeMargin={true}
-              />
-            </div>
-          )}
-        </div>
-        
-        {/* Important Notes */}
-        <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md mb-6 text-sm">
-          <div className="font-medium mb-2">Important Notes:</div>
-          <ul className="list-disc list-inside space-y-1 text-xs">
-            <li>Only send {tokenSymbol} to this address</li>
-            <li>Deposits will appear after {networkInfo.confirmations}</li>
-            <li>Minimum deposit: {networkInfo.minDeposit}</li>
-            <li>Double-check the address before sending</li>
-          </ul>
-        </div>
-        
-        {/* Action Buttons */}
-        <div className="flex space-x-3">
-          <button
-            onClick={onClose}
-            disabled={isLoading}
-            className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-md transition-colors"
-          >
-            Close
-          </button>
-          
-          <button
-            onClick={handleDepositConfirmation}
-            disabled={isLoading}
-            className={`flex-1 px-4 py-2 rounded-md transition-colors flex items-center justify-center ${
-              isLoading
-                ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                : 'bg-green-600 hover:bg-green-700 text-white'
-            }`}
-          >
-            {isLoading ? (
-              <>
-                <Loader size={16} className="mr-2 animate-spin" />
-                Checking...
-              </>
-            ) : (
-              <>
-                <Wallet size={16} className="mr-2" />
-                I've Sent {tokenSymbol}
-              </>
+            
+            {/* 🚩 ADD: Explorer link for custodial deposits */}
+            {custodialOnlyMode && custodialDepositInfo?.explorerUrl && (
+              <div className="mt-4 text-center">
+                <button
+                  onClick={() => window.open(custodialDepositInfo.explorerUrl, '_blank')}
+                  className="text-blue-400 hover:text-blue-300 text-sm flex items-center justify-center mx-auto"
+                >
+                  <ExternalLink size={14} className="mr-1" />
+                  View Address on Explorer
+                </button>
+              </div>
             )}
-          </button>
-        </div>
+          </>
+        )}
         
         {/* Loading State Overlay */}
         {isLoading && (
@@ -254,6 +426,18 @@ const DepositModal: FC<DepositModalProps> = ({
               <div className="text-white font-medium">Checking for deposit...</div>
               <div className="text-gray-400 text-sm">This may take a few moments</div>
             </div>
+          </div>
+        )}
+        
+        {/* 🚩 ADD: Debug info */}
+        {process.env.NODE_ENV === 'development' && (
+          <div className="mt-4 bg-gray-900 p-2 rounded text-xs">
+            <div className="text-gray-400 font-bold mb-1">🔍 Debug Info:</div>
+            <div className="text-purple-400">Mode: {walletMode}</div>
+            <div className="text-cyan-400">Custodial Only: {custodialOnlyMode ? 'Yes' : 'No'}</div>
+            <div className="text-green-400">UserId: {userId || 'None'}</div>
+            <div className="text-blue-400">Display Address: {displayAddress?.slice(0, 8) + '...' || 'None'}</div>
+            <div className="text-yellow-400">Has Custodial Info: {custodialDepositInfo ? 'Yes' : 'No'}</div>
           </div>
         )}
       </div>

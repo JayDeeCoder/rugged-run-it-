@@ -6174,7 +6174,7 @@ server.listen(PORT, async () => {
         console.log(`🏛️ House wallet: ${housePublicKey.toString()}`);
         console.log(`💰 House balance: ${houseBalance.toFixed(3)} SOL`);
         console.log(`🔄 Hybrid system: ${hybridSystemStats.totalUsers} users loaded`);
-        console.log(`💎 Custodial balance: ${hybridSystemStats.totalCustodialBalance.toFixed(3)} SOL`);
+        console.log(`❤️ Custodial balance: ${hybridSystemStats.totalCustodialBalance.toFixed(3)} SOL`);
         console.log(`🔗 Privy integration: ${privyIntegrationManager.totalPrivyWallets} wallets, ${privyIntegrationManager.connectedPrivyWallets} connected`);
         console.log(`💼 Embedded wallet balance: ${privyIntegrationManager.totalPrivyBalance.toFixed(3)} SOL`);
         console.log(`🔐 Direct blockchain integration: ENABLED`);

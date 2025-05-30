@@ -55,29 +55,70 @@ export interface TransactionRecord {
 /**
  * PrivyWalletAPI - Complete service for managing Privy wallet operations
  * Integrates with Supabase database and Solana blockchain
+ * Uses lazy initialization to avoid build-time errors
  */
 export class PrivyWalletAPI {
-  private supabase: SupabaseClient;
-  private connection: Connection;
+  private supabase: SupabaseClient | null = null;
+  private connection: Connection | null = null;
+  private initialized = false;
 
-  constructor() {
-    // Initialize Supabase client
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  /**
+   * Initialize the service (lazy initialization)
+   */
+  private async initialize(): Promise<void> {
+    if (this.initialized) return;
 
-    if (!supabaseUrl || !supabaseServiceKey) {
-      throw new Error('Missing Supabase configuration');
+    try {
+      // Initialize Supabase client
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+      if (!supabaseUrl) {
+        throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL environment variable');
+      }
+
+      if (!supabaseServiceKey) {
+        throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY environment variable');
+      }
+
+      this.supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+      // Initialize Solana connection
+      const rpcUrl = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+      if (!rpcUrl) {
+        throw new Error('Missing Solana RPC URL (SOLANA_RPC_URL or NEXT_PUBLIC_SOLANA_RPC_URL)');
+      }
+
+      this.connection = new Connection(rpcUrl, 'confirmed');
+      this.initialized = true;
+
+      logger.info('PrivyWalletAPI initialized successfully');
+    } catch (error) {
+      logger.error('Failed to initialize PrivyWalletAPI:', error);
+      throw error;
     }
+  }
 
-    this.supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Initialize Solana connection
-    const rpcUrl = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-    if (!rpcUrl) {
-      throw new Error('Missing Solana RPC URL');
+  /**
+   * Get initialized Supabase client
+   */
+  private async getSupabase(): Promise<SupabaseClient> {
+    await this.initialize();
+    if (!this.supabase) {
+      throw new Error('Supabase client not initialized');
     }
+    return this.supabase;
+  }
 
-    this.connection = new Connection(rpcUrl, 'confirmed');
+  /**
+   * Get initialized Solana connection
+   */
+  private async getConnection(): Promise<Connection> {
+    await this.initialize();
+    if (!this.connection) {
+      throw new Error('Solana connection not initialized');
+    }
+    return this.connection;
   }
 
   /**
@@ -96,8 +137,10 @@ export class PrivyWalletAPI {
         currentBalance = await this.getBlockchainBalance(walletAddress);
       }
 
+      const supabase = await this.getSupabase();
+
       // Use the database function to upsert wallet
-      const { data, error } = await this.supabase.rpc('upsert_privy_wallet', {
+      const { data, error } = await supabase.rpc('upsert_privy_wallet', {
         p_user_id: userId,
         p_wallet_address: walletAddress,
         p_initial_balance: currentBalance
@@ -123,7 +166,9 @@ export class PrivyWalletAPI {
    */
   async getPrivyWallet(userId: string): Promise<PrivyWalletData | null> {
     try {
-      const { data, error } = await this.supabase
+      const supabase = await this.getSupabase();
+
+      const { data, error } = await supabase
         .from('privy_wallets')
         .select('*')
         .eq('user_id', userId)
@@ -170,7 +215,8 @@ export class PrivyWalletAPI {
         return 0;
       }
 
-      const lamports = await this.connection.getBalance(publicKey);
+      const connection = await this.getConnection();
+      const lamports = await connection.getBalance(publicKey);
       return lamports / LAMPORTS_PER_SOL;
     } catch (error) {
       logger.error('Error getting blockchain balance:', error);
@@ -189,9 +235,10 @@ export class PrivyWalletAPI {
       }
 
       const currentBalance = await this.getBlockchainBalance(wallet.privyWalletAddress);
+      const supabase = await this.getSupabase();
 
       // Update balance in database
-      const { error } = await this.supabase.rpc('update_privy_wallet_balance', {
+      const { error } = await supabase.rpc('update_privy_wallet_balance', {
         p_user_id: userId,
         p_new_balance: currentBalance
       });
@@ -214,7 +261,9 @@ export class PrivyWalletAPI {
    */
   async checkDailyWithdrawalLimit(userId: string, amount: number): Promise<DailyLimitCheck> {
     try {
-      const { data, error } = await this.supabase.rpc('check_daily_withdrawal_limit', {
+      const supabase = await this.getSupabase();
+
+      const { data, error } = await supabase.rpc('check_daily_withdrawal_limit', {
         p_user_id: userId,
         p_amount: amount,
         p_daily_limit: DAILY_WITHDRAWAL_LIMIT
@@ -255,7 +304,9 @@ export class PrivyWalletAPI {
     metadata?: any
   ): Promise<string | null> {
     try {
-      const { data, error } = await this.supabase.rpc('log_transaction', {
+      const supabase = await this.getSupabase();
+
+      const { data, error } = await supabase.rpc('log_transaction', {
         p_user_id: userId,
         p_transaction_type: transactionType,
         p_amount: amount,
@@ -283,7 +334,9 @@ export class PrivyWalletAPI {
    */
   async getTransactionHistory(userId: string, limit: number = 50): Promise<TransactionRecord[]> {
     try {
-      const { data, error } = await this.supabase
+      const supabase = await this.getSupabase();
+
+      const { data, error } = await supabase
         .from('user_transactions')
         .select('*')
         .eq('user_id', userId)
@@ -406,9 +459,10 @@ export class PrivyWalletAPI {
 
       // Process the signed transaction
       const transactionBuffer = Buffer.from(signedTransactionBase64, 'base64');
+      const connection = await this.getConnection();
 
       // Submit to blockchain
-      const signature = await this.connection.sendRawTransaction(
+      const signature = await connection.sendRawTransaction(
         transactionBuffer,
         { 
           skipPreflight: false, 
@@ -420,7 +474,7 @@ export class PrivyWalletAPI {
 
       // Wait for confirmation
       const confirmation = await Promise.race([
-        this.connection.confirmTransaction(signature, 'confirmed'),
+        connection.confirmTransaction(signature, 'confirmed'),
         new Promise<any>((_, reject) => 
           setTimeout(() => reject(new Error('Transaction timeout')), 30000)
         )
@@ -475,133 +529,6 @@ export class PrivyWalletAPI {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Transfer failed'
-      };
-    }
-  }
-
-  /**
-   * Execute a direct withdrawal from Privy wallet
-   */
-  async executeDirectWithdrawal(
-    userId: string,
-    destinationAddress: string,
-    amount: number,
-    signedTransactionBase64?: string
-  ): Promise<TransferResult> {
-    try {
-      // Validate destination address
-      if (!isValidSolanaAddress(destinationAddress)) {
-        return {
-          success: false,
-          error: 'Invalid destination address'
-        };
-      }
-
-      // Get user's Privy wallet
-      const wallet = await this.getPrivyWallet(userId);
-      if (!wallet) {
-        return {
-          success: false,
-          error: 'Privy wallet not found. Please register your wallet first.'
-        };
-      }
-
-      // Update and check current balance
-      const currentBalance = await this.updateWalletBalance(userId);
-
-      // Check daily withdrawal limit
-      const dailyCheck = await this.checkDailyWithdrawalLimit(userId, amount);
-
-      // Validate withdrawal
-      const validation = this.validateTransfer(amount, currentBalance, dailyCheck);
-      if (!validation.valid) {
-        return {
-          success: false,
-          error: validation.error,
-          dailyLimits: dailyCheck
-        };
-      }
-
-      // If no signed transaction provided, this is just a validation call
-      if (!signedTransactionBase64) {
-        return {
-          success: false,
-          error: 'No signed transaction provided - validation successful',
-          dailyLimits: dailyCheck
-        };
-      }
-
-      // Process the signed transaction
-      const transactionBuffer = Buffer.from(signedTransactionBase64, 'base64');
-
-      // Submit to blockchain
-      const signature = await this.connection.sendRawTransaction(
-        transactionBuffer,
-        { 
-          skipPreflight: false, 
-          preflightCommitment: 'confirmed' 
-        }
-      );
-
-      logger.info(`Withdrawal transaction submitted: ${signature}`);
-
-      // Wait for confirmation
-      const confirmation = await Promise.race([
-        this.connection.confirmTransaction(signature, 'confirmed'),
-        new Promise<any>((_, reject) => 
-          setTimeout(() => reject(new Error('Transaction timeout')), 30000)
-        )
-      ]);
-
-      if (confirmation && confirmation.value && confirmation.value.err) {
-        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-      }
-
-      logger.info(`Withdrawal transaction confirmed: ${signature}`);
-
-      // Log the successful transaction
-      await this.logTransaction(
-        userId,
-        'privy_withdrawal',
-        amount,
-        wallet.privyWalletAddress,
-        destinationAddress,
-        signature,
-        'completed',
-        { withdrawalType: 'direct_withdrawal' }
-      );
-
-      // Update wallet balance
-      const newBalance = await this.updateWalletBalance(userId);
-
-      // Get updated daily limits
-      const updatedDailyCheck = await this.checkDailyWithdrawalLimit(userId, 0);
-
-      return {
-        success: true,
-        transactionId: signature,
-        newBalance: newBalance,
-        dailyLimits: updatedDailyCheck
-      };
-
-    } catch (error) {
-      logger.error('Error in executeDirectWithdrawal:', error);
-      
-      // Log failed transaction
-      await this.logTransaction(
-        userId,
-        'privy_withdrawal',
-        amount,
-        undefined,
-        destinationAddress,
-        undefined,
-        'failed',
-        { error: error instanceof Error ? error.message : 'Unknown error' }
-      );
-
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Withdrawal failed'
       };
     }
   }

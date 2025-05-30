@@ -1,22 +1,21 @@
-// src/components/trading/DepositModal.tsx - Fixed Version
+// src/components/trading/DepositModal.tsx - UI Matched to WithdrawModal
 import { FC, useState, useRef, useEffect, useCallback } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
-import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, ExternalLink, QrCode, RefreshCw, AlertTriangle } from 'lucide-react';
+import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, QrCode, RefreshCw } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { UserAPI } from '../../services/api'; // 🔧 FIXED: Import UserAPI
-import { toast } from 'react-hot-toast'; // 🔧 FIXED: Import toast
+import { UserAPI } from '../../services/api';
+import { toast } from 'react-hot-toast';
 
-// 🚩 TEMPORARY: Inline feature flags for debugging
+// Feature flags - same pattern as your withdrawal modal
 const DEBUG_FEATURE_FLAGS = {
   CUSTODIAL_ONLY_MODE: process.env.NEXT_PUBLIC_CUSTODIAL_ONLY_MODE === 'true',
   ENABLE_EMBEDDED_WALLETS: process.env.NEXT_PUBLIC_ENABLE_EMBEDDED_WALLETS === 'true',
   ENABLE_HYBRID_SYSTEM: process.env.NEXT_PUBLIC_ENABLE_HYBRID_SYSTEM === 'true'
 };
 
-// 🚩 TEMPORARY: Inline feature flag functions for debugging
 function isCustodialOnlyMode(): boolean {
   return DEBUG_FEATURE_FLAGS.CUSTODIAL_ONLY_MODE || !DEBUG_FEATURE_FLAGS.ENABLE_HYBRID_SYSTEM;
 }
@@ -27,7 +26,6 @@ function getWalletMode(): 'custodial' | 'hybrid' | 'embedded' {
   return 'embedded';
 }
 
-// Define the TokenType enum locally
 enum TokenType {
   SOL = 'SOL',
   RUGGED = 'RUGGED'
@@ -74,134 +72,141 @@ const DepositModal: FC<DepositModalProps> = ({
   walletAddress,
   userId: propUserId
 }) => {
+  // Feature flag setup - exactly like withdrawal modal
+  const custodialOnlyMode = isCustodialOnlyMode();
+  const walletMode = getWalletMode();
+  
+  // User management - same pattern as withdrawal modal
+  const { authenticated } = usePrivy();
+  // FIX: Handle undefined propUserId by converting to null
+  const [internalUserId, setInternalUserId] = useState<string | null>(propUserId || null);
+  const [fetchingUserId, setFetchingUserId] = useState<boolean>(false);
+  
+  // State management - matches withdrawal modal patterns
   const [copied, setCopied] = useState<boolean>(false);
   const [showQR, setShowQR] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  
-  // 🔧 FIXED: Local userId state to handle initialization
-  const [localUserId, setLocalUserId] = useState<string | null>(propUserId || null);
-  const [initializingUser, setInitializingUser] = useState<boolean>(false);
+  const [success, setSuccess] = useState<boolean>(false);
+  const [successMessage, setSuccessMessage] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
   
   // Custodial-specific state
   const [custodialDepositInfo, setCustodialDepositInfo] = useState<CustodialDepositResponse | null>(null);
   const [fetchingDepositInfo, setFetchingDepositInfo] = useState<boolean>(false);
-  const [depositError, setDepositError] = useState<string | null>(null);
+  const [serverConfigError, setServerConfigError] = useState<boolean>(false);
+  const [hasAttemptedFetch, setHasAttemptedFetch] = useState<boolean>(false);
   
-  // Debug state
-  const [debugInfo, setDebugInfo] = useState<any>({});
-  
-  // Feature flag checks
-  const custodialOnlyMode = isCustodialOnlyMode();
-  const walletMode = getWalletMode();
-  
-  const tokenSymbol = currentToken;
-  const { user, authenticated } = usePrivy();
-  const { currentUser } = useContext(UserContext);
   const modalRef = useRef<HTMLDivElement>(null);
+  const tokenSymbol = currentToken;
+  const effectiveUserId = internalUserId || propUserId;
   
-  // 🔧 FIXED: Use the effective userId (prop or local)
-  const effectiveUserId = propUserId || localUserId;
+  // Fallback house wallet - same as your pattern
+  const FALLBACK_HOUSE_WALLET = '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
   
-  // 🔧 FIXED: Initialize user if not provided (same logic as TradingControls)
-  const initializeUser = useCallback(async () => {
-    if (!authenticated || !walletAddress || propUserId) {
-      console.log('🔍 DepositModal: Skipping user init:', {
-        authenticated,
-        hasWalletAddress: !!walletAddress,
-        hasPropUserId: !!propUserId
-      });
-      return;
+  // User initialization - exact same pattern as withdrawal modal
+  useEffect(() => {
+    if (authenticated && walletAddress && !propUserId && !fetchingUserId) {
+      const fetchUserId = async () => {
+        try {
+          setFetchingUserId(true);
+          console.log('🔍 DepositModal: Fetching userId via API for walletAddress:', walletAddress);
+          
+          const response = await fetch('/api/users/get-or-create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ walletAddress })
+          });
+          
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ DepositModal: API error:', errorText);
+            throw new Error(`API error: ${response.status}`);
+          }
+          
+          const data = await response.json();
+          if (data.user && data.user.id) {
+            setInternalUserId(data.user.id);
+            console.log('✅ DepositModal: Got userId from API:', data.user.id);
+          } else {
+            console.error('❌ DepositModal: No user in API response:', data);
+          }
+        } catch (error) {
+          console.error('❌ DepositModal: Failed to fetch userId via API:', error);
+        } finally {
+          setFetchingUserId(false);
+        }
+      };
+      
+      fetchUserId();
+    } else if (propUserId) {
+      setInternalUserId(propUserId);
+      console.log('✅ DepositModal: Using provided userId:', propUserId);
     }
-    
-    console.log('🚀 DepositModal: Initializing user with wallet:', walletAddress);
-    setInitializingUser(true);
+  }, [authenticated, walletAddress, propUserId, fetchingUserId]);
+
+  const retryGetUserId = useCallback(async () => {
+    if (!walletAddress || fetchingUserId) return;
     
     try {
-      const userData = await UserAPI.getUserOrCreate(walletAddress);
-      if (userData) {
-        setLocalUserId(userData.id);
-        console.log('✅ DepositModal: User initialized with ID:', userData.id);
+      setFetchingUserId(true);
+      console.log('🔄 DepositModal: Manual retry fetching userId via API for:', walletAddress);
+      
+      const response = await fetch('/api/users/get-or-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress })
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ DepositModal: Retry API error:', errorText);
+        throw new Error(`API error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      if (data.user && data.user.id) {
+        setInternalUserId(data.user.id);
+        console.log('✅ DepositModal: Retry got userId from API:', data.user.id);
       } else {
-        throw new Error('Failed to get user data');
+        console.error('❌ DepositModal: Retry - No user in API response:', data);
       }
     } catch (error) {
-      console.error('❌ DepositModal: Could not initialize user:', error);
-      setDepositError('Failed to initialize user account');
-      toast.error('Failed to initialize user account');
+      console.error('❌ DepositModal: Retry failed to fetch userId via API:', error);
     } finally {
-      setInitializingUser(false);
+      setFetchingUserId(false);
     }
-  }, [authenticated, walletAddress, propUserId]);
+  }, [walletAddress, fetchingUserId]);
   
-  // 🚩 DEBUG: Enhanced logging
-  useEffect(() => {
-    const debug = {
-      timestamp: new Date().toISOString(),
-      environmentVariables: {
-        NEXT_PUBLIC_CUSTODIAL_ONLY_MODE: process.env.NEXT_PUBLIC_CUSTODIAL_ONLY_MODE,
-        NEXT_PUBLIC_ENABLE_EMBEDDED_WALLETS: process.env.NEXT_PUBLIC_ENABLE_EMBEDDED_WALLETS,
-        NEXT_PUBLIC_ENABLE_HYBRID_SYSTEM: process.env.NEXT_PUBLIC_ENABLE_HYBRID_SYSTEM,
-        HOUSE_WALLET_ADDRESS: process.env.HOUSE_WALLET_ADDRESS,
-        NEXT_PUBLIC_HOUSE_WALLET_ADDRESS: process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS
-      },
-      featureFlags: DEBUG_FEATURE_FLAGS,
-      computed: {
-        custodialOnlyMode,
-        walletMode
-      },
-      props: {
-        propUserId,
-        localUserId,
-        effectiveUserId,
-        walletAddress: walletAddress?.slice(0, 8) + '...',
-        isOpen,
-        authenticated,
-        initializingUser
-      }
-    };
-    
-    setDebugInfo(debug);
-    console.log('🔍 DepositModal Debug Info:', debug);
-  }, [custodialOnlyMode, walletMode, propUserId, localUserId, effectiveUserId, walletAddress, isOpen, authenticated, initializingUser]);
-  
-  // Get custodial deposit info with enhanced debugging
+  // API fetch function
   const fetchCustodialDepositInfo = useCallback(async () => {
-    console.log('🚀 fetchCustodialDepositInfo called:', {
-      custodialOnlyMode,
-      effectiveUserId,
-      shouldFetch: custodialOnlyMode && effectiveUserId
-    });
-    
-    if (!custodialOnlyMode) {
-      console.log('❌ Not fetching - custodialOnlyMode is false');
+    if (!custodialOnlyMode || !effectiveUserId || fetchingDepositInfo || hasAttemptedFetch) {
       return;
     }
     
-    if (!effectiveUserId) {
-      console.log('❌ Not fetching - effectiveUserId is missing');
-      setDepositError('User ID is required for custodial deposits');
-      return;
-    }
-    
+    console.log('🚀 fetchCustodialDepositInfo called for user:', effectiveUserId);
     setFetchingDepositInfo(true);
-    setDepositError(null);
+    setError(null);
+    setServerConfigError(false);
+    setHasAttemptedFetch(true);
     
     try {
-      console.log('📡 Making API call to /api/custodial/deposit-info...');
-      
       const response = await fetch('/api/custodial/deposit-info', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: effectiveUserId })
       });
       
-      console.log('📡 Response status:', response.status);
-      console.log('📡 Response headers:', Object.fromEntries(response.headers));
-      
       if (!response.ok) {
         const errorText = await response.text();
         console.error('❌ API error response:', errorText);
-        throw new Error(`API error ${response.status}: ${errorText}`);
+        
+        if (errorText.includes('House wallet not configured') || errorText.includes('Deposit service not available')) {
+          setServerConfigError(true);
+          setError('Custodial deposits are temporarily unavailable due to server configuration.');
+        } else {
+          setError(`Server error: ${response.status}`);
+        }
+        return;
       }
       
       const data: CustodialDepositResponse = await response.json();
@@ -209,83 +214,75 @@ const DepositModal: FC<DepositModalProps> = ({
       
       if (data.success) {
         setCustodialDepositInfo(data);
-        console.log('✅ Custodial deposit info set:', {
-          depositAddress: data.depositAddress,
-          hasInstructions: data.instructions?.length || 0,
-          hasQrCode: !!data.qrCodeUrl
-        });
+        setServerConfigError(false);
       } else {
-        throw new Error('API returned success: false');
+        setError(data.message || 'API returned success: false');
       }
     } catch (error) {
       console.error('❌ fetchCustodialDepositInfo error:', error);
-      setDepositError(error instanceof Error ? error.message : 'Failed to get deposit information');
+      setError('Failed to connect to deposit service');
+      setServerConfigError(true);
     } finally {
       setFetchingDepositInfo(false);
     }
-  }, [custodialOnlyMode, effectiveUserId]);
+  }, [custodialOnlyMode, effectiveUserId, fetchingDepositInfo, hasAttemptedFetch]);
   
-  // Reset state when modal opens/closes
+  // Reset state when modal opens/closes - same pattern as withdrawal modal
   useEffect(() => {
     if (isOpen) {
-      console.log('🚪 Modal opened, resetting state...');
+      console.log('🚀 DepositModal: Modal opened, resetting state');
       setCopied(false);
       setShowQR(false);
       setIsLoading(false);
-      setDepositError(null);
+      setError(null);
+      setSuccess(false);
+      setSuccessMessage('');
       setCustodialDepositInfo(null);
+      setServerConfigError(false);
+      setHasAttemptedFetch(false);
       
       // Initialize user if needed
-      if (!effectiveUserId) {
-        console.log('🔄 Need to initialize user...');
-        initializeUser();
-      } else {
-        // Force immediate fetch for custodial mode
-        if (custodialOnlyMode) {
-          console.log('🔄 Triggering custodial deposit info fetch...');
-          setTimeout(() => {
-            fetchCustodialDepositInfo();
-          }, 100);
-        }
+      if (!effectiveUserId && !fetchingUserId) {
+        // Will be handled by the useEffect above
       }
     } else {
-      // Reset local user ID when modal closes if it wasn't provided as prop
+      // Reset everything when modal closes
       if (!propUserId) {
-        setLocalUserId(null);
+        setInternalUserId(null);
       }
+      setHasAttemptedFetch(false);
+      setServerConfigError(false);
+      setError(null);
+      setCustodialDepositInfo(null);
     }
-  }, [isOpen, effectiveUserId, custodialOnlyMode, initializeUser, fetchCustodialDepositInfo, propUserId]);
+  }, [isOpen, effectiveUserId, propUserId, fetchingUserId]);
   
-  // 🔧 FIXED: Fetch custodial info when user ID becomes available
+  // Fetch custodial info when ready
   useEffect(() => {
-    if (isOpen && custodialOnlyMode && effectiveUserId && !initializingUser && !fetchingDepositInfo && !custodialDepositInfo) {
+    if (isOpen && custodialOnlyMode && effectiveUserId && !fetchingUserId && !hasAttemptedFetch) {
       console.log('🔄 User ID available, fetching custodial deposit info...');
       fetchCustodialDepositInfo();
     }
-  }, [isOpen, custodialOnlyMode, effectiveUserId, initializingUser, fetchingDepositInfo, custodialDepositInfo, fetchCustodialDepositInfo]);
-  
-  // Handle outside clicks
-  useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
-    if (isOpen && !isLoading && !fetchingDepositInfo && !initializingUser) onClose();
-  });
-  
-  if (!isOpen) return null;
+  }, [isOpen, custodialOnlyMode, effectiveUserId, fetchingUserId, hasAttemptedFetch, fetchCustodialDepositInfo]);
   
   // Determine display address
-  const displayAddress = custodialOnlyMode && custodialDepositInfo 
-    ? custodialDepositInfo.depositAddress 
-    : walletAddress;
+  const getDisplayAddress = () => {
+    if (custodialOnlyMode) {
+      if (custodialDepositInfo?.depositAddress) {
+        return custodialDepositInfo.depositAddress;
+      }
+      if (serverConfigError) {
+        return FALLBACK_HOUSE_WALLET;
+      }
+      return null;
+    }
+    return walletAddress;
+  };
   
-  console.log('🏠 Display address logic:', {
-    custodialOnlyMode,
-    hasCustodialInfo: !!custodialDepositInfo,
-    custodialAddress: custodialDepositInfo?.depositAddress,
-    walletAddress,
-    finalDisplayAddress: displayAddress
-  });
+  const displayAddress = getDisplayAddress();
   
-  // Copy address to clipboard
   const copyAddress = async () => {
+    if (!displayAddress) return;
     try {
       await navigator.clipboard.writeText(displayAddress);
       setCopied(true);
@@ -293,20 +290,20 @@ const DepositModal: FC<DepositModalProps> = ({
       console.log('📋 Address copied:', displayAddress?.slice(0, 8) + '...');
     } catch (error) {
       console.error('Failed to copy address:', error);
+      toast.error('Failed to copy address');
     }
   };
 
-  // Handle deposit confirmation
   const handleDepositConfirmation = () => {
     setIsLoading(true);
     setTimeout(() => {
       setIsLoading(false);
+      setSuccess(true);
+      setSuccessMessage(`Deposit initiated! Your ${tokenSymbol} will be credited to your ${custodialOnlyMode ? 'game balance' : 'account'} shortly.`);
       if (onSuccess) onSuccess();
-      onClose();
     }, 3000);
   };
 
-  // Get network info
   const getNetworkInfo = () => {
     if (custodialOnlyMode && custodialDepositInfo) {
       return {
@@ -324,271 +321,318 @@ const DepositModal: FC<DepositModalProps> = ({
       minDeposit: currentToken === TokenType.SOL ? '0.001 SOL' : '1 RUGGED',
       maxDeposit: 'No limit',
       confirmations: '1 confirmation',
-      depositType: 'Direct Wallet Deposit',
-      processingTime: 'Instant'
+      depositType: serverConfigError ? 'Manual Deposit (Fallback)' : 'Direct Wallet Deposit',
+      processingTime: serverConfigError ? '~1 minute' : 'Instant'
     };
   };
 
   const networkInfo = getNetworkInfo();
   
+  useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
+    if (isOpen && !isLoading) onClose();
+  });
+  
+  if (!isOpen) return null;
+  
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
       <div 
         ref={modalRef} 
-        className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto"
+        className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
       >
-        {/* Header */}
+        {/* Header - exactly matches withdrawal modal */}
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white flex items-center">
             <ArrowUpToLine size={20} className="mr-2" />
             Deposit {tokenSymbol}
+            {/* Mode indicator - same style as withdrawal modal */}
             <span className="ml-2 text-xs bg-green-600 text-white px-2 py-1 rounded">
               {walletMode.toUpperCase()}
             </span>
           </h2>
           <button
             onClick={onClose}
-            disabled={isLoading || fetchingDepositInfo || initializingUser}
+            disabled={isLoading || fetchingDepositInfo || fetchingUserId}
             className="text-gray-400 hover:text-white transition-colors"
           >
             <X size={20} />
           </button>
         </div>
         
-        {/* 🚩 ENHANCED: Debug panel - always visible for now */}
-        <div className="bg-gray-900 p-3 rounded mb-4 text-xs">
-          <div className="text-yellow-400 font-bold mb-2 flex items-center">
-            <AlertTriangle size={14} className="mr-1" />
-            Debug Panel
-          </div>
-          <div className="space-y-1">
-            <div className="text-red-400">Custodial Only Mode: {custodialOnlyMode ? 'TRUE' : 'FALSE'}</div>
-            <div className="text-blue-400">Wallet Mode: {walletMode}</div>
-            <div className="text-green-400">Prop User ID: {propUserId || 'MISSING'}</div>
-            <div className="text-cyan-400">Local User ID: {localUserId || 'MISSING'}</div>
-            <div className="text-orange-400">Effective User ID: {effectiveUserId || 'MISSING'}</div>
-            <div className="text-purple-400">Has Custodial Info: {custodialDepositInfo ? 'YES' : 'NO'}</div>
-            <div className="text-pink-400">Initializing User: {initializingUser ? 'YES' : 'NO'}</div>
-            <div className="text-yellow-300">Fetching Info: {fetchingDepositInfo ? 'YES' : 'NO'}</div>
-            <div className="text-teal-400">Display Address: {displayAddress?.slice(0, 12) + '...' || 'NONE'}</div>
-            <div className="text-rose-400">Error: {depositError || 'None'}</div>
-          </div>
-          <div className="mt-2 pt-2 border-t border-gray-700">
-            <div className="text-gray-400 text-xs">Env Vars:</div>
-            <div className="text-yellow-300">CUSTODIAL_ONLY: {process.env.NEXT_PUBLIC_CUSTODIAL_ONLY_MODE || 'undefined'}</div>
-            <div className="text-blue-300">EMBEDDED_WALLETS: {process.env.NEXT_PUBLIC_ENABLE_EMBEDDED_WALLETS || 'undefined'}</div>
-          </div>
-        </div>
-        
-        {/* Mode explanation */}
-        {custodialOnlyMode && (
-          <div className="bg-green-900 bg-opacity-20 border border-green-800 text-green-400 p-3 rounded-md mb-4 text-sm">
-            <div className="font-medium mb-1">🏦 Custodial Deposit Active</div>
-            <div className="text-xs">
-              Send SOL from any wallet to this address. Your game balance will be credited automatically.
+        {success ? (
+          // Success state - exactly matches withdrawal modal
+          <div className="text-center py-8">
+            <div className="flex justify-center mb-4">
+              <div className="w-16 h-16 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
+                <Check size={32} className="text-green-500" />
+              </div>
             </div>
-          </div>
-        )}
-        
-        {/* 🔧 FIXED: User initialization loading state */}
-        {initializingUser && (
-          <div className="bg-blue-800 p-4 rounded-md mb-6 text-center">
-            <Loader size={24} className="animate-spin text-blue-500 mx-auto mb-2" />
-            <div className="text-white text-sm">Initializing user account...</div>
-            <div className="text-gray-400 text-xs">Getting user ID from wallet address...</div>
-          </div>
-        )}
-        
-        {/* Loading state for custodial deposit info */}
-        {custodialOnlyMode && fetchingDepositInfo && (
-          <div className="bg-gray-800 p-4 rounded-md mb-6 text-center">
-            <Loader size={24} className="animate-spin text-green-500 mx-auto mb-2" />
-            <div className="text-white text-sm">Getting deposit address...</div>
-            <div className="text-gray-400 text-xs">Calling /api/custodial/deposit-info...</div>
-          </div>
-        )}
-        
-        {/* Error state */}
-        {depositError && (
-          <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-500 p-3 rounded-md mb-4 text-sm">
-            <div className="font-medium mb-1">❌ Error</div>
-            <div className="text-xs">{depositError}</div>
-            {effectiveUserId ? (
-              <button
-                onClick={fetchCustodialDepositInfo}
-                className="mt-2 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs"
-                disabled={fetchingDepositInfo}
-              >
-                {fetchingDepositInfo ? 'Retrying...' : 'Retry API Call'}
-              </button>
-            ) : (
-              <button
-                onClick={initializeUser}
-                className="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs"
-                disabled={initializingUser}
-              >
-                {initializingUser ? 'Initializing...' : 'Initialize User'}
-              </button>
-            )}
-          </div>
-        )}
-        
-        {/* 🚩 FORCE SHOW: Show manual deposit info if custodial mode but no API data */}
-        {custodialOnlyMode && !custodialDepositInfo && !fetchingDepositInfo && !initializingUser && effectiveUserId && (
-          <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-400 p-3 rounded-md mb-4 text-sm">
-            <div className="font-medium mb-1">⚠️ Manual Deposit Info</div>
-            <div className="text-xs mb-2">API call failed, showing manual deposit address:</div>
-            <div className="bg-gray-800 p-2 rounded font-mono text-xs break-all">
-              {process.env.HOUSE_WALLET_ADDRESS || process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS || '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56'}
-            </div>
+            <h3 className="text-xl font-bold text-white mb-2">Success!</h3>
+            <p className="text-gray-400 mb-6">{successMessage}</p>
             <button
-              onClick={() => {
-                const addr = process.env.HOUSE_WALLET_ADDRESS || process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS || '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
-                navigator.clipboard.writeText(addr);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              }}
-              className="mt-2 bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-xs"
+              onClick={onClose}
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md transition-colors w-full"
             >
-              Copy Manual Address
+              Done
             </button>
           </div>
-        )}
-        
-        {/* Show main content */}
-        {(!custodialOnlyMode || custodialDepositInfo || (!fetchingDepositInfo && !initializingUser && depositError)) && (
+        ) : (
           <>
-            {/* Network Info */}
-            <div className="bg-gray-800 p-4 rounded-md mb-6">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-gray-400">Network:</span>
-                <span className="text-white font-medium">{networkInfo.network}</span>
+            {/* Debug info - exactly matches withdrawal modal style */}
+            {process.env.NODE_ENV === 'development' && (
+              <div className="bg-gray-900 p-3 rounded mb-4 text-xs space-y-1">
+                <div className="text-gray-400 font-bold">🔍 Debug Info:</div>
+                <div className="text-purple-400">Wallet Mode: {walletMode}</div>
+                <div className="text-orange-400">Custodial Only: {custodialOnlyMode ? 'Yes' : 'No'}</div>
+                <div className="text-green-400">Prop UserId: {propUserId || 'None'}</div>
+                <div className="text-cyan-400">Internal UserId: {internalUserId || 'None'}</div>
+                <div className="text-lime-400">Effective UserId: {effectiveUserId || 'None'}</div>
+                <div className="text-blue-400">WalletAddress: {walletAddress || 'None'}</div>
+                <div className="text-yellow-400">Authenticated: {authenticated ? 'Yes' : 'No'}</div>
+                <div className="text-purple-400">Fetching UserId: {fetchingUserId ? 'Yes' : 'No'}</div>
+                <div className="text-teal-400">Fetching Deposit Info: {fetchingDepositInfo ? 'Yes' : 'No'}</div>
+                <div className="text-pink-400">Server Config Error: {serverConfigError ? 'Yes' : 'No'}</div>
+                {!effectiveUserId && !fetchingUserId && (
+                  <div className="text-red-400 font-bold">⚠️ No userId available!</div>
+                )}
+                {fetchingUserId && (
+                  <div className="text-yellow-400 font-bold">🔄 Fetching userId from API...</div>
+                )}
               </div>
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-gray-400">Type:</span>
-                <span className="text-white">{networkInfo.depositType}</span>
-              </div>
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-gray-400">Min Deposit:</span>
-                <span className="text-white">{networkInfo.minDeposit}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-400">Credit Time:</span>
-                <span className="text-white">{networkInfo.processingTime}</span>
-              </div>
-            </div>
+            )}
             
-            {/* Address Display */}
-            <div className="mb-6">
-              <label className="block text-gray-300 mb-2 text-sm">
-                {custodialOnlyMode ? 'Send SOL to this Address' : 'Your Deposit Address'}
-              </label>
-              
-              <div className="bg-gray-800 p-3 rounded-md mb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1 mr-2">
-                    <div className="text-white font-mono text-sm break-all">
-                      {displayAddress || 'Address not available'}
-                    </div>
-                  </div>
-                  {displayAddress && (
-                    <button
-                      onClick={copyAddress}
-                      className="flex items-center bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-1 rounded transition-colors"
-                    >
-                      {copied ? (
-                        <>
-                          <Check size={14} className="mr-1" />
-                          Copied
-                        </>
-                      ) : (
-                        <>
-                          <Copy size={14} className="mr-1" />
-                          Copy
-                        </>
-                      )}
-                    </button>
-                  )}
+            {/* Mode description - matches withdrawal modal */}
+            {custodialOnlyMode && (
+              <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md mb-4 text-sm">
+                <div className="font-medium mb-1">🏦 Custodial Deposit Mode</div>
+                <div className="text-xs">
+                  Send SOL from any wallet to this address. Your game balance will be credited automatically.
                 </div>
               </div>
-              
-              {/* QR Code */}
-              {displayAddress && (
-                <>
-                  <div className="flex justify-center mb-4">
-                    <button
-                      onClick={() => setShowQR(!showQR)}
-                      className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors"
-                    >
-                      <QrCode size={16} className="mr-2" />
-                      {showQR ? 'Hide QR Code' : 'Show QR Code'}
-                    </button>
+            )}
+            
+            {/* User ID status notification - same as withdrawal modal */}
+            {authenticated && walletAddress && !effectiveUserId && !fetchingUserId && (
+              <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md mb-4 text-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-bold mb-1">⚠️ User Setup Required</div>
+                    <div className="text-xs">Unable to initialize user account. Please retry.</div>
                   </div>
-                  
-                  {showQR && (
-                    <div className="flex justify-center bg-white p-4 rounded-lg mb-4">
-                      <QRCodeSVG 
-                        value={displayAddress} 
-                        size={200}
-                        level="M"
-                        includeMargin={true}
-                      />
+                  <button
+                    onClick={retryGetUserId}
+                    className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-xs"
+                  >
+                    Retry
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            {/* Server configuration error */}
+            {serverConfigError && (
+              <div className="bg-orange-900 bg-opacity-30 border border-orange-800 text-orange-400 p-3 rounded-md mb-4 text-sm">
+                <div className="font-medium mb-2">⚠️ Server Configuration Issue</div>
+                <div className="text-xs mb-2">
+                  The custodial deposit service is temporarily unavailable. Using fallback address.
+                </div>
+                <div className="text-xs text-orange-300">
+                  • Your deposit will be manually processed
+                  • Allow 1-2 minutes for credit
+                </div>
+              </div>
+            )}
+            
+            {/* Loading states */}
+            {fetchingUserId && (
+              <div className="bg-blue-800 p-4 rounded-md mb-6 text-center">
+                <Loader size={24} className="animate-spin text-blue-500 mx-auto mb-2" />
+                <div className="text-white text-sm">Initializing user account...</div>
+                <div className="text-gray-400 text-xs">Getting user ID from wallet address...</div>
+              </div>
+            )}
+            
+            {fetchingDepositInfo && (
+              <div className="bg-gray-800 p-4 rounded-md mb-6 text-center">
+                <Loader size={24} className="animate-spin text-green-500 mx-auto mb-2" />
+                <div className="text-white text-sm">Getting deposit address...</div>
+                <div className="text-gray-400 text-xs">Contacting server...</div>
+              </div>
+            )}
+            
+            {/* Network info - matches withdrawal modal balance display style */}
+            {displayAddress && (
+              <div className="bg-gray-800 p-4 rounded-md mb-6">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-gray-400 text-sm">Deposit Information</span>
+                  <button 
+                    onClick={() => {
+                      setHasAttemptedFetch(false);
+                      if (!effectiveUserId) {
+                        retryGetUserId();
+                      } else {
+                        fetchCustodialDepositInfo();
+                      }
+                    }}
+                    disabled={fetchingDepositInfo || fetchingUserId}
+                    className="text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-1"
+                    title="Refresh deposit info"
+                  >
+                    <RefreshCw size={14} className={(fetchingDepositInfo || fetchingUserId) ? 'animate-spin' : ''} />
+                    <span className="text-xs">Refresh</span>
+                  </button>
+                </div>
+                
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400 text-sm">Network:</span>
+                    <span className="text-white font-medium">{networkInfo.network}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400 text-sm">Type:</span>
+                    <span className="text-white">{networkInfo.depositType}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400 text-sm">Min Deposit:</span>
+                    <span className="text-white">{networkInfo.minDeposit}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400 text-sm">Credit Time:</span>
+                    <span className="text-white">{networkInfo.processingTime}</span>
+                  </div>
+                </div>
+                
+                {/* Show wallet address for debugging - matches withdrawal modal */}
+                {walletAddress && (
+                  <div className="mt-3 pt-2 border-t border-gray-700">
+                    <div className="text-xs text-gray-500">
+                      Your Wallet: {walletAddress.slice(0, 8)}...{walletAddress.slice(-8)}
                     </div>
-                  )}
-                </>
-              )}
-            </div>
-            
-            {/* Instructions */}
-            <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md mb-6 text-sm">
-              <div className="font-medium mb-2">Important Notes:</div>
-              {custodialOnlyMode && custodialDepositInfo ? (
-                <ul className="list-disc list-inside space-y-1 text-xs">
-                  {custodialDepositInfo.important.map((note, index) => (
-                    <li key={index}>{note}</li>
-                  ))}
-                </ul>
-              ) : (
-                <ul className="list-disc list-inside space-y-1 text-xs">
-                  <li>Only send {tokenSymbol} to this address</li>
-                  <li>Double-check the address before sending</li>
-                  {custodialOnlyMode && <li>Your game balance will be credited automatically</li>}
-                </ul>
-              )}
-            </div>
-            
-            {/* Action Buttons */}
-            <div className="flex space-x-3">
-              <button
-                onClick={onClose}
-                disabled={isLoading || initializingUser}
-                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-md transition-colors disabled:opacity-50"
-              >
-                Close
-              </button>
-              
-              <button
-                onClick={handleDepositConfirmation}
-                disabled={isLoading || initializingUser}
-                className={`flex-1 px-4 py-2 rounded-md transition-colors flex items-center justify-center ${
-                  isLoading || initializingUser
-                    ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                    : 'bg-green-600 hover:bg-green-700 text-white'
-                }`}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader size={16} className="mr-2 animate-spin" />
-                    Checking...
-                  </>
-                ) : (
-                  <>
-                    <Wallet size={16} className="mr-2" />
-                    I've Sent {tokenSymbol}
-                  </>
+                  </div>
                 )}
-              </button>
-            </div>
+              </div>
+            )}
+            
+            {/* Address display */}
+            {displayAddress && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">
+                    {custodialOnlyMode ? 'Send SOL to this Address' : 'Your Deposit Address'}
+                    {serverConfigError && (
+                      <span className="ml-2 text-xs text-orange-400">(Fallback Address)</span>
+                    )}
+                  </label>
+                  
+                  <div className="bg-gray-800 border border-gray-700 rounded-md p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 mr-2">
+                        <div className="text-white font-mono text-sm break-all">
+                          {displayAddress}
+                        </div>
+                      </div>
+                      <button
+                        onClick={copyAddress}
+                        className="text-blue-400 text-xs hover:text-blue-300 flex items-center"
+                      >
+                        {copied ? (
+                          <>
+                            <Check size={14} className="mr-1" />
+                            Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={14} className="mr-1" />
+                            Copy
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* QR Code toggle */}
+                <div className="flex justify-center">
+                  <button
+                    onClick={() => setShowQR(!showQR)}
+                    className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors"
+                  >
+                    <QrCode size={16} className="mr-2" />
+                    {showQR ? 'Hide QR Code' : 'Show QR Code'}
+                  </button>
+                </div>
+                
+                {/* QR Code display */}
+                {showQR && (
+                  <div className="flex justify-center bg-white p-4 rounded-lg">
+                    <QRCodeSVG 
+                      value={displayAddress} 
+                      size={200}
+                      level="M"
+                      includeMargin={true}
+                    />
+                  </div>
+                )}
+                
+                {/* Instructions - matches withdrawal modal info boxes */}
+                <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md text-sm">
+                  <div className="font-medium mb-2">Important Notes:</div>
+                  <ul className="list-disc list-inside space-y-1 text-xs">
+                    <li>Only send {tokenSymbol} to this address</li>
+                    <li>Double-check the address before sending</li>
+                    {custodialOnlyMode && <li>Your game balance will be credited automatically</li>}
+                    {serverConfigError && <li>Manual processing may take 1-2 minutes</li>}
+                  </ul>
+                </div>
+                
+                {/* Action button - matches withdrawal modal */}
+                <button
+                  onClick={handleDepositConfirmation}
+                  disabled={isLoading}
+                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-md transition-colors flex items-center justify-center"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader size={16} className="animate-spin mr-2" />
+                      Checking...
+                    </>
+                  ) : (
+                    <>
+                      <Wallet size={16} className="mr-2" />
+                      I've Sent {tokenSymbol}
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+            
+            {/* No address available state */}
+            {!displayAddress && !fetchingUserId && !fetchingDepositInfo && (
+              <div className="text-center py-8">
+                <div className="text-gray-400 mb-4">Unable to generate deposit address</div>
+                <button
+                  onClick={() => {
+                    setHasAttemptedFetch(false);
+                    if (!effectiveUserId) {
+                      retryGetUserId();
+                    } else {
+                      fetchCustodialDepositInfo();
+                    }
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors"
+                >
+                  <RefreshCw size={16} className="mr-2 inline" />
+                  Retry
+                </button>
+              </div>
+            )}
+            
+            {/* Error Message - matches withdrawal modal */}
+            {error && (
+              <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-500 p-3 rounded-md mt-4">
+                {error}
+              </div>
+            )}
           </>
         )}
       </div>

@@ -127,39 +127,29 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
 };
 
 // 🔧 UPDATED: Enhanced custodial balance hook
+// In your WithdrawModal.tsx, replace the existing hook with:
 const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<number>(0);
 
   const updateCustodialBalance = useCallback(async () => {
-    if (!userId) {
-      console.log('🔍 WithdrawModal useCustodialBalance: No userId provided');
-      return;
-    }
+    if (!userId) return;
     
-    console.log('🚀 WithdrawModal useCustodialBalance: Starting balance fetch for userId:', userId);
     setLoading(true);
     try {
-      // 🚩 UPDATE: Use the new custodial balance API
-      const response = await fetch(`/api/custodial/balance?userId=${userId}`);
+      // 🚩 CORRECTED: Use your actual API endpoint
+      const response = await fetch(`/api/custodial/balance/${userId}`);
       const data = await response.json();
       
-      if (data.success && data.balanceSOL !== undefined) {
-        setCustodialBalance(data.balanceSOL);
-        setLastUpdated(Date.now());
-        console.log(`💎 WithdrawModal: Custodial SOL balance updated: ${data.balanceSOL.toFixed(3)} SOL`);
-      } else {
-        console.warn('WithdrawModal: No balanceSOL in response:', data);
-        // Try legacy format
-        if (data.custodialBalance !== undefined) {
-          setCustodialBalance(data.custodialBalance);
-          setLastUpdated(Date.now());
-          console.log(`💎 WithdrawModal: Legacy custodial balance: ${data.custodialBalance.toFixed(3)} SOL`);
-        }
-      }
+      // 🚩 CORRECTED: Use custodialBalance from your API
+      setCustodialBalance(data.custodialBalance || 0);
+      setLastUpdated(Date.now());
+      console.log(`💎 Custodial balance: ${(data.custodialBalance || 0).toFixed(3)} SOL`);
+      
     } catch (error) {
-      console.error('WithdrawModal: Failed to fetch custodial balance:', error);
+      console.error('Failed to fetch custodial balance:', error);
+      setCustodialBalance(0);
     } finally {
       setLoading(false);
     }
@@ -167,7 +157,6 @@ const useCustodialBalance = (userId: string) => {
 
   useEffect(() => {
     if (userId) {
-      console.log('🔄 WithdrawModal useCustodialBalance: useEffect triggered for userId:', userId);
       updateCustodialBalance();
       const interval = setInterval(updateCustodialBalance, 10000);
       return () => clearInterval(interval);
@@ -176,6 +165,7 @@ const useCustodialBalance = (userId: string) => {
 
   return { custodialBalance, loading, lastUpdated, updateCustodialBalance };
 };
+
 
 const WithdrawModal: FC<WithdrawModalProps> = ({ 
   isOpen, 

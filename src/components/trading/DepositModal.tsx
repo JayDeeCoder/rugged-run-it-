@@ -1,4 +1,4 @@
-// src/components/trading/DepositModal.tsx - Updated with Custodial Support
+// src/components/trading/DepositModal.tsx - Corrected for your API structure
 import { FC, useState, useRef, useEffect, useCallback } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
@@ -30,11 +30,18 @@ interface DepositModalProps {
   userId?: string | null; // 🚩 ADD: userId for custodial deposits
 }
 
-// 🚩 ADD: Interface for custodial deposit info
-interface CustodialDepositInfo {
-  depositAddress: string;
-  qrCodeUrl?: string;
-  explorerUrl?: string;
+// 🚩 CORRECTED: Interface matching your actual API response
+interface CustodialDepositResponse {
+  success: boolean;
+  message: string;
+  depositInfo: {
+    depositAddress: string;
+    requestedAmount: string | number;
+    minDeposit: number;
+    maxDeposit: number;
+    network: string;
+    mode: string;
+  };
   instructions: string[];
   important: string[];
   timing: {
@@ -42,6 +49,10 @@ interface CustodialDepositInfo {
     blockchainConfirmations: string;
     supportContact: string;
   };
+  depositAddress: string; // Also available at top level
+  qrCodeUrl: string;
+  explorerUrl: string;
+  timestamp: string;
 }
 
 const DepositModal: FC<DepositModalProps> = ({ 
@@ -57,7 +68,7 @@ const DepositModal: FC<DepositModalProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   
   // 🚩 ADD: Custodial-specific state
-  const [custodialDepositInfo, setCustodialDepositInfo] = useState<CustodialDepositInfo | null>(null);
+  const [custodialDepositInfo, setCustodialDepositInfo] = useState<CustodialDepositResponse | null>(null);
   const [fetchingDepositInfo, setFetchingDepositInfo] = useState<boolean>(false);
   const [depositError, setDepositError] = useState<string | null>(null);
   
@@ -74,7 +85,7 @@ const DepositModal: FC<DepositModalProps> = ({
   
   const modalRef = useRef<HTMLDivElement>(null);
   
-  // 🚩 ADD: Get custodial deposit info
+  // 🚩 CORRECTED: Get custodial deposit info using your actual API
   const fetchCustodialDepositInfo = useCallback(async () => {
     if (!custodialOnlyMode || !userId) return;
     
@@ -91,16 +102,18 @@ const DepositModal: FC<DepositModalProps> = ({
       });
       
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Deposit info API error:', errorText);
         throw new Error(`Failed to get deposit info: ${response.status}`);
       }
       
-      const data = await response.json();
+      const data: CustodialDepositResponse = await response.json();
       
       if (data.success) {
         setCustodialDepositInfo(data);
         console.log('✅ Custodial deposit info received:', data.depositAddress);
       } else {
-        throw new Error(data.error || 'Failed to get deposit information');
+        throw new Error('API returned success: false');
       }
     } catch (error) {
       console.error('❌ Failed to fetch custodial deposit info:', error);
@@ -134,9 +147,9 @@ const DepositModal: FC<DepositModalProps> = ({
   // If not open, don't render
   if (!isOpen) return null;
   
-  // 🚩 UPDATE: Dynamic address based on mode
+  // 🚩 CORRECTED: Dynamic address based on mode and API response
   const displayAddress = custodialOnlyMode && custodialDepositInfo 
-    ? custodialDepositInfo.depositAddress 
+    ? custodialDepositInfo.depositAddress // Use the address from your API
     : walletAddress;
   
   // Copy wallet address to clipboard
@@ -165,27 +178,30 @@ const DepositModal: FC<DepositModalProps> = ({
     }, 3000);
   };
 
-  // 🚩 UPDATE: Dynamic network info based on mode
+  // 🚩 CORRECTED: Dynamic network info based on mode and API data
   const getNetworkInfo = () => {
-    const baseInfo = {
-      network: currentToken === TokenType.SOL ? 'Solana Mainnet' : 'Solana (SPL Token)',
-      minDeposit: currentToken === TokenType.SOL ? '0.001 SOL' : '1 RUGGED',
-      confirmations: '1 confirmation'
-    };
-    
-    if (custodialOnlyMode) {
+    if (custodialOnlyMode && custodialDepositInfo) {
       return {
-        ...baseInfo,
+        network: custodialDepositInfo.depositInfo.network,
+        minDeposit: `${custodialDepositInfo.depositInfo.minDeposit} SOL`,
+        maxDeposit: `${custodialDepositInfo.depositInfo.maxDeposit} SOL`,
+        confirmations: custodialDepositInfo.timing.blockchainConfirmations,
         depositType: 'Custodial Deposit',
-        processingTime: '1-3 minutes'
+        processingTime: custodialDepositInfo.timing.estimatedCreditTime
       };
     }
     
-    return {
-      ...baseInfo,
+    // Default for embedded mode
+    const baseInfo = {
+      network: currentToken === TokenType.SOL ? 'Solana Mainnet' : 'Solana (SPL Token)',
+      minDeposit: currentToken === TokenType.SOL ? '0.001 SOL' : '1 RUGGED',
+      maxDeposit: 'No limit',
+      confirmations: '1 confirmation',
       depositType: 'Direct Wallet Deposit',
       processingTime: 'Instant'
     };
+    
+    return baseInfo;
   };
 
   const networkInfo = getNetworkInfo();
@@ -265,17 +281,21 @@ const DepositModal: FC<DepositModalProps> = ({
                 <span className="text-gray-400">Min Deposit:</span>
                 <span className="text-white">{networkInfo.minDeposit}</span>
               </div>
+              {networkInfo.maxDeposit && networkInfo.maxDeposit !== 'No limit' && (
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-gray-400">Max Deposit:</span>
+                  <span className="text-white">{networkInfo.maxDeposit}</span>
+                </div>
+              )}
               <div className="flex justify-between items-center mb-2">
                 <span className="text-gray-400">Confirmations:</span>
                 <span className="text-white">{networkInfo.confirmations}</span>
               </div>
               {/* 🚩 ADD: Processing time for custodial */}
-              {custodialOnlyMode && (
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Credit Time:</span>
-                  <span className="text-white">{networkInfo.processingTime}</span>
-                </div>
-              )}
+              <div className="flex justify-between items-center">
+                <span className="text-gray-400">Credit Time:</span>
+                <span className="text-white">{networkInfo.processingTime}</span>
+              </div>
             </div>
             
             {/* Wallet Address Section */}
@@ -336,29 +356,27 @@ const DepositModal: FC<DepositModalProps> = ({
               )}
             </div>
             
-            {/* 🚩 UPDATE: Dynamic important notes based on mode */}
+            {/* 🚩 CORRECTED: Dynamic important notes based on mode and API data */}
             <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md mb-6 text-sm">
               <div className="font-medium mb-2">Important Notes:</div>
-              <ul className="list-disc list-inside space-y-1 text-xs">
-                <li>Only send {tokenSymbol} to this address</li>
-                {custodialOnlyMode ? (
-                  <>
-                    <li>Send from any Solana wallet (Phantom, Solflare, etc.)</li>
-                    <li>Your game balance will be credited automatically</li>
-                    <li>Balance updates in 1-3 minutes after confirmation</li>
-                  </>
-                ) : (
-                  <>
-                    <li>Deposits will appear after {networkInfo.confirmations}</li>
-                    <li>This is your personal wallet address</li>
-                  </>
-                )}
-                <li>Minimum deposit: {networkInfo.minDeposit}</li>
-                <li>Double-check the address before sending</li>
-              </ul>
+              {custodialOnlyMode && custodialDepositInfo ? (
+                <ul className="list-disc list-inside space-y-1 text-xs">
+                  {custodialDepositInfo.important.map((note, index) => (
+                    <li key={index}>{note}</li>
+                  ))}
+                </ul>
+              ) : (
+                <ul className="list-disc list-inside space-y-1 text-xs">
+                  <li>Only send {tokenSymbol} to this address</li>
+                  <li>Deposits will appear after {networkInfo.confirmations}</li>
+                  <li>This is your personal wallet address</li>
+                  <li>Minimum deposit: {networkInfo.minDeposit}</li>
+                  <li>Double-check the address before sending</li>
+                </ul>
+              )}
             </div>
             
-            {/* 🚩 ADD: Custodial-specific instructions */}
+            {/* 🚩 CORRECTED: Custodial-specific instructions from API */}
             {custodialOnlyMode && custodialDepositInfo && (
               <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md mb-6 text-sm">
                 <div className="font-medium mb-2">📱 How to Send:</div>
@@ -403,7 +421,7 @@ const DepositModal: FC<DepositModalProps> = ({
               </button>
             </div>
             
-            {/* 🚩 ADD: Explorer link for custodial deposits */}
+            {/* 🚩 CORRECTED: Explorer link from API response */}
             {custodialOnlyMode && custodialDepositInfo?.explorerUrl && (
               <div className="mt-4 text-center">
                 <button
@@ -438,6 +456,7 @@ const DepositModal: FC<DepositModalProps> = ({
             <div className="text-green-400">UserId: {userId || 'None'}</div>
             <div className="text-blue-400">Display Address: {displayAddress?.slice(0, 8) + '...' || 'None'}</div>
             <div className="text-yellow-400">Has Custodial Info: {custodialDepositInfo ? 'Yes' : 'No'}</div>
+            <div className="text-pink-400">API House Address: {custodialDepositInfo?.depositAddress?.slice(0, 8) + '...' || 'None'}</div>
           </div>
         )}
       </div>

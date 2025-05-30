@@ -1,4 +1,4 @@
-// src/components/trading/DepositModal.tsx - UI Matched to WithdrawModal
+// src/components/trading/DepositModal.tsx - FIXED: Infinite loop and state issues
 import { FC, useState, useRef, useEffect, useCallback } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
@@ -72,17 +72,19 @@ const DepositModal: FC<DepositModalProps> = ({
   walletAddress,
   userId: propUserId
 }) => {
-  // Feature flag setup - exactly like withdrawal modal
+  console.log('🔄 DepositModal render - Props:', { isOpen, walletAddress, propUserId });
+  
+  // Feature flag setup
   const custodialOnlyMode = isCustodialOnlyMode();
   const walletMode = getWalletMode();
   
-  // User management - same pattern as withdrawal modal
+  // User management - FIXED: Simplified state management
   const { authenticated } = usePrivy();
-  // FIX: Handle undefined propUserId by converting to null
   const [internalUserId, setInternalUserId] = useState<string | null>(propUserId || null);
   const [fetchingUserId, setFetchingUserId] = useState<boolean>(false);
+  const [userInitComplete, setUserInitComplete] = useState<boolean>(false);
   
-  // State management - matches withdrawal modal patterns
+  // State management
   const [copied, setCopied] = useState<boolean>(false);
   const [showQR, setShowQR] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -98,59 +100,22 @@ const DepositModal: FC<DepositModalProps> = ({
   
   const modalRef = useRef<HTMLDivElement>(null);
   const tokenSymbol = currentToken;
-  const effectiveUserId = internalUserId || propUserId;
   
-  // Fallback house wallet - same as your pattern
+  // FIXED: Stable derived values
+  const effectiveUserId = internalUserId || propUserId;
   const FALLBACK_HOUSE_WALLET = '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
   
-  // User initialization - exact same pattern as withdrawal modal
-  useEffect(() => {
-    if (authenticated && walletAddress && !propUserId && !fetchingUserId) {
-      const fetchUserId = async () => {
-        try {
-          setFetchingUserId(true);
-          console.log('🔍 DepositModal: Fetching userId via API for walletAddress:', walletAddress);
-          
-          const response = await fetch('/api/users/get-or-create', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ walletAddress })
-          });
-          
-          if (!response.ok) {
-            const errorText = await response.text();
-            console.error('❌ DepositModal: API error:', errorText);
-            throw new Error(`API error: ${response.status}`);
-          }
-          
-          const data = await response.json();
-          if (data.user && data.user.id) {
-            setInternalUserId(data.user.id);
-            console.log('✅ DepositModal: Got userId from API:', data.user.id);
-          } else {
-            console.error('❌ DepositModal: No user in API response:', data);
-          }
-        } catch (error) {
-          console.error('❌ DepositModal: Failed to fetch userId via API:', error);
-        } finally {
-          setFetchingUserId(false);
-        }
-      };
-      
-      fetchUserId();
-    } else if (propUserId) {
-      setInternalUserId(propUserId);
-      console.log('✅ DepositModal: Using provided userId:', propUserId);
+  // FIXED: Simplified user fetch function - removed from useEffect deps
+  const fetchUserIdFromAPI = useCallback(async () => {
+    if (!walletAddress || fetchingUserId) {
+      console.log('🚫 fetchUserIdFromAPI: Skipping - no wallet or already fetching');
+      return;
     }
-  }, [authenticated, walletAddress, propUserId, fetchingUserId]);
-
-  const retryGetUserId = useCallback(async () => {
-    if (!walletAddress || fetchingUserId) return;
+    
+    console.log('🔍 fetchUserIdFromAPI: Starting for wallet:', walletAddress);
+    setFetchingUserId(true);
     
     try {
-      setFetchingUserId(true);
-      console.log('🔄 DepositModal: Manual retry fetching userId via API for:', walletAddress);
-      
       const response = await fetch('/api/users/get-or-create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -159,35 +124,38 @@ const DepositModal: FC<DepositModalProps> = ({
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ DepositModal: Retry API error:', errorText);
+        console.error('❌ fetchUserIdFromAPI: API error:', errorText);
         throw new Error(`API error: ${response.status}`);
       }
       
       const data = await response.json();
       if (data.user && data.user.id) {
         setInternalUserId(data.user.id);
-        console.log('✅ DepositModal: Retry got userId from API:', data.user.id);
+        setUserInitComplete(true);
+        console.log('✅ fetchUserIdFromAPI: Success, got userId:', data.user.id);
       } else {
-        console.error('❌ DepositModal: Retry - No user in API response:', data);
+        console.error('❌ fetchUserIdFromAPI: No user in response:', data);
+        setError('Failed to initialize user account');
       }
     } catch (error) {
-      console.error('❌ DepositModal: Retry failed to fetch userId via API:', error);
+      console.error('❌ fetchUserIdFromAPI: Error:', error);
+      setError('Failed to connect to user service');
     } finally {
       setFetchingUserId(false);
     }
-  }, [walletAddress, fetchingUserId]);
+  }, [walletAddress]); // Only depend on walletAddress
   
-  // API fetch function
-  const fetchCustodialDepositInfo = useCallback(async () => {
-    if (!custodialOnlyMode || !effectiveUserId || fetchingDepositInfo || hasAttemptedFetch) {
+  // FIXED: Simplified custodial fetch function
+  const fetchCustodialInfo = useCallback(async () => {
+    if (!custodialOnlyMode || !effectiveUserId || fetchingDepositInfo) {
+      console.log('🚫 fetchCustodialInfo: Skipping', { custodialOnlyMode, effectiveUserId, fetchingDepositInfo });
       return;
     }
     
-    console.log('🚀 fetchCustodialDepositInfo called for user:', effectiveUserId);
+    console.log('🚀 fetchCustodialInfo: Starting for user:', effectiveUserId);
     setFetchingDepositInfo(true);
     setError(null);
     setServerConfigError(false);
-    setHasAttemptedFetch(true);
     
     try {
       const response = await fetch('/api/custodial/deposit-info', {
@@ -198,11 +166,12 @@ const DepositModal: FC<DepositModalProps> = ({
       
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ API error response:', errorText);
+        console.error('❌ fetchCustodialInfo: API error:', errorText);
         
         if (errorText.includes('House wallet not configured') || errorText.includes('Deposit service not available')) {
           setServerConfigError(true);
-          setError('Custodial deposits are temporarily unavailable due to server configuration.');
+          setError('Custodial deposits temporarily unavailable. Using fallback address.');
+          console.log('⚠️ Using fallback wallet due to server config error');
         } else {
           setError(`Server error: ${response.status}`);
         }
@@ -210,24 +179,72 @@ const DepositModal: FC<DepositModalProps> = ({
       }
       
       const data: CustodialDepositResponse = await response.json();
-      console.log('✅ API response data:', data);
+      console.log('✅ fetchCustodialInfo: Success:', data);
       
       if (data.success) {
         setCustodialDepositInfo(data);
         setServerConfigError(false);
       } else {
-        setError(data.message || 'API returned success: false');
+        setError(data.message || 'Failed to get deposit info');
+        setServerConfigError(true);
       }
     } catch (error) {
-      console.error('❌ fetchCustodialDepositInfo error:', error);
+      console.error('❌ fetchCustodialInfo: Error:', error);
       setError('Failed to connect to deposit service');
       setServerConfigError(true);
     } finally {
       setFetchingDepositInfo(false);
     }
-  }, [custodialOnlyMode, effectiveUserId, fetchingDepositInfo, hasAttemptedFetch]);
+  }, [custodialOnlyMode, effectiveUserId]); // Only essential deps
   
-  // Reset state when modal opens/closes - same pattern as withdrawal modal
+  // FIXED: User initialization effect - only run when modal opens and we need a user
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    console.log('🔄 User init effect triggered:', { 
+      authenticated, 
+      walletAddress, 
+      propUserId, 
+      internalUserId,
+      userInitComplete,
+      fetchingUserId 
+    });
+    
+    // If we have a prop userId, use it immediately
+    if (propUserId && !internalUserId) {
+      console.log('✅ Using provided propUserId:', propUserId);
+      setInternalUserId(propUserId);
+      setUserInitComplete(true);
+      return;
+    }
+    
+    // If we need to fetch user ID and haven't completed init
+    if (authenticated && walletAddress && !propUserId && !internalUserId && !userInitComplete && !fetchingUserId) {
+      console.log('🔍 Need to fetch user ID from API...');
+      fetchUserIdFromAPI();
+    }
+  }, [isOpen, authenticated, walletAddress, propUserId, internalUserId, userInitComplete, fetchingUserId, fetchUserIdFromAPI]);
+  
+  // FIXED: Custodial info fetch effect - only run when we have a user and modal is open
+  useEffect(() => {
+    if (!isOpen || !custodialOnlyMode) return;
+    
+    console.log('🔄 Custodial fetch effect triggered:', { 
+      effectiveUserId, 
+      hasAttemptedFetch, 
+      fetchingDepositInfo,
+      userInitComplete 
+    });
+    
+    // Only fetch if we have a user ID and haven't attempted yet
+    if (effectiveUserId && userInitComplete && !hasAttemptedFetch && !fetchingDepositInfo) {
+      console.log('🚀 Fetching custodial deposit info...');
+      setHasAttemptedFetch(true);
+      fetchCustodialInfo();
+    }
+  }, [isOpen, custodialOnlyMode, effectiveUserId, userInitComplete, hasAttemptedFetch, fetchingDepositInfo, fetchCustodialInfo]);
+  
+  // FIXED: Modal reset effect - simplified dependencies
   useEffect(() => {
     if (isOpen) {
       console.log('🚀 DepositModal: Modal opened, resetting state');
@@ -241,29 +258,40 @@ const DepositModal: FC<DepositModalProps> = ({
       setServerConfigError(false);
       setHasAttemptedFetch(false);
       
-      // Initialize user if needed
-      if (!effectiveUserId && !fetchingUserId) {
-        // Will be handled by the useEffect above
+      // Reset user init if we don't have a prop userId
+      if (!propUserId) {
+        setUserInitComplete(false);
       }
     } else {
       // Reset everything when modal closes
+      console.log('🔒 DepositModal: Modal closed, full reset');
       if (!propUserId) {
         setInternalUserId(null);
+        setUserInitComplete(false);
       }
       setHasAttemptedFetch(false);
       setServerConfigError(false);
       setError(null);
       setCustodialDepositInfo(null);
+      setFetchingUserId(false);
+      setFetchingDepositInfo(false);
     }
-  }, [isOpen, effectiveUserId, propUserId, fetchingUserId]);
+  }, [isOpen, propUserId]); // Minimal dependencies
   
-  // Fetch custodial info when ready
-  useEffect(() => {
-    if (isOpen && custodialOnlyMode && effectiveUserId && !fetchingUserId && !hasAttemptedFetch) {
-      console.log('🔄 User ID available, fetching custodial deposit info...');
-      fetchCustodialDepositInfo();
+  // Manual retry function
+  const handleRetry = useCallback(() => {
+    console.log('🔄 Manual retry triggered');
+    setError(null);
+    setHasAttemptedFetch(false);
+    setServerConfigError(false);
+    
+    if (!effectiveUserId) {
+      setUserInitComplete(false);
+      fetchUserIdFromAPI();
+    } else {
+      fetchCustodialInfo();
     }
-  }, [isOpen, custodialOnlyMode, effectiveUserId, fetchingUserId, hasAttemptedFetch, fetchCustodialDepositInfo]);
+  }, [effectiveUserId, fetchUserIdFromAPI, fetchCustodialInfo]);
   
   // Determine display address
   const getDisplayAddress = () => {
@@ -340,12 +368,11 @@ const DepositModal: FC<DepositModalProps> = ({
         ref={modalRef} 
         className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
       >
-        {/* Header - exactly matches withdrawal modal */}
+        {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white flex items-center">
             <ArrowUpToLine size={20} className="mr-2" />
             Deposit {tokenSymbol}
-            {/* Mode indicator - same style as withdrawal modal */}
             <span className="ml-2 text-xs bg-green-600 text-white px-2 py-1 rounded">
               {walletMode.toUpperCase()}
             </span>
@@ -360,7 +387,7 @@ const DepositModal: FC<DepositModalProps> = ({
         </div>
         
         {success ? (
-          // Success state - exactly matches withdrawal modal
+          // Success state
           <div className="text-center py-8">
             <div className="flex justify-center mb-4">
               <div className="w-16 h-16 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
@@ -378,7 +405,7 @@ const DepositModal: FC<DepositModalProps> = ({
           </div>
         ) : (
           <>
-            {/* Debug info - exactly matches withdrawal modal style */}
+            {/* FIXED: Improved debug info */}
             {process.env.NODE_ENV === 'development' && (
               <div className="bg-gray-900 p-3 rounded mb-4 text-xs space-y-1">
                 <div className="text-gray-400 font-bold">🔍 Debug Info:</div>
@@ -390,18 +417,14 @@ const DepositModal: FC<DepositModalProps> = ({
                 <div className="text-blue-400">WalletAddress: {walletAddress || 'None'}</div>
                 <div className="text-yellow-400">Authenticated: {authenticated ? 'Yes' : 'No'}</div>
                 <div className="text-purple-400">Fetching UserId: {fetchingUserId ? 'Yes' : 'No'}</div>
-                <div className="text-teal-400">Fetching Deposit Info: {fetchingDepositInfo ? 'Yes' : 'No'}</div>
-                <div className="text-pink-400">Server Config Error: {serverConfigError ? 'Yes' : 'No'}</div>
-                {!effectiveUserId && !fetchingUserId && (
-                  <div className="text-red-400 font-bold">⚠️ No userId available!</div>
-                )}
-                {fetchingUserId && (
-                  <div className="text-yellow-400 font-bold">🔄 Fetching userId from API...</div>
-                )}
+                <div className="text-teal-400">User Init Complete: {userInitComplete ? 'Yes' : 'No'}</div>
+                <div className="text-pink-400">Fetching Deposit Info: {fetchingDepositInfo ? 'Yes' : 'No'}</div>
+                <div className="text-red-400">Has Attempted Fetch: {hasAttemptedFetch ? 'Yes' : 'No'}</div>
+                <div className="text-orange-400">Server Config Error: {serverConfigError ? 'Yes' : 'No'}</div>
               </div>
             )}
             
-            {/* Mode description - matches withdrawal modal */}
+            {/* Mode description */}
             {custodialOnlyMode && (
               <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md mb-4 text-sm">
                 <div className="font-medium mb-1">🏦 Custodial Deposit Mode</div>
@@ -411,7 +434,7 @@ const DepositModal: FC<DepositModalProps> = ({
               </div>
             )}
             
-            {/* User ID status notification - same as withdrawal modal */}
+            {/* User ID status notification */}
             {authenticated && walletAddress && !effectiveUserId && !fetchingUserId && (
               <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md mb-4 text-sm">
                 <div className="flex items-center justify-between">
@@ -420,7 +443,7 @@ const DepositModal: FC<DepositModalProps> = ({
                     <div className="text-xs">Unable to initialize user account. Please retry.</div>
                   </div>
                   <button
-                    onClick={retryGetUserId}
+                    onClick={handleRetry}
                     className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-xs"
                   >
                     Retry
@@ -460,20 +483,13 @@ const DepositModal: FC<DepositModalProps> = ({
               </div>
             )}
             
-            {/* Network info - matches withdrawal modal balance display style */}
+            {/* Network info */}
             {displayAddress && (
               <div className="bg-gray-800 p-4 rounded-md mb-6">
                 <div className="flex justify-between items-center mb-2">
                   <span className="text-gray-400 text-sm">Deposit Information</span>
                   <button 
-                    onClick={() => {
-                      setHasAttemptedFetch(false);
-                      if (!effectiveUserId) {
-                        retryGetUserId();
-                      } else {
-                        fetchCustodialDepositInfo();
-                      }
-                    }}
+                    onClick={handleRetry}
                     disabled={fetchingDepositInfo || fetchingUserId}
                     className="text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-1"
                     title="Refresh deposit info"
@@ -502,7 +518,6 @@ const DepositModal: FC<DepositModalProps> = ({
                   </div>
                 </div>
                 
-                {/* Show wallet address for debugging - matches withdrawal modal */}
                 {walletAddress && (
                   <div className="mt-3 pt-2 border-t border-gray-700">
                     <div className="text-xs text-gray-500">
@@ -574,7 +589,7 @@ const DepositModal: FC<DepositModalProps> = ({
                   </div>
                 )}
                 
-                {/* Instructions - matches withdrawal modal info boxes */}
+                {/* Instructions */}
                 <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md text-sm">
                   <div className="font-medium mb-2">Important Notes:</div>
                   <ul className="list-disc list-inside space-y-1 text-xs">
@@ -585,7 +600,7 @@ const DepositModal: FC<DepositModalProps> = ({
                   </ul>
                 </div>
                 
-                {/* Action button - matches withdrawal modal */}
+                {/* Action button */}
                 <button
                   onClick={handleDepositConfirmation}
                   disabled={isLoading}
@@ -611,14 +626,7 @@ const DepositModal: FC<DepositModalProps> = ({
               <div className="text-center py-8">
                 <div className="text-gray-400 mb-4">Unable to generate deposit address</div>
                 <button
-                  onClick={() => {
-                    setHasAttemptedFetch(false);
-                    if (!effectiveUserId) {
-                      retryGetUserId();
-                    } else {
-                      fetchCustodialDepositInfo();
-                    }
-                  }}
+                  onClick={handleRetry}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors"
                 >
                   <RefreshCw size={16} className="mr-2 inline" />
@@ -627,10 +635,16 @@ const DepositModal: FC<DepositModalProps> = ({
               </div>
             )}
             
-            {/* Error Message - matches withdrawal modal */}
+            {/* Error Message */}
             {error && (
               <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-500 p-3 rounded-md mt-4">
                 {error}
+                <button
+                  onClick={handleRetry}
+                  className="ml-2 text-xs underline hover:no-underline"
+                >
+                  Retry
+                </button>
               </div>
             )}
           </>

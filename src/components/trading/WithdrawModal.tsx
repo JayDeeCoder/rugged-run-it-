@@ -98,7 +98,7 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
       const balanceResponse = await connection.getBalance(publicKey);
       const solBalance = balanceResponse / LAMPORTS_PER_SOL;
       
-      console.log(`✅ WithdrawModal useEmbeddedWalletBalance: Balance fetched and SETTING STATE: ${solBalance.toFixed(6)} SOL`);
+      console.log(`✅ WithdrawModal useEmbeddedWalletBalance: Balance fetched and SETTING STATE: ${solBalance.toFixed(3)} SOL`);
       setBalance(solBalance);
       setLastUpdated(Date.now());
       

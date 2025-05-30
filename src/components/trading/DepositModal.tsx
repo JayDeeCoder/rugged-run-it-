@@ -1,4 +1,4 @@
-// src/components/trading/DepositModal.tsx - Debug Version
+// src/components/trading/DepositModal.tsx - Fixed Version
 import { FC, useState, useRef, useEffect, useCallback } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
@@ -6,6 +6,8 @@ import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
 import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, ExternalLink, QrCode, RefreshCw, AlertTriangle } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import { UserAPI } from '../../services/api'; // 🔧 FIXED: Import UserAPI
+import { toast } from 'react-hot-toast'; // 🔧 FIXED: Import toast
 
 // 🚩 TEMPORARY: Inline feature flags for debugging
 const DEBUG_FEATURE_FLAGS = {
@@ -70,11 +72,15 @@ const DepositModal: FC<DepositModalProps> = ({
   onSuccess, 
   currentToken,
   walletAddress,
-  userId
+  userId: propUserId
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
   const [showQR, setShowQR] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  
+  // 🔧 FIXED: Local userId state to handle initialization
+  const [localUserId, setLocalUserId] = useState<string | null>(propUserId || null);
+  const [initializingUser, setInitializingUser] = useState<boolean>(false);
   
   // Custodial-specific state
   const [custodialDepositInfo, setCustodialDepositInfo] = useState<CustodialDepositResponse | null>(null);
@@ -89,9 +95,43 @@ const DepositModal: FC<DepositModalProps> = ({
   const walletMode = getWalletMode();
   
   const tokenSymbol = currentToken;
-  const { user } = usePrivy();
+  const { user, authenticated } = usePrivy();
   const { currentUser } = useContext(UserContext);
   const modalRef = useRef<HTMLDivElement>(null);
+  
+  // 🔧 FIXED: Use the effective userId (prop or local)
+  const effectiveUserId = propUserId || localUserId;
+  
+  // 🔧 FIXED: Initialize user if not provided (same logic as TradingControls)
+  const initializeUser = useCallback(async () => {
+    if (!authenticated || !walletAddress || propUserId) {
+      console.log('🔍 DepositModal: Skipping user init:', {
+        authenticated,
+        hasWalletAddress: !!walletAddress,
+        hasPropUserId: !!propUserId
+      });
+      return;
+    }
+    
+    console.log('🚀 DepositModal: Initializing user with wallet:', walletAddress);
+    setInitializingUser(true);
+    
+    try {
+      const userData = await UserAPI.getUserOrCreate(walletAddress);
+      if (userData) {
+        setLocalUserId(userData.id);
+        console.log('✅ DepositModal: User initialized with ID:', userData.id);
+      } else {
+        throw new Error('Failed to get user data');
+      }
+    } catch (error) {
+      console.error('❌ DepositModal: Could not initialize user:', error);
+      setDepositError('Failed to initialize user account');
+      toast.error('Failed to initialize user account');
+    } finally {
+      setInitializingUser(false);
+    }
+  }, [authenticated, walletAddress, propUserId]);
   
   // 🚩 DEBUG: Enhanced logging
   useEffect(() => {
@@ -110,22 +150,26 @@ const DepositModal: FC<DepositModalProps> = ({
         walletMode
       },
       props: {
-        userId,
+        propUserId,
+        localUserId,
+        effectiveUserId,
         walletAddress: walletAddress?.slice(0, 8) + '...',
-        isOpen
+        isOpen,
+        authenticated,
+        initializingUser
       }
     };
     
     setDebugInfo(debug);
     console.log('🔍 DepositModal Debug Info:', debug);
-  }, [custodialOnlyMode, walletMode, userId, walletAddress, isOpen]);
+  }, [custodialOnlyMode, walletMode, propUserId, localUserId, effectiveUserId, walletAddress, isOpen, authenticated, initializingUser]);
   
   // Get custodial deposit info with enhanced debugging
   const fetchCustodialDepositInfo = useCallback(async () => {
     console.log('🚀 fetchCustodialDepositInfo called:', {
       custodialOnlyMode,
-      userId,
-      shouldFetch: custodialOnlyMode && userId
+      effectiveUserId,
+      shouldFetch: custodialOnlyMode && effectiveUserId
     });
     
     if (!custodialOnlyMode) {
@@ -133,8 +177,8 @@ const DepositModal: FC<DepositModalProps> = ({
       return;
     }
     
-    if (!userId) {
-      console.log('❌ Not fetching - userId is missing');
+    if (!effectiveUserId) {
+      console.log('❌ Not fetching - effectiveUserId is missing');
       setDepositError('User ID is required for custodial deposits');
       return;
     }
@@ -148,7 +192,7 @@ const DepositModal: FC<DepositModalProps> = ({
       const response = await fetch('/api/custodial/deposit-info', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId })
+        body: JSON.stringify({ userId: effectiveUserId })
       });
       
       console.log('📡 Response status:', response.status);
@@ -179,7 +223,7 @@ const DepositModal: FC<DepositModalProps> = ({
     } finally {
       setFetchingDepositInfo(false);
     }
-  }, [custodialOnlyMode, userId]);
+  }, [custodialOnlyMode, effectiveUserId]);
   
   // Reset state when modal opens/closes
   useEffect(() => {
@@ -191,24 +235,38 @@ const DepositModal: FC<DepositModalProps> = ({
       setDepositError(null);
       setCustodialDepositInfo(null);
       
-      // Force immediate fetch for custodial mode
-      if (custodialOnlyMode && userId) {
-        console.log('🔄 Triggering custodial deposit info fetch...');
-        setTimeout(() => {
-          fetchCustodialDepositInfo();
-        }, 100);
+      // Initialize user if needed
+      if (!effectiveUserId) {
+        console.log('🔄 Need to initialize user...');
+        initializeUser();
       } else {
-        console.log('⚠️ Not fetching custodial info:', {
-          custodialOnlyMode,
-          hasUserId: !!userId
-        });
+        // Force immediate fetch for custodial mode
+        if (custodialOnlyMode) {
+          console.log('🔄 Triggering custodial deposit info fetch...');
+          setTimeout(() => {
+            fetchCustodialDepositInfo();
+          }, 100);
+        }
+      }
+    } else {
+      // Reset local user ID when modal closes if it wasn't provided as prop
+      if (!propUserId) {
+        setLocalUserId(null);
       }
     }
-  }, [isOpen, custodialOnlyMode, userId, fetchCustodialDepositInfo]);
+  }, [isOpen, effectiveUserId, custodialOnlyMode, initializeUser, fetchCustodialDepositInfo, propUserId]);
+  
+  // 🔧 FIXED: Fetch custodial info when user ID becomes available
+  useEffect(() => {
+    if (isOpen && custodialOnlyMode && effectiveUserId && !initializingUser && !fetchingDepositInfo && !custodialDepositInfo) {
+      console.log('🔄 User ID available, fetching custodial deposit info...');
+      fetchCustodialDepositInfo();
+    }
+  }, [isOpen, custodialOnlyMode, effectiveUserId, initializingUser, fetchingDepositInfo, custodialDepositInfo, fetchCustodialDepositInfo]);
   
   // Handle outside clicks
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
-    if (isOpen && !isLoading && !fetchingDepositInfo) onClose();
+    if (isOpen && !isLoading && !fetchingDepositInfo && !initializingUser) onClose();
   });
   
   if (!isOpen) return null;
@@ -290,7 +348,7 @@ const DepositModal: FC<DepositModalProps> = ({
           </h2>
           <button
             onClick={onClose}
-            disabled={isLoading || fetchingDepositInfo}
+            disabled={isLoading || fetchingDepositInfo || initializingUser}
             className="text-gray-400 hover:text-white transition-colors"
           >
             <X size={20} />
@@ -306,11 +364,14 @@ const DepositModal: FC<DepositModalProps> = ({
           <div className="space-y-1">
             <div className="text-red-400">Custodial Only Mode: {custodialOnlyMode ? 'TRUE' : 'FALSE'}</div>
             <div className="text-blue-400">Wallet Mode: {walletMode}</div>
-            <div className="text-green-400">User ID: {userId || 'MISSING'}</div>
+            <div className="text-green-400">Prop User ID: {propUserId || 'MISSING'}</div>
+            <div className="text-cyan-400">Local User ID: {localUserId || 'MISSING'}</div>
+            <div className="text-orange-400">Effective User ID: {effectiveUserId || 'MISSING'}</div>
             <div className="text-purple-400">Has Custodial Info: {custodialDepositInfo ? 'YES' : 'NO'}</div>
-            <div className="text-cyan-400">Fetching Info: {fetchingDepositInfo ? 'YES' : 'NO'}</div>
-            <div className="text-orange-400">Display Address: {displayAddress?.slice(0, 12) + '...' || 'NONE'}</div>
-            <div className="text-pink-400">Error: {depositError || 'None'}</div>
+            <div className="text-pink-400">Initializing User: {initializingUser ? 'YES' : 'NO'}</div>
+            <div className="text-yellow-300">Fetching Info: {fetchingDepositInfo ? 'YES' : 'NO'}</div>
+            <div className="text-teal-400">Display Address: {displayAddress?.slice(0, 12) + '...' || 'NONE'}</div>
+            <div className="text-rose-400">Error: {depositError || 'None'}</div>
           </div>
           <div className="mt-2 pt-2 border-t border-gray-700">
             <div className="text-gray-400 text-xs">Env Vars:</div>
@@ -329,6 +390,15 @@ const DepositModal: FC<DepositModalProps> = ({
           </div>
         )}
         
+        {/* 🔧 FIXED: User initialization loading state */}
+        {initializingUser && (
+          <div className="bg-blue-800 p-4 rounded-md mb-6 text-center">
+            <Loader size={24} className="animate-spin text-blue-500 mx-auto mb-2" />
+            <div className="text-white text-sm">Initializing user account...</div>
+            <div className="text-gray-400 text-xs">Getting user ID from wallet address...</div>
+          </div>
+        )}
+        
         {/* Loading state for custodial deposit info */}
         {custodialOnlyMode && fetchingDepositInfo && (
           <div className="bg-gray-800 p-4 rounded-md mb-6 text-center">
@@ -343,17 +413,28 @@ const DepositModal: FC<DepositModalProps> = ({
           <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-500 p-3 rounded-md mb-4 text-sm">
             <div className="font-medium mb-1">❌ Error</div>
             <div className="text-xs">{depositError}</div>
-            <button
-              onClick={fetchCustodialDepositInfo}
-              className="mt-2 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs"
-            >
-              Retry API Call
-            </button>
+            {effectiveUserId ? (
+              <button
+                onClick={fetchCustodialDepositInfo}
+                className="mt-2 bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs"
+                disabled={fetchingDepositInfo}
+              >
+                {fetchingDepositInfo ? 'Retrying...' : 'Retry API Call'}
+              </button>
+            ) : (
+              <button
+                onClick={initializeUser}
+                className="mt-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs"
+                disabled={initializingUser}
+              >
+                {initializingUser ? 'Initializing...' : 'Initialize User'}
+              </button>
+            )}
           </div>
         )}
         
         {/* 🚩 FORCE SHOW: Show manual deposit info if custodial mode but no API data */}
-        {custodialOnlyMode && !custodialDepositInfo && !fetchingDepositInfo && (
+        {custodialOnlyMode && !custodialDepositInfo && !fetchingDepositInfo && !initializingUser && effectiveUserId && (
           <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-400 p-3 rounded-md mb-4 text-sm">
             <div className="font-medium mb-1">⚠️ Manual Deposit Info</div>
             <div className="text-xs mb-2">API call failed, showing manual deposit address:</div>
@@ -375,7 +456,7 @@ const DepositModal: FC<DepositModalProps> = ({
         )}
         
         {/* Show main content */}
-        {(!custodialOnlyMode || custodialDepositInfo || (!fetchingDepositInfo && depositError)) && (
+        {(!custodialOnlyMode || custodialDepositInfo || (!fetchingDepositInfo && !initializingUser && depositError)) && (
           <>
             {/* Network Info */}
             <div className="bg-gray-800 p-4 rounded-md mb-6">
@@ -480,17 +561,17 @@ const DepositModal: FC<DepositModalProps> = ({
             <div className="flex space-x-3">
               <button
                 onClick={onClose}
-                disabled={isLoading}
-                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-md transition-colors"
+                disabled={isLoading || initializingUser}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-md transition-colors disabled:opacity-50"
               >
                 Close
               </button>
               
               <button
                 onClick={handleDepositConfirmation}
-                disabled={isLoading}
+                disabled={isLoading || initializingUser}
                 className={`flex-1 px-4 py-2 rounded-md transition-colors flex items-center justify-center ${
-                  isLoading
+                  isLoading || initializingUser
                     ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
                     : 'bg-green-600 hover:bg-green-700 text-white'
                 }`}

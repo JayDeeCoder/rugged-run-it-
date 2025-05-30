@@ -1233,63 +1233,423 @@ const TradingControls: FC<TradingControlsProps> = ({
   };
 
   // Enhanced cashout with dual token support
-  const handleCashout = useCallback(async () => {
-    if (!authenticated || !walletAddress || !isConnected || !activeBet || !userId) {
-      return;
-    }
+  // 🔧 FIXED: Enhanced cashout with timeout and better error handling
+// ✅ MAINTAINS: Original UI/UX exactly as designed
+const handleCashout = useCallback(async () => {
+  if (!authenticated || !walletAddress || !isConnected || !activeBet || !userId) {
+    return;
+  }
 
-    setIsCashingOut(true);
-    try {
-      let success = false;
+  // Prevent multiple simultaneous cashout attempts
+  if (isCashingOut) {
+    return;
+  }
 
-      // Route cashout based on bet token type
-      if (activeBet.tokenType === TokenType.SOL) {
-        // Custodial SOL cashout
-        success = await new Promise<boolean>((resolve) => {
-          const socket = (window as any).gameSocket;
-          if (socket) {
-            socket.emit('custodialCashOut', { userId, walletAddress });
-            socket.once('custodialCashOutResult', (result: any) => {
-              if (result.success) {
-                updateCustodialBalance(); // Refresh custodial balance
-                resolve(true);
-              } else {
-                resolve(false);
-              }
-            });
+  setIsCashingOut(true);
+  try {
+    let success = false;
+
+    // Route cashout based on bet token type
+    if (activeBet.tokenType === TokenType.SOL) {
+      // Enhanced SOL cashout with timeout and better error handling
+      success = await new Promise<boolean>((resolve) => {
+        const socket = (window as any).gameSocket;
+        
+        if (!socket || !socket.connected) {
+          resolve(false);
+          return;
+        }
+
+        // Set up timeout to prevent hanging
+        const timeoutId = setTimeout(() => {
+          resolve(false);
+        }, 10000); // 10 second timeout
+
+        // Set up response handler
+        const handleCashoutResult = (result: any) => {
+          clearTimeout(timeoutId);
+          if (result.success) {
+            updateCustodialBalance(); // Refresh custodial balance
+            resolve(true);
           } else {
             resolve(false);
           }
+        };
+
+        // Register listeners (use once to prevent multiple responses)
+        socket.once('custodialCashOutResult', handleCashoutResult);
+        socket.once('error', () => {
+          clearTimeout(timeoutId);
+          resolve(false);
+        });
+        socket.once('disconnect', () => {
+          clearTimeout(timeoutId);
+          resolve(false);
         });
 
-        if (success) {
-          toast.success('Cashed out to SOL game balance!');
+        // Send cashout request
+        try {
+          socket.emit('custodialCashOut', { userId, walletAddress });
+        } catch (emitError) {
+          clearTimeout(timeoutId);
+          resolve(false);
         }
-      } else {
-        // RUGGED token cashout (existing logic)
-        const cashoutResult = await cashOut(walletAddress);
+      });
+
+      if (success) {
+        toast.success('Cashed out to SOL game balance!');
+      }
+    } else {
+      // Enhanced RUGGED token cashout with timeout
+      try {
+        const cashoutPromise = cashOut(walletAddress);
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('timeout')), 15000);
+        });
+
+        const cashoutResult = await Promise.race([cashoutPromise, timeoutPromise]);
         success = cashoutResult.success || false;
+        
         if (success) {
           updateRuggedBalance(); // Refresh RUGGED balance
           toast.success('Cashed out RUGGED tokens!');
         }
+      } catch (error) {
+        success = false;
       }
+    }
 
-      if (success) {
-        setActiveBet(null);
-        if (onSell) onSell(100);
-      } else {
-        setServerError('Failed to RUG');
-        toast.error('Failed to RUG');
-      }
-    } catch (error) {
-      console.error('Error cashing out:', error);
+    if (success) {
+      setActiveBet(null);
+      if (onSell) onSell(100);
+    } else {
       setServerError('Failed to RUG');
       toast.error('Failed to RUG');
-    } finally {
-      setIsCashingOut(false);
     }
-  }, [authenticated, walletAddress, isConnected, activeBet, cashOut, onSell, userId, updateCustodialBalance, updateRuggedBalance]);
+  } catch (error) {
+    console.error('Error cashing out:', error);
+    setServerError('Failed to RUG');
+    toast.error('Failed to RUG');
+  } finally {
+    setIsCashingOut(false);
+  }
+}, [authenticated, walletAddress, isConnected, activeBet, cashOut, onSell, userId, updateCustodialBalance, updateRuggedBalance, isCashingOut]);
+
+// 🔧 FIXED: Add connection recovery effect (no UI changes)
+useEffect(() => {
+  // If we lose connection during cashout, reset the state
+  if (!isConnected && isCashingOut) {
+    setIsCashingOut(false);
+    setServerError('Connection lost during cashout');
+    toast.error('Connection lost - please try cashing out again');
+  }
+}, [isConnected, isCashingOut]);
+
+// ✅ ORIGINAL: Keeping your exact BettingSection component unchanged
+// Just ensuring the RUG button respects the enhanced validation
+const BettingSection: FC<{
+  activeBet: ActiveBet | null;
+  amount: string;
+  onAmountChange: (amount: string) => void;
+  onQuickAmount: (amount: number) => void;
+  onPlaceBet: () => void;
+  onCashout: () => void;
+  quickAmounts: number[];
+  currentToken: TokenType;
+  activeBalance: number;
+  isPlacingBet: boolean;
+  isCashingOut: boolean;
+  isWalletReady: boolean;
+  canBet: boolean;
+  isWaitingPeriod: boolean;
+  gameStatus: string;
+  isConnected: boolean;
+  currentMultiplier: number;
+  isMobile: boolean;
+  betValidationError?: string;
+}> = ({
+  activeBet,
+  amount,
+  onAmountChange,
+  onQuickAmount,
+  onPlaceBet,
+  onCashout,
+  quickAmounts,
+  currentToken,
+  activeBalance,
+  isPlacingBet,
+  isCashingOut,
+  isWalletReady,
+  canBet,
+  isWaitingPeriod,
+  gameStatus,
+  isConnected,
+  currentMultiplier,
+  isMobile,
+  betValidationError
+}) => {
+  const amountNum = parseFloat(amount);
+  const amountValid = !isNaN(amountNum) && amountNum > 0 && amountNum <= activeBalance;
+  
+  // Different min/max based on token type
+  const minBetAmount = currentToken === TokenType.SOL ? 0.001 : 1;
+  const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
+  
+  const amountInRange = amountNum >= minBetAmount && amountNum <= maxBetAmount;
+
+  if (isMobile) {
+    return (
+      <div>
+        {!activeBet ? (
+          <>
+            <div className="mb-2">
+              <div className="flex gap-1 mb-1">
+                <input
+                  type="text"
+                  value={amount}
+                  onChange={(e) => onAmountChange(e.target.value)}
+                  className="flex-1 bg-gray-700 text-white px-2 py-1.5 rounded text-sm focus:outline-none"
+                  placeholder={`Min: ${minBetAmount}`}
+                  disabled={!canBet}
+                />
+                <button
+                  onClick={() => onQuickAmount(activeBalance * 0.5)}
+                  className="bg-gray-600 text-gray-300 px-2 text-xs rounded hover:bg-gray-500"
+                  disabled={!canBet}
+                >
+                  ½
+                </button>
+                <button
+                  onClick={() => onQuickAmount(Math.min(activeBalance, maxBetAmount))}
+                  className="bg-gray-600 text-gray-300 px-2 text-xs rounded hover:bg-gray-500"
+                  disabled={!canBet}
+                >
+                  Max
+                </button>
+              </div>
+              
+              <div className="grid grid-cols-4 gap-1">
+                {quickAmounts.map((amt) => (
+                  <button
+                    key={amt}
+                    onClick={() => onQuickAmount(amt)}
+                    className={`py-1 text-xs rounded transition-colors ${
+                      parseFloat(amount) === amt
+                        ? 'bg-green-600 text-white'
+                        : 'bg-gray-700 text-gray-300'
+                    }`}
+                    disabled={!canBet}
+                  >
+                    {amt}
+                  </button>
+                ))}
+              </div>
+
+              {betValidationError && (
+                <div className="text-red-400 text-xs mt-1">{betValidationError}</div>
+              )}
+            </div>
+          </>
+        ) : null}
+        
+        <div className="grid grid-cols-2 gap-2">
+          {!activeBet ? (
+            <>
+              <button
+                onClick={onPlaceBet}
+                disabled={isPlacingBet || !isWalletReady || !amountValid || !amountInRange || !canBet}
+                className={`py-2.5 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
+                  isPlacingBet || !isWalletReady || !amountValid || !amountInRange || !canBet
+                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-green-600 hover:bg-green-700 text-white'
+                }`}
+              >
+                {isPlacingBet ? (
+                  <>
+                    <div className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full mr-1"></div>
+                    Placing
+                  </>
+                ) : (
+                  <>
+                    <Coins className="mr-1 h-4 w-4" />
+                    {isWaitingPeriod ? 'SNIPE' : 'BUY'}
+                  </>
+                )}
+              </button>
+              <button
+                disabled
+                className="py-2.5 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
+              >
+                <Sparkles className="mr-1 h-4 w-4" />
+                RUG
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                disabled
+                className="py-2.5 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
+              >
+                <Coins className="mr-1 h-4 w-4" />
+                Buy Active
+              </button>
+              <button
+                onClick={onCashout}
+                disabled={isCashingOut || !isConnected || gameStatus !== 'active'}
+                className={`py-2.5 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
+                  isCashingOut || !isConnected || gameStatus !== 'active'
+                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-yellow-600 hover:bg-yellow-700 text-white'
+                }`}
+              >
+                {isCashingOut ? (
+                  <>
+                    <div className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full mr-1"></div>
+                    Cashing
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="mr-1 h-4 w-4" />
+                    RUG
+                  </>
+                )}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-gray-800 pt-3">
+      <h3 className="text-sm font-bold text-gray-400 mb-3">
+        {activeBet ? 'ACTIVE BET' : 'PLACE BUY'}
+      </h3>
+      
+      {!activeBet && (
+        <>
+          <div className="mb-3">
+            <label className="block text-gray-400 text-xs mb-1">
+              Buy Amount ({currentToken}) - Min: {minBetAmount}, Max: {maxBetAmount}
+            </label>
+            <div className="flex">
+              <input
+                type="text"
+                value={amount}
+                onChange={(e) => onAmountChange(e.target.value)}
+                className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-l-md focus:outline-none"
+                placeholder={`Min: ${minBetAmount}`}
+                disabled={!canBet}
+              />
+              <button
+                onClick={() => onQuickAmount(activeBalance * 0.5)}
+                className="bg-gray-600 text-gray-300 px-2 text-xs border-l border-gray-900 hover:bg-gray-500"
+                disabled={!canBet}
+              >
+                Half
+              </button>
+              <button
+                onClick={() => onQuickAmount(Math.min(activeBalance, maxBetAmount))}
+                className="bg-gray-600 text-gray-300 px-2 text-xs rounded-r-md hover:bg-gray-500"
+                disabled={!canBet}
+              >
+                Max
+              </button>
+            </div>
+            
+            {betValidationError && (
+              <div className="text-red-400 text-xs mt-1">{betValidationError}</div>
+            )}
+          </div>
+          
+          <div className="grid grid-cols-4 gap-2 mb-3">
+            {quickAmounts.map((amt) => (
+              <button
+                key={amt}
+                onClick={() => onQuickAmount(amt)}
+                className={`px-2 py-1 text-xs rounded transition-colors ${
+                  parseFloat(amount) === amt
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                }`}
+                disabled={!canBet}
+              >
+                {amt.toString()} {currentToken}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      
+      <div className="grid grid-cols-2 gap-3">
+        {!activeBet ? (
+          <>
+            <button
+              onClick={onPlaceBet}
+              disabled={isPlacingBet || !isWalletReady || !amountValid || !amountInRange || !canBet}
+              className={`py-3 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
+                isPlacingBet || !isWalletReady || !amountValid || !amountInRange || !canBet
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  : 'bg-green-600 hover:bg-green-700 text-white'
+              }`}
+            >
+              {isPlacingBet ? (
+                <>
+                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                  Placing...
+                </>
+              ) : (
+                <>
+                  <Coins className="mr-2 h-4 w-4" />
+                  {isWaitingPeriod ? 'SNIPE' : 'BUY'}
+                </>
+              )}
+            </button>
+            <button
+              disabled
+              className="py-3 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
+            >
+              <Sparkles className="mr-2 h-4 w-4" />
+              RUG
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              disabled
+              className="py-3 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
+            >
+              <Coins className="mr-2 h-4 w-4" />
+              Buy Placed
+            </button>
+            <button
+              onClick={onCashout}
+              disabled={isCashingOut || !isConnected || gameStatus !== 'active'}
+              className={`py-3 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
+                isCashingOut || !isConnected || gameStatus !== 'active'
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  : 'bg-yellow-600 hover:bg-yellow-700 text-white'
+              }`}
+            >
+              {isCashingOut ? (
+                <>
+                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                  Cashing...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  RUG ({currentMultiplier.toFixed(2)}x)
+                </>
+              )}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
 
   // Auto cashout effect
   useEffect(() => {
@@ -1586,6 +1946,7 @@ const TradingControls: FC<TradingControlsProps> = ({
           onClose={() => setShowDepositModal(false)}
           currentToken={currentToken}
           walletAddress={walletAddress}
+          userId={userId}
         />
         
         <WithdrawModal 
@@ -1699,7 +2060,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         currentToken={currentToken}
         balance={activeBalance}
         walletAddress={walletAddress}
-        userId={userId || null}
+        userId={userId}
       />
     </div>
   );

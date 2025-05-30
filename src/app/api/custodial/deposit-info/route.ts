@@ -1,19 +1,47 @@
-// app/api/custodial/deposit-info/route.ts
+// app/api/custodial/deposit-info/route.ts - FIXED with better environment variable handling
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {
     console.log('🏦 Getting deposit information for custodial mode...');
     
-    const HOUSE_WALLET_ADDRESS = process.env.HOUSE_WALLET_ADDRESS || process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS;
+    // FIXED: Better environment variable detection with detailed logging
+    const possibleHouseWallets = [
+      process.env.HOUSE_WALLET_ADDRESS,
+      process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS,
+      process.env.REACT_APP_HOUSE_WALLET_ADDRESS,
+      // Add fallback if all else fails
+      '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56' // Your existing fallback
+    ];
+    
+    console.log('🔍 Environment variable check:', {
+      HOUSE_WALLET_ADDRESS: !!process.env.HOUSE_WALLET_ADDRESS,
+      NEXT_PUBLIC_HOUSE_WALLET_ADDRESS: !!process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS,
+      REACT_APP_HOUSE_WALLET_ADDRESS: !!process.env.REACT_APP_HOUSE_WALLET_ADDRESS,
+      NODE_ENV: process.env.NODE_ENV,
+      allEnvKeys: Object.keys(process.env).filter(key => key.includes('HOUSE')),
+    });
+    
+    const HOUSE_WALLET_ADDRESS = possibleHouseWallets.find(addr => addr && addr.length > 0);
     
     if (!HOUSE_WALLET_ADDRESS) {
-      console.error('❌ House wallet address not configured');
+      console.error('❌ No house wallet address found in any environment variable');
+      console.error('Available env variables:', Object.keys(process.env).filter(key => key.includes('WALLET') || key.includes('HOUSE')));
+      
       return NextResponse.json(
-        { error: 'Deposit service not available. House wallet not configured.' },
+        { 
+          error: 'House wallet not configured',
+          details: 'No valid house wallet address found in environment variables',
+          debug: {
+            checkedVariables: ['HOUSE_WALLET_ADDRESS', 'NEXT_PUBLIC_HOUSE_WALLET_ADDRESS', 'REACT_APP_HOUSE_WALLET_ADDRESS'],
+            foundVariables: Object.keys(process.env).filter(key => key.includes('HOUSE') || key.includes('WALLET'))
+          }
+        },
         { status: 500 }
       );
     }
+
+    console.log(`✅ Using house wallet: ${HOUSE_WALLET_ADDRESS.slice(0, 8)}...${HOUSE_WALLET_ADDRESS.slice(-8)}`);
 
     const body = await request.json();
     const { userId, amount } = body;
@@ -26,7 +54,7 @@ export async function POST(request: NextRequest) {
       depositInfo: {
         depositAddress: HOUSE_WALLET_ADDRESS,
         requestedAmount: amount || 'Any amount',
-        minDeposit: 0.002,
+        minDeposit: 0.001, // FIXED: Changed from 0.002 to match your game config
         maxDeposit: 100,
         network: 'Solana Mainnet',
         mode: 'custodial'
@@ -52,6 +80,7 @@ export async function POST(request: NextRequest) {
       depositAddress: HOUSE_WALLET_ADDRESS, // Make it easy to copy
       qrCodeUrl: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${HOUSE_WALLET_ADDRESS}`,
       explorerUrl: `https://solscan.io/account/${HOUSE_WALLET_ADDRESS}`,
+      environmentSource: possibleHouseWallets.findIndex(addr => addr === HOUSE_WALLET_ADDRESS), // Debug info
       timestamp: new Date().toISOString()
     });
 
@@ -72,9 +101,21 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
     
-    const HOUSE_WALLET_ADDRESS = process.env.HOUSE_WALLET_ADDRESS || process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS;
+    // Same improved environment variable handling
+    const possibleHouseWallets = [
+      process.env.HOUSE_WALLET_ADDRESS,
+      process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS,
+      process.env.REACT_APP_HOUSE_WALLET_ADDRESS,
+      '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56'
+    ];
     
-    console.log('📋 GET deposit info request:', { userId, hasHouseWallet: !!HOUSE_WALLET_ADDRESS });
+    const HOUSE_WALLET_ADDRESS = possibleHouseWallets.find(addr => addr && addr.length > 0);
+    
+    console.log('📋 GET deposit info request:', { 
+      userId, 
+      hasHouseWallet: !!HOUSE_WALLET_ADDRESS,
+      sourceIndex: possibleHouseWallets.findIndex(addr => addr === HOUSE_WALLET_ADDRESS)
+    });
     
     return NextResponse.json({
       message: 'Custodial deposit information endpoint',
@@ -83,7 +124,7 @@ export async function GET(request: NextRequest) {
       mode: 'custodial',
       network: 'Solana Mainnet',
       limits: {
-        minDeposit: 0.002,
+        minDeposit: 0.001,
         maxDeposit: 100,
         note: 'No daily deposit limits in custodial mode'
       },
@@ -94,6 +135,11 @@ export async function GET(request: NextRequest) {
         'Blockchain explorer integration',
         'Real-time deposit tracking'
       ],
+      debug: {
+        environmentVariables: Object.keys(process.env).filter(key => key.includes('HOUSE') || key.includes('WALLET')),
+        foundHouseWallet: !!HOUSE_WALLET_ADDRESS,
+        walletPreview: HOUSE_WALLET_ADDRESS ? `${HOUSE_WALLET_ADDRESS.slice(0, 8)}...${HOUSE_WALLET_ADDRESS.slice(-8)}` : 'None'
+      },
       timestamp: new Date().toISOString()
     });
     

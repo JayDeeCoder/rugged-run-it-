@@ -4,7 +4,7 @@ import { usePrivy } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
-import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, QrCode, RefreshCw } from 'lucide-react';
+import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, QrCode, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
@@ -96,6 +96,7 @@ const DepositModal: FC<DepositModalProps> = ({
   const [custodialDepositInfo, setCustodialDepositInfo] = useState<CustodialDepositResponse | null>(null);
   const [fetchingDepositInfo, setFetchingDepositInfo] = useState<boolean>(false);
   const [serverConfigError, setServerConfigError] = useState<boolean>(false);
+  const [showDebugInfo, setShowDebugInfo] = useState<boolean>(false);
   const [hasAttemptedFetch, setHasAttemptedFetch] = useState<boolean>(false);
   
   const modalRef = useRef<HTMLDivElement>(null);
@@ -363,10 +364,10 @@ const DepositModal: FC<DepositModalProps> = ({
   if (!isOpen) return null;
   
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-2">
       <div 
         ref={modalRef} 
-        className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
+        className="bg-[#0d0d0f] border border-gray-800 rounded-lg w-full max-w-sm max-h-[90vh] overflow-y-auto shadow-xl"
       >
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
@@ -404,8 +405,8 @@ const DepositModal: FC<DepositModalProps> = ({
             </button>
           </div>
         ) : (
-          <>
-            {/* FIXED: Improved debug info */}
+          <div className="p-4">
+            {/* MOBILE-OPTIMIZED: Improved debug info */}
             {process.env.NODE_ENV === 'development' && (
               <div className="bg-gray-900 p-3 rounded mb-4 text-xs space-y-1">
                 <div className="text-gray-400 font-bold">🔍 Debug Info:</div>
@@ -466,18 +467,18 @@ const DepositModal: FC<DepositModalProps> = ({
               </div>
             )}
             
-            {/* Loading states */}
+            {/* Loading states - Mobile optimized */}
             {fetchingUserId && (
-              <div className="bg-blue-800 p-4 rounded-md mb-6 text-center">
-                <Loader size={24} className="animate-spin text-blue-500 mx-auto mb-2" />
-                <div className="text-white text-sm">Initializing user account...</div>
-                <div className="text-gray-400 text-xs">Getting user ID from wallet address...</div>
+              <div className="bg-blue-800 p-3 rounded-md mb-4 text-center">
+                <Loader size={20} className="animate-spin text-blue-500 mx-auto mb-2" />
+                <div className="text-white text-sm">Initializing account...</div>
+                <div className="text-gray-400 text-xs">Getting user ID...</div>
               </div>
             )}
             
             {fetchingDepositInfo && (
-              <div className="bg-gray-800 p-4 rounded-md mb-6 text-center">
-                <Loader size={24} className="animate-spin text-green-500 mx-auto mb-2" />
+              <div className="bg-gray-800 p-3 rounded-md mb-4 text-center">
+                <Loader size={20} className="animate-spin text-green-500 mx-auto mb-2" />
                 <div className="text-white text-sm">Getting deposit address...</div>
                 <div className="text-gray-400 text-xs">Contacting server...</div>
               </div>
@@ -528,11 +529,11 @@ const DepositModal: FC<DepositModalProps> = ({
               </div>
             )}
             
-            {/* Address display */}
+            {/* Address display - Mobile optimized */}
             {displayAddress && (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div>
-                  <label className="block text-sm text-gray-400 mb-2">
+                  <label className="block text-xs text-gray-400 mb-2">
                     {custodialOnlyMode ? 'Send SOL to this Address' : 'Your Deposit Address'}
                     {serverConfigError && (
                       <span className="ml-2 text-xs text-orange-400">(Fallback Address)</span>
@@ -542,7 +543,7 @@ const DepositModal: FC<DepositModalProps> = ({
                   <div className="bg-gray-800 border border-gray-700 rounded-md p-3">
                     <div className="flex items-center justify-between">
                       <div className="flex-1 mr-2">
-                        <div className="text-white font-mono text-sm break-all">
+                        <div className="text-white font-mono text-xs break-all">
                           {displayAddress}
                         </div>
                       </div>
@@ -552,12 +553,12 @@ const DepositModal: FC<DepositModalProps> = ({
                       >
                         {copied ? (
                           <>
-                            <Check size={14} className="mr-1" />
+                            <Check size={12} className="mr-1" />
                             Copied
                           </>
                         ) : (
                           <>
-                            <Copy size={14} className="mr-1" />
+                            <Copy size={12} className="mr-1" />
                             Copy
                           </>
                         )}
@@ -566,23 +567,23 @@ const DepositModal: FC<DepositModalProps> = ({
                   </div>
                 </div>
                 
-                {/* QR Code toggle */}
+                {/* QR Code toggle - Mobile optimized */}
                 <div className="flex justify-center">
                   <button
                     onClick={() => setShowQR(!showQR)}
-                    className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors"
+                    className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md transition-colors text-sm"
                   >
-                    <QrCode size={16} className="mr-2" />
-                    {showQR ? 'Hide QR Code' : 'Show QR Code'}
+                    <QrCode size={14} className="mr-2" />
+                    {showQR ? 'Hide QR' : 'Show QR'}
                   </button>
                 </div>
                 
-                {/* QR Code display */}
+                {/* QR Code display - Mobile optimized */}
                 {showQR && (
-                  <div className="flex justify-center bg-white p-4 rounded-lg">
+                  <div className="flex justify-center bg-white p-3 rounded-lg">
                     <QRCodeSVG 
                       value={displayAddress} 
-                      size={200}
+                      size={150} // Smaller for mobile
                       level="M"
                       includeMargin={true}
                     />
@@ -647,7 +648,7 @@ const DepositModal: FC<DepositModalProps> = ({
                 </button>
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>

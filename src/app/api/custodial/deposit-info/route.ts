@@ -26,8 +26,8 @@ export async function POST(request: NextRequest) {
       depositInfo: {
         depositAddress: HOUSE_WALLET_ADDRESS,
         requestedAmount: amount || 'Any amount',
-        minDeposit: 0.001,
-        maxDeposit: 1000,
+        minDeposit: 0.002,
+        maxDeposit: 100,
         network: 'Solana Mainnet',
         mode: 'custodial'
       },
@@ -83,8 +83,8 @@ export async function GET(request: NextRequest) {
       mode: 'custodial',
       network: 'Solana Mainnet',
       limits: {
-        minDeposit: 0.001,
-        maxDeposit: 1000,
+        minDeposit: 0.002,
+        maxDeposit: 100,
         note: 'No daily deposit limits in custodial mode'
       },
       instructions: 'Send SOL to the deposit address to credit your game balance',

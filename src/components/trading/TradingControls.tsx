@@ -1155,10 +1155,10 @@ const TradingControls: FC<TradingControlsProps> = ({
 
   console.log('💰 TradingControls Balance Debug:', {
     currentToken,
-    embeddedWalletBalance: embeddedWalletBalance.toFixed(6),
-    custodialBalance: custodialBalance.toFixed(6), 
-    ruggedBalance: ruggedBalance.toFixed(6),
-    activeBalance: activeBalance.toFixed(6),
+    embeddedWalletBalance: embeddedWalletBalance.toFixed(3),
+    custodialBalance: custodialBalance.toFixed(3), 
+    ruggedBalance: ruggedBalance.toFixed(3),
+    activeBalance: activeBalance.toFixed(3),
     gamingBalance: 'custodial', // Now using custodial for gaming
     embeddedWalletLoading
   });
@@ -1166,7 +1166,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   // Validation error message
   const getBetValidationError = () => {
     const amountNum = parseFloat(amount);
-    const minBetAmount = currentToken === TokenType.SOL ? 0.001 : 1;
+    const minBetAmount = currentToken === TokenType.SOL ? 0.002 : 1;
     const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
     
     if (isNaN(amountNum) || amountNum <= 0) return 'Enter valid amount';

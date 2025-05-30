@@ -5,9 +5,9 @@ import { createClient } from '@supabase/supabase-js';
 import bs58 from 'bs58';
 
 // Withdrawal limits for custodial-only mode
-const DAILY_WITHDRAWAL_LIMIT = 100.0; // 100 SOL per day (higher than hybrid mode)
-const MIN_WITHDRAWAL = 0.001;
-const MAX_SINGLE_WITHDRAWAL = 50.0; // 50 SOL per transaction
+const DAILY_WITHDRAWAL_LIMIT = 20.0; // 20 SOL per day (higher than hybrid mode)
+const MIN_WITHDRAWAL = 0.002;
+const MAX_SINGLE_WITHDRAWAL = 5.0; // 50 SOL per transaction
 
 async function checkDailyWithdrawalLimit(supabase: any, userId: string, amount: number): Promise<{ allowed: boolean; used: number; remaining: number }> {
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format

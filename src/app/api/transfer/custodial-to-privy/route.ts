@@ -5,9 +5,9 @@ import { createClient } from '@supabase/supabase-js';
 import bs58 from 'bs58';
 
 // Minimum transfer amount
-const MIN_TRANSFER = 0.001;
+const MIN_TRANSFER = 0.002;
 // Daily transfer limits (optional - you can adjust or remove)
-const DAILY_TRANSFER_LIMIT = 50.0; // 50 SOL per day
+const DAILY_TRANSFER_LIMIT = 20.0; // 50 SOL per day
 
 async function checkDailyTransferLimit(supabase: any, userId: string, amount: number): Promise<{ allowed: boolean; used: number; remaining: number }> {
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
@@ -242,7 +242,7 @@ export async function POST(request: NextRequest) {
     // Get updated daily limit info
     const updatedDailyCheck = await checkDailyTransferLimit(supabase, userId, 0);
     
-    console.log(`✅ Custodial to Privy transfer completed: ${amount} SOL, New custodial balance: ${newCustodialBalance.toFixed(6)} SOL, New embedded balance: ${newEmbeddedBalance.toFixed(6)} SOL`);
+    console.log(`✅ Custodial to Privy transfer completed: ${amount} SOL, New custodial balance: ${newCustodialBalance.toFixed(3)} SOL, New embedded balance: ${newEmbeddedBalance.toFixed(3)} SOL`);
     
     return NextResponse.json({
       success: true,

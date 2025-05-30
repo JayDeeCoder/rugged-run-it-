@@ -14,7 +14,7 @@ const connection = new Connection(
 );
 
 // Load house wallet securely using environment variables or secret management
-const HOUSE_PRIVATE_KEY = process.env.SOLANA_HOUSE_WALLET_PRIVATE_KEY || '';
+const HOUSE_PRIVATE_KEY = process.env.HOUSE_WALLET_PRIVATE_KEY || '';
 let houseKeypair: Keypair;
 
 try {

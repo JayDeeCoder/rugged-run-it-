@@ -38,7 +38,7 @@ export interface EmbeddedWallet {
 export class RuggedGameService {
   // House wallet address - funds go here when users get rugged
   private static HOUSE_WALLET_ADDRESS = process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS || 
-                                       'J85gzK8UMx95GXCHXWYzoKwVt453nCSVFDaa9CVRGgkn';
+                                       '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
   
   // Keep track of game states
   private activeGames: Map<string, GameState> = new Map();

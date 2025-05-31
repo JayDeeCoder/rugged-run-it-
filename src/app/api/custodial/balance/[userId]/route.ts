@@ -1,4 +1,4 @@
-// app/api/custodial/balance/[userId]/route.ts
+// app/api/custodial/balance/[userId]/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -7,8 +7,7 @@ export async function GET(
   { params }: { params: { userId: string } }
 ) {
   try {
-    // Initialize Supabase client INSIDE the handler
-    // Try multiple possible variable names
+    // Initialize Supabase client
     const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
     const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
     
@@ -34,49 +33,71 @@ export async function GET(
       );
     }
     
-    console.log('🔍 Getting custodial balance for user:', userId);
+    console.log('🔍 Getting FRESH custodial balance for user:', userId);
     
-    // Get user's hybrid wallet data
-    const { data: userWallet, error: walletError } = await supabase
-      .from('user_hybrid_wallets')
-      .select('*')
+    // 🔧 CRITICAL FIX: Read from the SAME table the game server writes to
+    const { data: userProfile, error: profileError } = await supabase
+      .from('user_profiles') // ← This is the key change!
+      .select(`
+        user_id,
+        username,
+        custodial_balance,
+        privy_balance,
+        total_balance,
+        external_wallet_address,
+        custodial_total_deposited,
+        last_custodial_deposit,
+        embedded_wallet_id,
+        total_transfers_to_embedded,
+        total_transfers_to_custodial,
+        updated_at,
+        created_at
+      `)
       .eq('user_id', userId)
       .single();
     
-    if (walletError || !userWallet) {
-      // User doesn't have a custodial wallet yet
+    if (profileError || !userProfile) {
+      console.log(`❌ User profile not found for ${userId}:`, profileError);
+      
+      // User doesn't exist - return default values
       return NextResponse.json({
         userId,
         custodialBalance: 0,
         totalDeposited: 0,
         lastDeposit: 0,
         hasWallet: false,
-        message: 'No custodial wallet found. User needs to make a deposit first.',
+        message: 'User not found. Please register first.',
         timestamp: Date.now()
       });
     }
     
-    const custodialBalance = parseFloat(userWallet.custodial_balance) || 0;
-    const totalDeposited = parseFloat(userWallet.custodial_total_deposited) || 0;
-    const lastDeposit = userWallet.last_custodial_deposit ? 
-      new Date(userWallet.last_custodial_deposit).getTime() : 0;
+    // 🔧 FIXED: Use the same balance fields as the game server
+    const custodialBalance = parseFloat(userProfile.custodial_balance) || 0;
+    const privyBalance = parseFloat(userProfile.privy_balance) || 0;
+    const totalBalance = parseFloat(userProfile.total_balance) || 0;
+    const totalDeposited = parseFloat(userProfile.custodial_total_deposited) || 0;
+    const lastDeposit = userProfile.last_custodial_deposit ? 
+      new Date(userProfile.last_custodial_deposit).getTime() : 0;
     
-    console.log(`💰 Custodial balance for ${userId}: ${custodialBalance.toFixed(6)} SOL`);
+    console.log(`💰 FRESH custodial balance for ${userId}: ${custodialBalance.toFixed(6)} SOL (from user_profiles table)`);
     
     return NextResponse.json({
       userId,
-      custodialBalance,
+      custodialBalance,           // ← This will now match the game server
+      totalBalance,
+      privyBalance,
+      embeddedBalance: privyBalance, // Alias for compatibility
       totalDeposited,
       lastDeposit,
       hasWallet: true,
-      walletAddress: userWallet.external_wallet_address,
+      walletAddress: userProfile.external_wallet_address,
       canBet: custodialBalance >= 0.001,
       canWithdraw: custodialBalance > 0,
-      embeddedBalance: parseFloat(userWallet.embedded_balance) || 0,
-      embeddedWalletId: userWallet.embedded_wallet_id,
-      totalTransfersToEmbedded: parseFloat(userWallet.total_transfers_to_embedded) || 0,
-      totalTransfersToCustodial: parseFloat(userWallet.total_transfers_to_custodial) || 0,
-      lastActivity: userWallet.updated_at,
+      embeddedWalletId: userProfile.embedded_wallet_id,
+      totalTransfersToEmbedded: parseFloat(userProfile.total_transfers_to_embedded) || 0,
+      totalTransfersToCustodial: parseFloat(userProfile.total_transfers_to_custodial) || 0,
+      lastActivity: userProfile.updated_at,
+      source: 'user_profiles_table', // 🔧 NEW: Indicate the data source
       timestamp: Date.now()
     });
     
@@ -92,14 +113,41 @@ export async function GET(
   }
 }
 
-// Optional: Handle other HTTP methods
-export async function POST() {
-  return NextResponse.json(
-    { error: 'Method not allowed. Use GET to retrieve balance.' },
-    { status: 405 }
-  );
+// 🔧 ENHANCED: Add POST method for force refresh
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { userId: string } }
+) {
+  try {
+    const { userId } = params;
+    const body = await request.json();
+    
+    // Handle force refresh requests
+    if (body.action === 'refresh') {
+      console.log(`🔄 Force refresh requested for user: ${userId}`);
+      
+      // Simply return fresh data (same as GET)
+      return GET(request, { params });
+    }
+    
+    return NextResponse.json(
+      { error: 'Unsupported POST action. Use action: "refresh" to force refresh.' },
+      { status: 400 }
+    );
+    
+  } catch (error) {
+    console.error('❌ Error in POST handler:', error);
+    return NextResponse.json(
+      { 
+        error: 'Failed to process POST request',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    );
+  }
 }
 
+// Keep the other methods as-is
 export async function PUT() {
   return NextResponse.json(
     { error: 'Method not allowed. Use GET to retrieve balance.' },

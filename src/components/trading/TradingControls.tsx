@@ -1093,7 +1093,7 @@ const TradingControls: FC<TradingControlsProps> = ({
           initTimeout = setTimeout(() => {
             console.log(`📡 Initializing user via socket (one-time)...`);
             
-            const socket = (window as any).socket;
+            const socket = (window as any).gameSocket;
             if (socket) {
               socket.emit('initializeUser', {
                 userId: userData.id,
@@ -1177,7 +1177,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   useEffect(() => {
     if (!userId) return;
     
-    const socket = (window as any).socket;
+    const socket = (window as any).gameSocket;
     if (!socket) return;
     
     console.log(`🔌 Setting up socket listeners for user: ${userId}`);
@@ -1254,15 +1254,22 @@ const TradingControls: FC<TradingControlsProps> = ({
 
   // 🔧 FIXED: Optimized cashout with stable dependencies
   const handleCashout = useCallback(async () => {
-    if (!authenticated || !walletAddress || !isConnected || !activeBet || !userId) {
+    if (!authenticated || !walletAddress || !isConnected || !activeBet) {
       return;
     }
-
+  
+    // ✅ FIXED: Add null check for userId
+    if (!userId) {
+      setServerError('User not initialized');
+      toast.error('User not initialized');
+      return;
+    }
+  
     // Prevent multiple simultaneous attempts
     if (isCashingOut || operationTimeouts.has('cashout')) {
       return;
     }
-
+  
     setIsCashingOut(true);
     setOperationTimeouts(prev => new Set(prev).add('cashout'));
     
@@ -1277,20 +1284,21 @@ const TradingControls: FC<TradingControlsProps> = ({
       setServerError('Cashout timed out');
       toast.error('Cashout timed out - please try again');
     }, 15000);
-
+  
     try {
       let success = false;
-
+  
       if (activeBet.tokenType === TokenType.SOL) {
-        console.log('💸 Using custodialCashOut method...');
+        console.log('💸 Using custodialCashOut hook method...');
         
+        // ✅ FIXED: Use the hook method instead of direct socket access
         const result = await custodialCashOut(userId, walletAddress);
         success = result.success;
         
         if (success) {
           console.log('✅ Custodial cashout successful:', result);
           toast.success(`Cashed out: ${result.payout?.toFixed(3)} SOL`);
-          // Call update function directly
+          // Update balance immediately
           try {
             updateCustodialBalance();
           } catch (error) {
@@ -1325,7 +1333,7 @@ const TradingControls: FC<TradingControlsProps> = ({
           success = false;
         }
       }
-
+  
       if (success) {
         setActiveBet(null);
         if (onSell) onSell(100);
@@ -1346,8 +1354,8 @@ const TradingControls: FC<TradingControlsProps> = ({
         return newSet;
       });
     }
-  }, [authenticated, walletAddress, isConnected, activeBet, userId, isCashingOut, operationTimeouts, custodialCashOut, cashOut, onSell]); // Removed function dependencies
-
+  }, [authenticated, walletAddress, isConnected, activeBet, userId, isCashingOut, operationTimeouts, custodialCashOut, cashOut, onSell]); // Added custodialCashOut dependency
+  
   // Auto transfer function with stable dependencies
   const autoTransferToGameBalance = useCallback(async (amount: number) => {
     if (!embeddedWallet || !walletAddress || !userId) {
@@ -1608,138 +1616,123 @@ const TradingControls: FC<TradingControlsProps> = ({
       setServerError('Bet placement timed out');
       toast.error('Bet placement timed out - please try again');
     }, 15000);
+    // 🔧 FIXED: Add null check for userId before calling placeCustodialBet
+// 🔧 FIXED: Add null check for userId before calling placeCustodialBet
+try {
+  let success = false;
+  let entryMultiplier = gameState.gameStatus === 'waiting' ? 1.0 : gameState.activeCurrentMultiplier;
+
+  if (currentToken === TokenType.SOL) {
+    console.log('📡 Using placeCustodialBet hook method...');
     
-    try {
-      let success = false;
-      let entryMultiplier = gameState.gameStatus === 'waiting' ? 1.0 : gameState.activeCurrentMultiplier;
-
-      if (currentToken === TokenType.SOL) {
-        console.log('📡 Using custodial bet placement...');
-        
-        // Use socket for custodial betting
-        const socket = (window as any).socket;
-        if (socket) {
-          const betPromise = new Promise<any>((resolve, reject) => {
-            const timeoutId = setTimeout(() => {
-              reject(new Error('Socket timeout'));
-            }, 12000);
-
-            socket.emit('custodialBet', {
-              userId,
-              betAmount: amountNum
-            });
-
-            socket.once('custodialBetResult', (result: any) => {
-              clearTimeout(timeoutId);
-              resolve(result);
-            });
-          });
-
-          const result = await betPromise;
-          success = result.success;
-          
-          if (success) {
-            console.log('✅ Custodial bet placed successfully:', result);
-            entryMultiplier = result.entryMultiplier || entryMultiplier;
-            
-            // FIXED: Create and set active bet immediately
-            const newBet: ActiveBet = {
-              id: `custodial_bet_${Date.now()}`,
-              amount: amountNum,
-              entryMultiplier,
-              timestamp: Date.now(),
-              gameId: gameState.activeCurrentGame?.id || 'unknown',
-              tokenType: currentToken
-            };
-            
-            setActiveBet(newBet);
-            console.log('✅ Active bet set:', newBet);
-            
-            // Update balance immediately
-            try {
-              updateCustodialBalance();
-            } catch (error) {
-              console.warn('⚠️ Balance update failed:', error);
-            }
-          } else {
-            console.error('❌ Custodial bet failed:', result.reason);
-            setServerError(result.reason || 'Failed to place custodial bet');
-            toast.error(result.reason || 'Failed to place bet');
-          }
-        } else {
-          throw new Error('Socket connection not available');
-        }
-      } else {
-        // Use existing RUGGED token betting
-        console.log('📡 Using RUGGED token betting system...');
-        success = await placeBet(walletAddress, amountNum, userId || undefined);
-        
-        if (success) {
-          // Create and set active bet for RUGGED tokens
-          const newBet: ActiveBet = {
-            id: `rugged_bet_${Date.now()}`,
-            amount: amountNum,
-            entryMultiplier,
-            timestamp: Date.now(),
-            gameId: gameState.activeCurrentGame?.id || 'unknown',
-            tokenType: currentToken
-          };
-          
-          setActiveBet(newBet);
-          try {
-            updateRuggedBalance();
-          } catch (error) {
-            console.warn('⚠️ Balance update failed:', error);
-          }
-        }
-      }
-      
-      if (success) {
-        console.log('✅ Bet placed successfully - Entry:', entryMultiplier.toFixed(2) + 'x');
-        
-        const betType = gameState.gameStatus === 'waiting' ? 'Pre-game bet' : 'Bet';
-        const tokenDisplay = currentToken === TokenType.SOL ? 'SOL (game balance)' : 'RUGGED tokens';
-        toast.success(`${betType} placed: ${amountNum} ${tokenDisplay} (Entry: ${entryMultiplier.toFixed(2)}x)`);
-        
-        if (onBuy) onBuy(amountNum);
-      } else if (!serverError) {
-        const errorMsg = 'Failed to place buy - server returned false';
-        setServerError(errorMsg);
-        toast.error(errorMsg);
-      }
-    } catch (error) {
-      console.error('❌ Error placing bet:', error);
-      const errorMsg = `Failed to place buy: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      setServerError(errorMsg);
-      toast.error(errorMsg);
-    } finally {
-      clearTimeout(operationTimeout);
-      setIsPlacingBet(false);
-      setOperationTimeouts(prev => {
-        const newSet = new Set(prev);
-        newSet.delete('bet');
-        return newSet;
-      });
-      
-      console.log('🏁 Bet placement process completed');
+    // ✅ FIXED: Add null check for userId
+    if (!userId) {
+      throw new Error('User ID not available');
     }
-  }, [
-    amount, 
-    currentToken, 
-    activeBalance, 
-    isWalletReady, 
-    isConnected, 
-    gameState,
-    isWaitingPeriod, 
-    effectiveCanBet, 
-    userId, 
-    walletAddress, 
-    placeBet, 
-    onBuy,
-    isPlacingBet,
-    operationTimeouts,
-    serverError
-  ]); // Removed function dependencies
+    
+    // ✅ FIXED: Use the hook method with confirmed non-null userId
+    success = await placeCustodialBet(userId, amountNum);
+    
+    if (success) {
+      console.log('✅ Custodial bet placed successfully via hook');
+      
+      // FIXED: Create and set active bet immediately
+      const newBet: ActiveBet = {
+        id: `custodial_bet_${Date.now()}`,
+        amount: amountNum,
+        entryMultiplier,
+        timestamp: Date.now(),
+        gameId: gameState.activeCurrentGame?.id || 'unknown',
+        tokenType: currentToken
+      };
+      
+      setActiveBet(newBet);
+      console.log('✅ Active bet set:', newBet);
+      
+      // Update balance immediately
+      try {
+        updateCustodialBalance();
+      } catch (error) {
+        console.warn('⚠️ Balance update failed:', error);
+      }
+    } else {
+      console.error('❌ Custodial bet failed');
+      setServerError('Failed to place custodial bet');
+      toast.error('Failed to place bet');
+    }
+  } else {
+    // Use existing RUGGED token betting
+    console.log('📡 Using RUGGED token betting system...');
+    success = await placeBet(walletAddress, amountNum, userId || undefined);
+    
+    if (success) {
+      // Create and set active bet for RUGGED tokens
+      const newBet: ActiveBet = {
+        id: `rugged_bet_${Date.now()}`,
+        amount: amountNum,
+        entryMultiplier,
+        timestamp: Date.now(),
+        gameId: gameState.activeCurrentGame?.id || 'unknown',
+        tokenType: currentToken
+      };
+      
+      setActiveBet(newBet);
+      try {
+        updateRuggedBalance();
+      } catch (error) {
+        console.warn('⚠️ Balance update failed:', error);
+      }
+    }
+  }
+  
+  if (success) {
+    console.log('✅ Bet placed successfully - Entry:', entryMultiplier.toFixed(2) + 'x');
+    
+    const betType = gameState.gameStatus === 'waiting' ? 'Pre-game bet' : 'Bet';
+    const tokenDisplay = currentToken === TokenType.SOL ? 'SOL (game balance)' : 'RUGGED tokens';
+    toast.success(`${betType} placed: ${amountNum} ${tokenDisplay} (Entry: ${entryMultiplier.toFixed(2)}x)`);
+    
+    if (onBuy) onBuy(amountNum);
+  } else if (!serverError) {
+    const errorMsg = 'Failed to place buy - server returned false';
+    setServerError(errorMsg);
+    toast.error(errorMsg);
+  }
+} catch (error) {
+  console.error('❌ Error placing bet:', error);
+  const errorMsg = `Failed to place buy: ${error instanceof Error ? error.message : 'Unknown error'}`;
+  setServerError(errorMsg);
+  toast.error(errorMsg);
+} finally {
+  // ✅ FIXED: Remove the extra closing brace - finally belongs to the same try-catch
+  clearTimeout(operationTimeout);
+  setIsPlacingBet(false);
+  setOperationTimeouts(prev => {
+    const newSet = new Set(prev);
+    newSet.delete('bet');
+    return newSet;
+  });
+  
+  console.log('🏁 Bet placement process completed');
+}
+}, [
+amount, 
+currentToken, 
+activeBalance, 
+isWalletReady, 
+isConnected, 
+gameState,
+isWaitingPeriod, 
+effectiveCanBet, 
+userId, 
+walletAddress, 
+placeBet,
+placeCustodialBet, // ✅ ADD THIS LINE
+onBuy,
+isPlacingBet,
+operationTimeouts,
+serverError
+]); // Now includes placeCustodialBet dependency
 
   // Quick transfer amounts
   const quickTransferAmounts = [0.001, 0.01, 0.05, 0.1];

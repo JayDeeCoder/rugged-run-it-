@@ -128,7 +128,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
     // Store socket globally for other components
     (window as any).gameSocket = newSocket;
-
+    (window as any).socket = newSocket; // Add this for backward compatibility
     // Enhanced connection handler with better error handling
     newSocket.on('connect', () => {
       console.log('✅ Connected to enhanced game server');

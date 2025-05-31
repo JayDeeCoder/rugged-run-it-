@@ -1406,22 +1406,23 @@ const autoTransferToGameBalance = useCallback(async (amount: number) => {
     
     // ✅ ADD THIS: Manual trigger after successful transfer
     try {
-      console.log('🔧 Triggering manual deposit credit...');
-      const manualCredit = await fetch('/api/admin/manual-monitor', {
+      console.log('🔧 Forcing manual deposit credit...');
+      
+      // Try multiple manual credit approaches
+      const manualCredit = await fetch('/api/custodial/balance/' + userId, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          userId,
-          transactionSignature: signature,
-          amount 
+          action: 'credit',
+          amount: amount,
+          source: 'embedded_wallet_transfer',
+          transactionId: signature
         })
       });
       
-      if (manualCredit.ok) {
-        console.log('✅ Manual deposit credit triggered');
-      }
+      console.log('Manual credit response:', await manualCredit.text());
     } catch (error) {
-      console.log('⚠️ Manual credit failed, but transfer succeeded');
+      console.log('⚠️ Manual credit failed:', error);
     }
     
     // Refresh balances after a short delay to allow server processing

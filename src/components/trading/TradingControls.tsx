@@ -2041,27 +2041,33 @@ const BettingSection: FC<{
         countdownSeconds={countdownSeconds}
         serverError={serverError}
       />
-
-      <AirdropModal 
-        isOpen={showAirdropModal}
-        onClose={() => setShowAirdropModal(false)}
-      />
+      {showAirdropModal && (
+        <AirdropModal 
+          isOpen={showAirdropModal}
+          onClose={() => setShowAirdropModal(false)}
+        />
+      )}
       
-      <DepositModal 
-        isOpen={showDepositModal}
-        onClose={() => setShowDepositModal(false)}
-        currentToken={currentToken}
-        walletAddress={walletAddress}
-      />
+      {showDepositModal && (
+        <DepositModal 
+          isOpen={showDepositModal}
+          onClose={() => setShowDepositModal(false)}
+          currentToken={currentToken}
+          walletAddress={walletAddress}
+          userId={userId}
+        />
+      )}
       
-      <WithdrawModal 
-        isOpen={showWithdrawModal}
-        onClose={() => setShowWithdrawModal(false)}
-        currentToken={currentToken}
-        balance={activeBalance}
-        walletAddress={walletAddress}
-        userId={userId}
-      />
+      {showWithdrawModal && (
+        <WithdrawModal 
+          isOpen={showWithdrawModal}
+          onClose={() => setShowWithdrawModal(false)}
+          currentToken={currentToken}
+          balance={activeBalance}
+          walletAddress={walletAddress}
+          userId={userId}
+        />
+      )}
     </div>
   );
 };

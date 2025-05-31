@@ -1400,9 +1400,29 @@ const autoTransferToGameBalance = useCallback(async (amount: number) => {
     }
     
     console.log('✅ Transfer confirmed:', signature);
-    
+
     // Success! The deposit monitoring should pick this up automatically
     toast.success(`Transferred ${amount} SOL to game balance!`, { id: 'transfer' });
+    
+    // ✅ ADD THIS: Manual trigger after successful transfer
+    try {
+      console.log('🔧 Triggering manual deposit credit...');
+      const manualCredit = await fetch('/api/admin/manual-monitor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId,
+          transactionSignature: signature,
+          amount 
+        })
+      });
+      
+      if (manualCredit.ok) {
+        console.log('✅ Manual deposit credit triggered');
+      }
+    } catch (error) {
+      console.log('⚠️ Manual credit failed, but transfer succeeded');
+    }
     
     // Refresh balances after a short delay to allow server processing
     setTimeout(() => {
@@ -1430,6 +1450,7 @@ const autoTransferToGameBalance = useCallback(async (amount: number) => {
     return false;
   }
 }, [embeddedWallet, walletAddress, userId, embeddedWalletBalance, updateCustodialBalance]);
+
 
 // Quick transfer amounts
 const quickTransferAmounts = [0.001, 0.01, 0.05, 0.1];

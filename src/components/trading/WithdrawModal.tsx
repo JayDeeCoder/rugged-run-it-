@@ -176,30 +176,53 @@ const useCustodialBalance = (userId: string) => {
   }, [userId, loading]); // Stable dependencies
 
   // 🔧 NEW: Force refresh function for immediate updates
-  const forceRefresh = useCallback(async () => {
-    if (!userId) return;
+  // 🔧 NEW: Enhanced force refresh with cache busting and POST method
+const forceRefresh = useCallback(async () => {
+  if (!userId) return;
+  
+  console.log(`🔄 Force refreshing balance for ${userId}...`);
+  setLoading(true);
+  
+  try {
+    // Method 1: Try POST with refresh action first
+    const postResponse = await fetch(`/api/custodial/balance/${userId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'refresh' })
+    });
     
-    console.log(`🔄 WithdrawModal: Force refreshing balance for ${userId}...`);
-    setLoading(true);
-    
-    try {
-      const response = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}`); // Cache bust
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.custodialBalance !== undefined) {
-          const newBalance = parseFloat(data.custodialBalance) || 0;
-          console.log(`💰 WithdrawModal: Force refresh - Balance: ${newBalance.toFixed(6)} SOL`);
-          setCustodialBalance(newBalance);
-          setLastUpdated(Date.now());
-        }
+    if (postResponse.ok) {
+      const data = await postResponse.json();
+      if (data.custodialBalance !== undefined) {
+        const newBalance = parseFloat(data.custodialBalance) || 0;
+        console.log(`💰 Force refresh (POST): ${newBalance.toFixed(6)} SOL`);
+        setCustodialBalance(newBalance);
+        setLastUpdated(Date.now());
+        return;
       }
-    } catch (error) {
-      console.error('❌ WithdrawModal: Force refresh failed:', error);
-    } finally {
-      setLoading(false);
     }
-  }, [userId]);
+    
+    // Method 2: Fallback to GET with cache busting
+    const getResponse = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}&refresh=true`);
+    
+    if (getResponse.ok) {
+      const data = await getResponse.json();
+      if (data.custodialBalance !== undefined) {
+        const newBalance = parseFloat(data.custodialBalance) || 0;
+        console.log(`💰 Force refresh (GET): ${newBalance.toFixed(6)} SOL`);
+        setCustodialBalance(newBalance);
+        setLastUpdated(Date.now());
+      }
+    } else {
+      console.error('❌ Force refresh failed:', getResponse.status);
+    }
+    
+  } catch (error) {
+    console.error('❌ Force refresh error:', error);
+  } finally {
+    setLoading(false);
+  }
+}, [userId]);
 
   useEffect(() => {
     // Only set up polling if userId changes

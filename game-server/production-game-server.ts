@@ -1,4 +1,4 @@
-// production-game-server.ts - Complete Production-Ready Version 
+// production-game-server.ts - Complete Production-Ready Version with Enhanced Transaction Monitoring
 import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
@@ -1705,9 +1705,9 @@ let multiplierControl: MultiplierControl = {
     cooldownUntil: 0
 };
 
-// ===== TRANSACTION MONITORING SYSTEM =====
+// ===== ENHANCED TRANSACTION MONITORING SYSTEM =====
 
-// Main transaction monitoring function that writes to your database
+// FIXED: Enhanced transaction monitoring with proper house balance updates
 async function monitorAndUpdateDatabase(): Promise<void> {
     try {
         console.log('🔍 Monitoring house wallet transactions and updating database...');
@@ -1719,6 +1719,8 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                 limit: 20,
             }
         );
+
+        let balanceChanged = false; // Track if we need to update house balance
 
         for (const sigInfo of signatures) {
             // Skip if already processed
@@ -1745,173 +1747,196 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                 }
 
                 // Find transfer instruction to house wallet
-const transferInstruction = findTransferInstruction(transaction);
+                const transferInstruction = findTransferInstruction(transaction);
 
-// Method 1: Try balance change analysis first (works with Privy)
-let decoded: { fromPubkey: PublicKey; toPubkey: PublicKey; lamports: number } | null = null;
+                // Method 1: Try balance change analysis first (works with Privy)
+                let decoded: { fromPubkey: PublicKey; toPubkey: PublicKey; lamports: number } | null = null;
 
-try {
-    console.log('🔍 Attempting balance change analysis...');
-    
-    // Get pre and post balances
-    const preBalances = transaction.meta?.preBalances || [];
-    const postBalances = transaction.meta?.postBalances || [];
-    const accountKeys = transaction.transaction.message.accountKeys;
-    
-    // Find the house wallet in the account keys
-    const houseWalletIndex = accountKeys.findIndex(key => key.equals(housePublicKey));
-    
-    if (houseWalletIndex !== -1) {
-        // Calculate the change in house wallet balance
-        const preBalance = preBalances[houseWalletIndex] || 0;
-        const postBalance = postBalances[houseWalletIndex] || 0;
-        const balanceChange = postBalance - preBalance;
-        
-        console.log('🏠 House wallet balance change:', {
-            preBalance, postBalance, change: balanceChange
-        });
-        
-        if (balanceChange > 0) {
-            // Find the sender (account that lost balance)
-            for (let i = 0; i < accountKeys.length; i++) {
-                if (i !== houseWalletIndex) {
-                    const accountPreBalance = preBalances[i] || 0;
-                    const accountPostBalance = postBalances[i] || 0;
-                    const accountChange = accountPostBalance - accountPreBalance;
+                try {
+                    console.log('🔍 Attempting balance change analysis...');
                     
-                    // Look for account that lost approximately the same amount (accounting for fees)
-                    if (accountChange < 0 && Math.abs(Math.abs(accountChange) - balanceChange) < 10000) { // 0.00001 SOL tolerance
-                        decoded = {
-                            fromPubkey: accountKeys[i],
-                            toPubkey: housePublicKey,
-                            lamports: balanceChange
-                        };
-                        console.log('✅ Successfully decoded using balance analysis:', {
-                            from: decoded.fromPubkey.toString(),
-                            amount: balanceChange / LAMPORTS_PER_SOL
+                    const preBalances = transaction.meta?.preBalances || [];
+                    const postBalances = transaction.meta?.postBalances || [];
+                    const accountKeys = transaction.transaction.message.accountKeys;
+                    
+                    const houseWalletIndex = accountKeys.findIndex(key => key.equals(housePublicKey));
+                    
+                    if (houseWalletIndex !== -1) {
+                        const preBalance = preBalances[houseWalletIndex] || 0;
+                        const postBalance = postBalances[houseWalletIndex] || 0;
+                        const balanceChange = postBalance - preBalance;
+                        
+                        console.log('🏠 House wallet balance change:', {
+                            preBalance, postBalance, change: balanceChange
                         });
-                        break;
+                        
+                        if (balanceChange > 0) {
+                            // Find the sender (account that lost balance)
+                            for (let i = 0; i < accountKeys.length; i++) {
+                                if (i !== houseWalletIndex) {
+                                    const accountPreBalance = preBalances[i] || 0;
+                                    const accountPostBalance = postBalances[i] || 0;
+                                    const accountChange = accountPostBalance - accountPreBalance;
+                                    
+                                    if (accountChange < 0 && Math.abs(Math.abs(accountChange) - balanceChange) < 10000) {
+                                        decoded = {
+                                            fromPubkey: accountKeys[i],
+                                            toPubkey: housePublicKey,
+                                            lamports: balanceChange
+                                        };
+                                        console.log('✅ Successfully decoded using balance analysis:', {
+                                            from: decoded.fromPubkey.toString(),
+                                            amount: balanceChange / LAMPORTS_PER_SOL
+                                        });
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (balanceError) {
+                    console.log('⚠️ Balance analysis failed:', balanceError);
+                }
+
+                // Method 2: Fallback to instruction decoding
+                if (!decoded && transferInstruction) {
+                    try {
+                        console.log('🔍 Falling back to instruction decoding...');
+                        decoded = decodeTransferInstruction(transferInstruction);
+                        console.log('✅ Successfully decoded using instruction method');
+                    } catch (instructionError) {
+                        console.log('❌ Instruction decoding also failed:', instructionError);
                     }
                 }
-            }
-        }
-    }
-} catch (balanceError) {
-    console.log('⚠️ Balance analysis failed:', balanceError);
-}
 
-// Method 2: Fallback to instruction decoding (for standard transfers)
-if (!decoded && transferInstruction) {
-    try {
-        console.log('🔍 Falling back to instruction decoding...');
-        decoded = decodeTransferInstruction(transferInstruction);
-        console.log('✅ Successfully decoded using instruction method');
-    } catch (instructionError) {
-        console.log('❌ Instruction decoding also failed:', instructionError);
-    }
-}
+                // Process the deposit if we successfully decoded it
+                if (decoded) {
+                    // Check if this is a transfer TO the house wallet (incoming deposit)
+                    if (decoded.toPubkey.equals(housePublicKey)) {
+                        const fromAddress = decoded.fromPubkey.toString();
+                        const amount = decoded.lamports / LAMPORTS_PER_SOL;
+                        
+                        console.log(`💰 Detected incoming deposit: ${amount} SOL from ${fromAddress}`);
+                        
+                        // 🔧 CRITICAL FIX: Set flag to update house balance
+                        balanceChanged = true;
+                        
+                        // Try to find user by wallet address in database
+                        const { data: existingWallet, error: walletError } = await supabaseService
+                            .from('user_hybrid_wallets')
+                            .select('*')
+                            .eq('external_wallet_address', fromAddress)
+                            .single();
 
-// Process the deposit if we successfully decoded it
-if (decoded) {
-    // Check if this is a transfer TO the house wallet (incoming deposit)
-    if (decoded.toPubkey.equals(housePublicKey)) {
-        const fromAddress = decoded.fromPubkey.toString();
-        const amount = decoded.lamports / LAMPORTS_PER_SOL;
-        
-        console.log(`💰 Detected incoming deposit: ${amount} SOL from ${fromAddress}`);
-        
-        // Try to find user by wallet address in database
-        const { data: existingWallet, error: walletError } = await supabaseService
-            .from('user_hybrid_wallets')
-            .select('*')
-            .eq('external_wallet_address', fromAddress)
-            .single();
+                        if (!walletError && existingWallet) {
+                            // User found - update their balance
+                            const userId = existingWallet.user_id;
+                            
+                            console.log(`👤 Found user ${userId} - processing deposit: ${amount} SOL`);
+                            
+                            try {
+                                // ✅ Use enhanced balance update system
+                                const { data: balanceResult, error: balanceError } = await supabaseService
+                                    .rpc('update_user_balance', {
+                                        p_user_id: userId,
+                                        p_custodial_change: amount,
+                                        p_privy_change: 0,
+                                        p_transaction_type: 'external_deposit',
+                                        p_is_deposit: true,
+                                        p_deposit_amount: amount
+                                    });
 
-        if (!walletError && existingWallet) {
-            // User found - update their balance
-            const userId = existingWallet.user_id;
-            const currentBalance = parseFloat(existingWallet.custodial_balance) || 0;
-            const currentDeposited = parseFloat(existingWallet.custodial_total_deposited) || 0;
-            
-            const newBalance = currentBalance + amount;
-            const newTotalDeposited = currentDeposited + amount;
-            
-            console.log(`👤 Found user ${userId} - updating balance: ${currentBalance.toFixed(3)} → ${newBalance.toFixed(3)} SOL`);
-            
-            // Update user's custodial balance in database
-            const { error: updateError } = await supabaseService
-                .from('user_hybrid_wallets')
-                .update({
-                    custodial_balance: newBalance,
-                    custodial_total_deposited: newTotalDeposited,
-                    last_custodial_deposit: new Date().toISOString(),
-                    updated_at: new Date().toISOString()
-                })
-                .eq('user_id', userId);
+                                if (balanceError) {
+                                    console.error(`❌ Failed to update balance for user ${userId}:`, balanceError);
+                                    throw balanceError;
+                                }
 
-            if (updateError) {
-                console.error(`❌ Failed to update balance for user ${userId}:`, updateError);
-            } else {
-                console.log(`✅ Successfully credited ${amount} SOL to user ${userId}. New balance: ${newBalance.toFixed(3)} SOL`);
-                
-                // Record the deposit transaction
-                const { error: depositError } = await supabaseService
-                    .from('custodial_deposits')
-                    .insert({
-                        user_id: userId,
-                        wallet_address: fromAddress,
-                        amount: amount,
-                        transaction_signature: sigInfo.signature,
-                        processed_at: new Date().toISOString(),
-                        status: 'completed'
-                    });
+                                const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
+                                const newTotalBalance = parseFloat(balanceResult[0].new_total_balance);
+                                const newTotalDeposited = parseFloat(balanceResult[0].new_total_deposited);
+                                
+                                console.log(`✅ Balance updated: ${userId} - Custodial: ${newCustodialBalance.toFixed(3)} SOL, Total: ${newTotalBalance.toFixed(3)} SOL`);
 
-                if (depositError) {
-                    console.warn('Failed to record deposit transaction:', depositError);
+                                // Update in-memory state if user is loaded
+                                const memoryWallet = hybridUserWallets.get(userId);
+                                if (memoryWallet) {
+                                    memoryWallet.custodialBalance = newCustodialBalance;
+                                    memoryWallet.custodialTotalDeposited = newTotalDeposited;
+                                    memoryWallet.lastCustodialDeposit = Date.now();
+                                }
+
+                                // 🔧 CRITICAL FIX: Emit real-time update to frontend
+                                if (typeof io !== 'undefined') {
+                                    console.log(`📡 Broadcasting balance update for ${userId}: ${newCustodialBalance.toFixed(3)} SOL`);
+                                    
+                                    // Emit to specific user and all clients
+                                    io.emit('custodialBalanceUpdate', {
+                                        userId,
+                                        custodialBalance: newCustodialBalance,
+                                        totalBalance: newTotalBalance,
+                                        totalDeposited: newTotalDeposited,
+                                        depositAmount: amount,
+                                        transactionSignature: sigInfo.signature,
+                                        timestamp: Date.now(),
+                                        source: 'external_deposit'
+                                    });
+
+                                    // Also emit generic balance update
+                                    io.emit('balanceUpdate', {
+                                        userId,
+                                        type: 'custodial',
+                                        balance: newCustodialBalance,
+                                        change: amount,
+                                        source: 'deposit',
+                                        timestamp: Date.now()
+                                    });
+                                }
+
+                                console.log(`✅ Successfully processed ${amount} SOL deposit for ${userId}. New balance: ${newCustodialBalance.toFixed(3)} SOL`);
+
+                            } catch (processingError) {
+                                console.error(`❌ Critical error processing deposit for ${userId}:`, processingError);
+                                
+                                // Store as pending deposit for manual review
+                                try {
+                                    await supabaseService
+                                        .from('pending_deposits')
+                                        .insert({
+                                            wallet_address: fromAddress,
+                                            amount: amount,
+                                            transaction_signature: sigInfo.signature,
+                                            detected_at: new Date().toISOString(),
+                                            status: 'failed_processing',
+                                            error_message: processingError instanceof Error ? processingError.message : 'Unknown error'
+                                        });
+                                    
+                                    console.log(`📝 Stored failed deposit as pending for manual review: ${amount} SOL from ${fromAddress}`);
+                                } catch (pendingError) {
+                                    console.error('Failed to store pending deposit:', pendingError);
+                                }
+                            }
+                        } else {
+                            // User not found - store as pending deposit
+                            console.log(`⚠️ No user found for wallet ${fromAddress}, storing as pending deposit`);
+                            
+                            const { error: pendingError } = await supabaseService
+                                .from('pending_deposits')
+                                .insert({
+                                    wallet_address: fromAddress,
+                                    amount: amount,
+                                    transaction_signature: sigInfo.signature,
+                                    detected_at: new Date().toISOString(),
+                                    status: 'pending'
+                                });
+
+                            if (pendingError) {
+                                console.error('Failed to store pending deposit:', pendingError);
+                            } else {
+                                console.log(`📝 Stored pending deposit: ${amount} SOL from ${fromAddress}`);
+                            }
+                        }
+                    }
                 }
-
-                // Update in-memory state if user is loaded
-                const memoryWallet = hybridUserWallets.get(userId);
-                if (memoryWallet) {
-                    memoryWallet.custodialBalance = newBalance;
-                    memoryWallet.custodialTotalDeposited = newTotalDeposited;
-                    memoryWallet.lastCustodialDeposit = Date.now();
-                }
-
-                // Emit real-time update to frontend (if socket.io is available)
-                if (typeof io !== 'undefined') {
-                    io.emit('custodialBalanceUpdate', {
-                        userId,
-                        custodialBalance: newBalance,
-                        totalDeposited: newTotalDeposited,
-                        depositAmount: amount,
-                        transactionSignature: sigInfo.signature,
-                        timestamp: Date.now()
-                    });
-                }
-            }
-        } else {
-            // User not found - store as pending deposit
-            console.log(`⚠️ No user found for wallet ${fromAddress}, storing as pending deposit`);
-            
-            const { error: pendingError } = await supabaseService
-                .from('pending_deposits')
-                .insert({
-                    wallet_address: fromAddress,
-                    amount: amount,
-                    transaction_signature: sigInfo.signature,
-                    detected_at: new Date().toISOString(),
-                    status: 'pending'
-                });
-
-            if (pendingError) {
-                console.error('Failed to store pending deposit:', pendingError);
-            } else {
-                console.log(`📝 Stored pending deposit: ${amount} SOL from ${fromAddress}`);
-            }
-        }
-    }
-}
 
                 // Mark transaction as processed
                 processedSignatures.add(sigInfo.signature);
@@ -1919,6 +1944,39 @@ if (decoded) {
             } catch (error) {
                 console.error(`❌ Error processing transaction ${sigInfo.signature}:`, error);
                 processedSignatures.add(sigInfo.signature); // Mark as processed to avoid retrying
+            }
+        }
+
+        // 🔧 CRITICAL FIX: Update house balance if any changes were detected
+        if (balanceChanged) {
+            console.log('💰 Deposits detected, updating house balance...');
+            const oldBalance = houseBalance;
+            await updateHouseBalance();
+            const change = houseBalance - oldBalance;
+            
+            console.log(`🏛️ House balance updated: ${oldBalance.toFixed(3)} → ${houseBalance.toFixed(3)} SOL (${change >= 0 ? '+' : ''}${change.toFixed(3)})`);
+            
+            // 🔒 ADMIN ONLY: Send sensitive house balance data only to admin room
+            io.to('admin_monitoring').emit('adminHouseBalanceUpdate', {
+                oldBalance,
+                newBalance: houseBalance,
+                change,
+                maxPayoutCapacity: calculateMaxPayoutCapacity(),
+                timestamp: Date.now(),
+                source: 'deposit_processing'
+            });
+            
+            // Update current game state if active (but don't expose house balance to users)
+            if (currentGame) {
+                currentGame.houseBalance = houseBalance;
+                currentGame.maxPayoutCapacity = calculateMaxPayoutCapacity();
+                
+                // Only emit non-sensitive game capacity info to users
+                io.emit('gameCapacityUpdate', {
+                    maxPayoutCapacity: calculateMaxPayoutCapacity(),
+                    canAcceptLargeBets: houseBalance > 50, // Boolean indicator only
+                    timestamp: Date.now()
+                });
             }
         }
 
@@ -2034,23 +2092,32 @@ async function resolvePendingDeposits(): Promise<void> {
 }
 
 // Wallet Management Functions
+// 🔧 ENHANCED: Better house balance update with error handling
 async function updateHouseBalance(): Promise<number> {
     try {
         const config = getCurrentGameConfig();
         const now = Date.now();
-        if (now - lastHouseBalanceUpdate < config.BALANCE_CACHE_DURATION) {
+        
+        // Don't cache for too long when processing deposits
+        if (now - lastHouseBalanceUpdate < config.BALANCE_CACHE_DURATION / 2) {
             return houseBalance;
         }
 
         const balanceResponse = await solanaConnection.getBalance(housePublicKey);
-        houseBalance = balanceResponse / LAMPORTS_PER_SOL;
+        const newBalance = balanceResponse / LAMPORTS_PER_SOL;
+        
+        // Only log significant changes
+        if (Math.abs(newBalance - houseBalance) > 0.001) {
+            console.log(`🏛️ House balance updated: ${houseBalance.toFixed(3)} → ${newBalance.toFixed(3)} SOL`);
+        }
+        
+        houseBalance = newBalance;
         lastHouseBalanceUpdate = now;
         
-        console.log(`🏛️ House balance updated: ${houseBalance.toFixed(3)} SOL`);
         return houseBalance;
     } catch (error) {
         console.error('❌ Failed to update house balance:', error);
-        return houseBalance;
+        return houseBalance; // Return cached value on error
     }
 }
 
@@ -2262,6 +2329,59 @@ function updateHybridSystemStats(): void {
     };
 }
 
+// 🔧 NEW: Helper function to sync user balance from database
+async function syncUserBalanceFromDatabase(userId: string): Promise<number> {
+    try {
+        console.log(`🔄 Syncing balance from database for user ${userId}...`);
+        
+        const { data: freshWalletData, error } = await supabaseService
+            .from('user_hybrid_wallets')
+            .select('*')
+            .eq('user_id', userId)
+            .single();
+
+        if (error || !freshWalletData) {
+            console.warn(`❌ Failed to sync balance for user ${userId}:`, error);
+            return 0;
+        }
+
+        // Update in-memory wallet with fresh data
+        let userWallet = hybridUserWallets.get(userId);
+        if (!userWallet) {
+            // Create new wallet if it doesn't exist in memory
+            userWallet = {
+                userId,
+                externalWalletAddress: freshWalletData.external_wallet_address,
+                custodialBalance: parseFloat(freshWalletData.custodial_balance) || 0,
+                custodialTotalDeposited: parseFloat(freshWalletData.custodial_total_deposited) || 0,
+                lastCustodialDeposit: freshWalletData.last_custodial_deposit ? new Date(freshWalletData.last_custodial_deposit).getTime() : 0,
+                embeddedWalletId: freshWalletData.embedded_wallet_id,
+                embeddedBalance: parseFloat(freshWalletData.embedded_balance) || 0,
+                lastEmbeddedWithdrawal: freshWalletData.last_embedded_withdrawal ? new Date(freshWalletData.last_embedded_withdrawal).getTime() : 0,
+                lastTransferBetweenWallets: freshWalletData.last_transfer_between_wallets ? new Date(freshWalletData.last_transfer_between_wallets).getTime() : 0,
+                totalTransfersToEmbedded: parseFloat(freshWalletData.total_transfers_to_embedded) || 0,
+                totalTransfersToCustodial: parseFloat(freshWalletData.total_transfers_to_custodial) || 0,
+                createdAt: new Date(freshWalletData.created_at).getTime()
+            };
+        } else {
+            // Update existing wallet with fresh data
+            userWallet.custodialBalance = parseFloat(freshWalletData.custodial_balance) || 0;
+            userWallet.custodialTotalDeposited = parseFloat(freshWalletData.custodial_total_deposited) || 0;
+            userWallet.embeddedBalance = parseFloat(freshWalletData.embedded_balance) || 0;
+            userWallet.totalTransfersToEmbedded = parseFloat(freshWalletData.total_transfers_to_embedded) || 0;
+            userWallet.totalTransfersToCustodial = parseFloat(freshWalletData.total_transfers_to_custodial) || 0;
+        }
+
+        hybridUserWallets.set(userId, userWallet);
+        console.log(`✅ Balance synced for ${userId}: ${userWallet.custodialBalance.toFixed(3)} SOL`);
+        
+        return userWallet.custodialBalance;
+    } catch (error) {
+        console.error(`❌ Failed to sync balance for user ${userId}:`, error);
+        return 0;
+    }
+}
+
 // ===== INSTANT CUSTODIAL BETTING =====
 async function placeBetFromCustodialBalance(
     userId: string,
@@ -2280,18 +2400,46 @@ async function placeBetFromCustodialBalance(
         return { success: false, reason: 'Too late to place bet' };
     }
 
-    // Get user's custodial balance
-    const userWallet = hybridUserWallets.get(userId);
-    if (!userWallet) {
-        return { success: false, reason: 'User wallet not found - please deposit first' };
+    // 🔧 NEW: Get FRESH user profile from unified table (single source of truth)
+    let userProfile;
+    try {
+        console.log(`🔄 Loading user profile from unified table for ${userId}...`);
+        
+        const { data: profileData, error } = await supabaseService
+            .from('user_profiles')
+            .select('user_id, username, custodial_balance, privy_balance, total_balance, external_wallet_address, level')
+            .eq('user_id', userId)
+            .single();
+
+        if (error || !profileData) {
+            console.error(`❌ User profile not found for ${userId}:`, error);
+            return { success: false, reason: 'User profile not found - please register first' };
+        }
+
+        userProfile = {
+            userId: profileData.user_id,
+            username: profileData.username,
+            custodialBalance: parseFloat(profileData.custodial_balance) || 0,
+            privyBalance: parseFloat(profileData.privy_balance) || 0,
+            totalBalance: parseFloat(profileData.total_balance) || 0,
+            externalWalletAddress: profileData.external_wallet_address,
+            level: profileData.level || 1
+        };
+
+        console.log(`💰 Fresh profile loaded: ${userProfile.custodialBalance.toFixed(3)} SOL custodial balance for ${userId}`);
+        
+    } catch (error) {
+        console.error(`❌ Database error loading user profile for ${userId}:`, error);
+        return { success: false, reason: 'Database error loading user profile' };
     }
 
-    // Check sufficient custodial balance
-    if (userWallet.custodialBalance < betAmount) {
+    // Check sufficient custodial balance (now using fresh data from unified table!)
+    if (userProfile.custodialBalance < betAmount) {
+        console.log(`❌ Insufficient balance: ${userProfile.custodialBalance.toFixed(3)} SOL < ${betAmount} SOL`);
         return { 
             success: false, 
-            reason: `Insufficient custodial balance: ${userWallet.custodialBalance.toFixed(3)} SOL available, need ${betAmount} SOL`,
-            custodialBalance: userWallet.custodialBalance
+            reason: `Insufficient custodial balance: ${userProfile.custodialBalance.toFixed(3)} SOL available, need ${betAmount} SOL`,
+            custodialBalance: userProfile.custodialBalance
         };
     }
 
@@ -2301,7 +2449,7 @@ async function placeBetFromCustodialBalance(
     }
 
     // Check if user already has active bet
-    if (currentGame.activeBets.has(userWallet.externalWalletAddress)) {
+    if (currentGame.activeBets.has(userProfile.externalWalletAddress)) {
         return { success: false, reason: 'Already has active bet' };
     }
 
@@ -2310,32 +2458,49 @@ async function placeBetFromCustodialBalance(
         if (betAmount > config.INSTANT_RUG_THRESHOLD) {
             console.log(`🚨💥 CUSTODIAL INSTANT RUG: ${betAmount} SOL > ${config.INSTANT_RUG_THRESHOLD} SOL!`);
             
-            // Instantly deduct from custodial balance
-            userWallet.custodialBalance -= betAmount;
-            hybridUserWallets.set(userId, userWallet);
+            // 🔧 NEW: Use atomic balance update function
+            const { data: balanceResult, error: balanceError } = await supabaseService
+                .rpc('update_user_balance', {
+                    p_user_id: userId,
+                    p_custodial_change: -betAmount,
+                    p_privy_change: 0,
+                    p_transaction_type: 'instant_rug_bet'
+                });
+
+            if (balanceError || !balanceResult || balanceResult.length === 0) {
+                console.error(`❌ Failed to update balance for instant rug bet ${userId}:`, balanceError);
+                return { success: false, reason: 'Failed to process bet' };
+            }
+
+            const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
             
             // Add bet to game
             const entryMultiplier = currentGame.status === 'waiting' ? 1.0 : currentGame.currentMultiplier;
             const bet: PlayerBet = {
                 userId,
-                walletAddress: userWallet.externalWalletAddress,
+                walletAddress: userProfile.externalWalletAddress,
                 betAmount,
                 placedAt: Date.now(),
                 entryMultiplier,
                 maxPayout: betAmount * BET_VALIDATION.MAX_PAYOUT_MULTIPLIER,
                 isValid: true,
-                transactionId: `custodial_${Date.now()}_${userId}`,
+                transactionId: `custodial_instant_rug_${Date.now()}_${userId}`,
                 betCollected: true,
                 payoutProcessed: false
             };
 
-            currentGame.activeBets.set(userWallet.externalWalletAddress, bet);
+            currentGame.activeBets.set(userProfile.externalWalletAddress, bet);
             currentGame.totalBets += betAmount;
             currentGame.totalPlayers = currentGame.activeBets.size;
             
-            // Save wallet balance
-            await saveHybridWallet(userWallet);
-            updateHybridSystemStats();
+            // Update game stats in unified table
+            await supabaseService.rpc('update_user_game_stats', {
+                p_user_id: userId,
+                p_bet_amount: betAmount,
+                p_won: false, // Will lose due to instant rug
+                p_payout: 0,
+                p_multiplier: 0
+            });
             
             // Crash game immediately
             setTimeout(() => {
@@ -2345,7 +2510,7 @@ async function placeBetFromCustodialBalance(
             return { 
                 success: true, 
                 entryMultiplier,
-                custodialBalance: userWallet.custodialBalance,
+                custodialBalance: newCustodialBalance,
                 reason: 'Bet placed - HIGH RISK!' 
             };
         }
@@ -2353,14 +2518,27 @@ async function placeBetFromCustodialBalance(
         // NORMAL CUSTODIAL BET
         const entryMultiplier = currentGame.status === 'waiting' ? 1.0 : currentGame.currentMultiplier;
         
-        // INSTANTLY deduct from custodial balance (no blockchain transaction needed)
-        userWallet.custodialBalance -= betAmount;
-        hybridUserWallets.set(userId, userWallet);
+        // 🔧 NEW: Use atomic balance update function for normal bet
+        const { data: balanceResult, error: balanceError } = await supabaseService
+            .rpc('update_user_balance', {
+                p_user_id: userId,
+                p_custodial_change: -betAmount,
+                p_privy_change: 0,
+                p_transaction_type: 'custodial_bet'
+            });
+
+        if (balanceError || !balanceResult || balanceResult.length === 0) {
+            console.error(`❌ Failed to update balance for bet ${userId}:`, balanceError);
+            return { success: false, reason: 'Failed to process bet' };
+        }
+
+        const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
+        console.log(`💰 Balance updated: ${userProfile.custodialBalance.toFixed(3)} → ${newCustodialBalance.toFixed(3)} SOL`);
         
         // Create bet
         const bet: PlayerBet = {
             userId,
-            walletAddress: userWallet.externalWalletAddress,
+            walletAddress: userProfile.externalWalletAddress,
             betAmount,
             placedAt: Date.now(),
             entryMultiplier,
@@ -2371,7 +2549,7 @@ async function placeBetFromCustodialBalance(
             payoutProcessed: false
         };
 
-        currentGame.activeBets.set(userWallet.externalWalletAddress, bet);
+        currentGame.activeBets.set(userProfile.externalWalletAddress, bet);
         currentGame.totalBets += betAmount;
         currentGame.totalPlayers = currentGame.activeBets.size;
 
@@ -2382,11 +2560,7 @@ async function placeBetFromCustodialBalance(
             tradingState.volatility *= 1.5;
         }
 
-        console.log(`⚡ CUSTODIAL BET PLACED: ${betAmount} SOL, entry ${entryMultiplier}x, remaining: ${userWallet.custodialBalance.toFixed(3)} SOL`);
-
-        // Save to database
-        await saveHybridWallet(userWallet);
-        updateHybridSystemStats();
+        console.log(`⚡ CUSTODIAL BET PLACED: ${betAmount} SOL, entry ${entryMultiplier}x, remaining: ${newCustodialBalance.toFixed(3)} SOL`);
 
         // Save bet to database
         try {
@@ -2395,7 +2569,7 @@ async function placeBetFromCustodialBalance(
                 .insert({
                     game_id: currentGame.id,
                     user_id: userId,
-                    wallet_address: userWallet.externalWalletAddress,
+                    wallet_address: userProfile.externalWalletAddress,
                     bet_amount: betAmount,
                     entry_multiplier: entryMultiplier,
                     status: 'active',
@@ -2411,14 +2585,25 @@ async function placeBetFromCustodialBalance(
         return { 
             success: true, 
             entryMultiplier,
-            custodialBalance: userWallet.custodialBalance 
+            custodialBalance: newCustodialBalance 
         };
 
     } catch (error) {
         console.error('❌ Custodial bet failed:', error);
-        // Refund to custodial balance on error
-        userWallet.custodialBalance += betAmount;
-        hybridUserWallets.set(userId, userWallet);
+        
+        // 🔧 NEW: Refund using atomic balance update
+        try {
+            await supabaseService.rpc('update_user_balance', {
+                p_user_id: userId,
+                p_custodial_change: betAmount, // Refund
+                p_privy_change: 0,
+                p_transaction_type: 'bet_refund'
+            });
+            console.log(`💰 Refunded ${betAmount} SOL to user ${userId} due to error`);
+        } catch (refundError) {
+            console.error(`❌ Failed to refund ${userId}:`, refundError);
+        }
+        
         return { success: false, reason: 'Server error' };
     }
 }
@@ -2470,9 +2655,7 @@ async function cashOutToCustodialBalance(
    Bet: ${bet.betAmount} SOL @ ${bet.entryMultiplier}x
    Current: ${cashoutMultiplier}x
    Growth: ${growthRatio.toFixed(3)}x
-   Raw payout: ${rawPayout.toFixed(3)} SOL
-   After house edge (${(config.HOUSE_EDGE * 100).toFixed(0)}%): ${payoutWithHouseEdge.toFixed(3)} SOL
-   Final payout: ${safePayout.toFixed(3)} SOL`);
+   Payout: ${safePayout.toFixed(3)} SOL`);
 
         // Check for payout limits
         if (payoutWithHouseEdge > config.MAX_SINGLE_PAYOUT) {
@@ -2493,15 +2676,21 @@ async function cashOutToCustodialBalance(
             return { success: false, reason: 'Payout limit exceeded - game crashed' };
         }
 
-        // Get user's hybrid wallet
-        let userWallet = hybridUserWallets.get(userId);
-        if (!userWallet) {
-            return { success: false, reason: 'User wallet not found' };
+        // 🔧 NEW: Use atomic balance update for payout
+        const { data: balanceResult, error: balanceError } = await supabaseService
+            .rpc('update_user_balance', {
+                p_user_id: userId,
+                p_custodial_change: safePayout,
+                p_privy_change: 0,
+                p_transaction_type: 'custodial_cashout'
+            });
+
+        if (balanceError || !balanceResult || balanceResult.length === 0) {
+            console.error(`❌ Failed to update balance for cashout ${userId}:`, balanceError);
+            return { success: false, reason: 'Failed to process cashout' };
         }
 
-        // INSTANTLY add to custodial balance (no blockchain transaction needed!)
-        userWallet.custodialBalance += safePayout;
-        hybridUserWallets.set(userId, userWallet);
+        const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
 
         // Mark bet as cashed out
         bet.cashedOut = true;
@@ -2513,21 +2702,19 @@ async function cashOutToCustodialBalance(
         const profit = safePayout - bet.betAmount;
         const isLoss = cashoutMultiplier < bet.entryMultiplier;
 
+        // Update game stats in unified table
+        await supabaseService.rpc('update_user_game_stats', {
+            p_user_id: userId,
+            p_bet_amount: bet.betAmount,
+            p_won: true,
+            p_payout: safePayout,
+            p_multiplier: cashoutMultiplier
+        });
+
         console.log(`⚡ CUSTODIAL CASHOUT SUCCESS: 
    Payout: ${safePayout.toFixed(3)} SOL
    Profit: ${profit >= 0 ? '+' : ''}${profit.toFixed(3)} SOL
-   New custodial balance: ${userWallet.custodialBalance.toFixed(3)} SOL`);
-
-        // Save to database
-        await saveHybridWallet(userWallet);
-        updateHybridSystemStats();
-
-        // Update house balance tracking
-        await updateHouseBalance();
-        if (currentGame) {
-            currentGame.houseBalance = houseBalance;
-            currentGame.maxPayoutCapacity = calculateMaxPayoutCapacity();
-        }
+   New balance: ${newCustodialBalance.toFixed(3)} SOL`);
 
         // Save cashout to database
         try {
@@ -2539,12 +2726,7 @@ async function cashOutToCustodialBalance(
                         cashout_amount: safePayout,
                         profit_loss: profit,
                         status: isLoss ? 'cashed_out_loss' : 'cashed_out_profit',
-                        cashed_out_at: new Date().toISOString(),
-                        payout_transaction_id: `custodial_payout_${Date.now()}`,
-                        payout_processed: true,
-                        entry_multiplier: bet.entryMultiplier,
-                        growth_ratio: growthRatio,
-                        cashout_type: 'custodial'
+                        cashed_out_at: new Date().toISOString()
                     })
                     .eq('game_id', currentGame.id)
                     .eq('wallet_address', walletAddress);
@@ -2564,24 +2746,14 @@ async function cashOutToCustodialBalance(
             amount: safePayout,
             profit,
             isLoss,
-            custodialBalance: userWallet.custodialBalance,
-            houseEdge: config.HOUSE_EDGE,
-            timestamp: Date.now(),
-            houseBalance: currentGame.houseBalance
-        });
-
-        updateUserAnalytics(userId, null, {
-            amount: bet.betAmount,
-            payout: safePayout,
-            won: true,
-            multiplier: cashoutMultiplier,
-            type: 'custodial_cashout'
+            custodialBalance: newCustodialBalance,
+            timestamp: Date.now()
         });
 
         return { 
             success: true, 
             payout: safePayout,
-            custodialBalance: userWallet.custodialBalance 
+            custodialBalance: newCustodialBalance 
         };
 
     } catch (error) {
@@ -2591,7 +2763,45 @@ async function cashOutToCustodialBalance(
             reason: 'Server error during cashout' 
         };
     }
+}
 
+async function syncUserBalanceAfterTransaction(
+    userId: string, 
+    transactionType: string,
+    amount: number,
+    gameId?: string
+): Promise<void> {
+    try {
+        // Get current balance from database
+        const { data: currentBalance } = await supabaseService
+            .from('user_hybrid_wallets')
+            .select('custodial_balance')
+            .eq('user_id', userId)
+            .single();
+
+        // Update in-memory cache
+        const userWallet = hybridUserWallets.get(userId);
+        if (userWallet && currentBalance) {
+            userWallet.custodialBalance = parseFloat(currentBalance.custodial_balance) || 0;
+            hybridUserWallets.set(userId, userWallet);
+        }
+
+        // Log transaction
+        console.log(`💰 Balance sync: ${userId} - ${transactionType} ${amount} SOL - New balance: ${userWallet?.custodialBalance || 0} SOL`);
+        
+        // Emit real-time balance update
+        io.emit('balanceUpdate', {
+            userId,
+            custodialBalance: userWallet?.custodialBalance || 0,
+            transactionType,
+            amount,
+            gameId,
+            timestamp: Date.now()
+        });
+        
+    } catch (error) {
+        console.error(`❌ Failed to sync balance for ${userId}:`, error);
+    }
 }
 
 async function createTransaction(
@@ -3802,84 +4012,57 @@ async function crashGame(): Promise<void> {
     currentGame.status = 'crashed';
     const crashMultiplier = currentGame.currentMultiplier;
 
-    console.log(`💥 Trader Game ${currentGame.gameNumber} crashed at ${crashMultiplier}x`);
+    console.log(`💥 Game ${currentGame.gameNumber} crashed at ${crashMultiplier}x`);
 
     let totalPayouts = 0;
+    let totalLostBets = 0;
     
-    // Process all bets first
+    // 🔧 FIX: Process ALL bets and clear active bet state
     for (const [walletAddress, bet] of currentGame.activeBets) {
         if (!bet.cashedOut) {
-            console.log(`📉 Bet lost: ${bet.betAmount} SOL from ${walletAddress}`);
+            // Player lost - house keeps the money
+            totalLostBets += bet.betAmount;
+            console.log(`📉 Bet lost: ${bet.betAmount} SOL from ${walletAddress} (User: ${bet.userId})`);
             
+            // 🔧 CRITICAL: Clear active bet state in database
             try {
-                if (!currentGame.id.startsWith('memory-')) {
-                    await supabaseService
-                        .from('player_bets')
-                        .update({
-                            profit_loss: -bet.betAmount,
-                            status: 'lost'
-                        })
-                        .eq('game_id', currentGame.id)
-                        .eq('wallet_address', walletAddress);
-                }
+                await supabaseService
+                    .from('player_bets')
+                    .update({
+                        profit_loss: -bet.betAmount,
+                        status: 'lost',
+                        crash_multiplier: crashMultiplier,
+                        resolved_at: new Date().toISOString()
+                    })
+                    .eq('game_id', currentGame.id)
+                    .eq('wallet_address', walletAddress);
+                    
+                console.log(`✅ Marked bet as lost in database for ${walletAddress}`);
             } catch (error) {
-                console.warn('Error updating lost bet:', error);
+                console.error(`❌ Failed to update lost bet for ${walletAddress}:`, error);
             }
         } else {
             totalPayouts += bet.cashoutAmount || 0;
+            console.log(`💸 Bet won: ${bet.cashoutAmount} SOL to ${walletAddress}`);
         }
     }
+    
+    // 🔧 FIX: Clear ALL active bets from memory
+    console.log(`🧹 Clearing ${currentGame.activeBets.size} active bets from memory`);
+    currentGame.activeBets.clear();
     
     const gameProfit = currentGame.totalBets - totalPayouts;
     
-    // Bootstrap tracking
-    if (config._BOOTSTRAP_MODE) {
-        trackBootstrapProgress(gameProfit);
-    } else {
-        updateMultiplierHistory(currentGame, totalPayouts);
-    }
+    console.log(`💰 Game ${currentGame.gameNumber} summary:`);
+    console.log(`   Total bets: ${currentGame.totalBets.toFixed(3)} SOL`);
+    console.log(`   Total payouts: ${totalPayouts.toFixed(3)} SOL`);
+    console.log(`   Lost bets (house profit): ${totalLostBets.toFixed(3)} SOL`);
+    console.log(`   Net house profit: ${gameProfit.toFixed(3)} SOL`);
 
-    // Record analytics
-    recordGameAnalytics(currentGame, totalPayouts);
-
-    // Update user analytics for all players
-    for (const [walletAddress, bet] of currentGame.activeBets) {
-        if (!bet.cashedOut) {
-            updateUserAnalytics(bet.userId, { gameNumber: currentGame.gameNumber }, {
-                amount: bet.betAmount,
-                payout: 0,
-                won: false,
-                multiplier: currentGame.currentMultiplier,
-                type: 'loss'
-            });
-        }
-    }
-
+    // Update house balance and emit events
     await updateHouseBalance();
     
-    // Save to database
-    try {
-        if (!currentGame.id.startsWith('memory-')) {
-            await supabaseService
-                .from('games')
-                .update({
-                    end_time: new Date(crashTime).toISOString(),
-                    crash_multiplier: crashMultiplier,
-                    max_multiplier: currentGame.maxMultiplier,
-                    status: 'crashed',
-                    total_bets_amount: currentGame.totalBets,
-                    total_players: currentGame.totalPlayers,
-                    house_balance_end: houseBalance,
-                    total_payouts: totalPayouts,
-                    house_profit: gameProfit
-                })
-                .eq('id', currentGame.id);
-        }
-    } catch (error) {
-        console.warn('Game update failed:', error);
-    }
-
-    // Emit crash event
+    // Emit crash event with cleared state
     io.emit('gameCrashed', {
         gameId: currentGame.id,
         gameNumber: currentGame.gameNumber,
@@ -3890,26 +4073,37 @@ async function crashGame(): Promise<void> {
         totalBets: currentGame.totalBets,
         totalPlayers: currentGame.totalPlayers,
         totalPayouts,
+        totalLostBets,
         houseProfit: gameProfit,
         houseBalance: houseBalance,
+        activeBetsCleared: true, // 🔧 NEW: Confirm active bets cleared
         tradingState: {
             trend: tradingState.trend,
             rugPullTriggered: true
         }
     });
 
+    // 🔧 FIX: Emit active bet clearing to frontend
+    io.emit('activeBetsCleared', {
+        gameId: currentGame.id,
+        gameNumber: currentGame.gameNumber,
+        timestamp: crashTime,
+        message: 'All active bets have been resolved'
+    });
+
+    // Save game to history and clear current game
     gameHistory.push({ ...currentGame });
     if (gameHistory.length > 100) {
         gameHistory = gameHistory.slice(-100);
     }
 
-    console.log(`✅ Game ${currentGame.gameNumber} completed. Starting waiting period...`);
+    console.log(`✅ Game ${currentGame.gameNumber} completed and cleaned up`);
     currentGame = null;
     
-    // FIXED: Add small delay before starting next waiting period
+    // Start waiting period for next game
     setTimeout(() => {
         startWaitingPeriod();
-    }, 1000); // 1 second delay to ensure clean state
+    }, 1000);
 }
 
 // Enhanced transaction monitoring
@@ -4097,524 +4291,6 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
-    // ===== GET PRIVY WALLET HANDLER =====
-    socket.on('getPrivyWallet', async (data) => {
-        const { userId } = data;
-        
-        try {
-            console.log(`🔍 Getting Privy wallet for ${userId}`);
-            
-            const privyWallet = privyIntegrationManager.privyWallets.get(userId);
-            if (!privyWallet) {
-                socket.emit('privyWalletResponse', {
-                    success: false,
-                    error: 'Privy wallet not registered for this user',
-                    userId,
-                    hint: 'Register the Privy wallet first'
-                });
-                return;
-            }
-            
-            // Update balance from blockchain
-            const currentBalance = await updatePrivyWalletBalance(userId);
-            
-            socket.emit('privyWalletResponse', {
-                success: true,
-                userId,
-                wallet: {
-                    userId: privyWallet.userId,
-                    privyWalletAddress: privyWallet.privyWalletAddress,
-                    privyWalletId: privyWallet.privyWalletId,
-                    balance: currentBalance,
-                    lastBalanceUpdate: privyWallet.lastBalanceUpdate,
-                    isConnected: privyWallet.isConnected,
-                    createdAt: privyWallet.createdAt,
-                    lastUsed: privyWallet.lastUsed
-                },
-                capabilities: {
-                    canReceive: true,
-                    canSend: currentBalance > 0.001,
-                    canTransferToCustodial: currentBalance > 0.01,
-                    canTransferFromCustodial: true
-                },
-                timestamp: Date.now()
-            });
-            
-        } catch (error) {
-            console.error('❌ Socket get Privy wallet error:', error);
-            socket.emit('privyWalletResponse', {
-                success: false,
-                error: 'Failed to get Privy wallet',
-                userId
-            });
-        }
-    });
-
-    // ===== TRANSFER: CUSTODIAL TO PRIVY HANDLER =====
-    socket.on('transferCustodialToPrivy', async (data) => {
-        const { userId, amount } = data;
-        
-        try {
-            console.log(`🔄 Processing custodial to Privy transfer: ${amount} SOL for ${userId}`);
-            
-            const result = await transferCustodialToPrivy(userId, amount);
-            
-            socket.emit('transferCustodialToPrivyResult', {
-                success: result.success,
-                error: result.error,
-                transferId: result.transferId,
-                userId,
-                amount,
-                message: result.success ? 
-                    `Successfully transferred ${amount} SOL from custodial to Privy wallet` : 
-                    `Transfer failed: ${result.error}`,
-                timestamp: Date.now()
-            });
-            
-            // Broadcast successful transfer
-            if (result.success) {
-                const userHybridWallet = hybridUserWallets.get(userId);
-                const privyWallet = privyIntegrationManager.privyWallets.get(userId);
-                
-                io.emit('walletTransferCompleted', {
-                    userId,
-                    transferId: result.transferId,
-                    amount,
-                    from: 'custodial',
-                    to: 'privy',
-                    balances: {
-                        custodial: userHybridWallet?.custodialBalance || 0,
-                        privy: privyWallet?.balance || 0
-                    },
-                    timestamp: Date.now()
-                });
-            }
-            
-        } catch (error) {
-            console.error('❌ Socket custodial to Privy transfer error:', error);
-            socket.emit('transferCustodialToPrivyResult', {
-                success: false,
-                error: 'Server error during transfer',
-                userId,
-                amount
-            });
-        }
-    });
-
-    // ===== TRANSFER: PRIVY TO CUSTODIAL HANDLER =====
-    socket.on('transferPrivyToCustodial', async (data) => {
-        const { userId, amount, signedTransaction } = data;
-        
-        try {
-            console.log(`🔄 Processing Privy to custodial transfer: ${amount} SOL for ${userId}`);
-            
-            const result = await transferPrivyToCustodial(userId, amount, signedTransaction);
-            
-            if (!result.success && result.unsignedTransaction) {
-                socket.emit('transferPrivyToCustodialResult', {
-                    success: false,
-                    action: 'signature_required',
-                    transferId: result.transferId,
-                    unsignedTransaction: result.unsignedTransaction,
-                    message: 'Transaction created - please sign with your Privy wallet',
-                    instructions: [
-                        'Use your Privy wallet to sign this transaction',
-                        'This will transfer funds to your gaming balance',
-                        'Send the signed transaction back to complete the transfer'
-                    ],
-                    userId,
-                    amount,
-                    timestamp: Date.now()
-                });
-                return;
-            }
-            
-            socket.emit('transferPrivyToCustodialResult', {
-                success: result.success,
-                error: result.error,
-                transferId: result.transferId,
-                userId,
-                amount,
-                message: result.success ? 
-                    `Successfully transferred ${amount} SOL from Privy wallet to custodial balance` : 
-                    `Transfer failed: ${result.error}`,
-                timestamp: Date.now()
-            });
-            
-            // Broadcast successful transfer
-            if (result.success) {
-                const userHybridWallet = hybridUserWallets.get(userId);
-                const privyWallet = privyIntegrationManager.privyWallets.get(userId);
-                
-                io.emit('walletTransferCompleted', {
-                    userId,
-                    transferId: result.transferId,
-                    amount,
-                    from: 'privy',
-                    to: 'custodial',
-                    balances: {
-                        custodial: userHybridWallet?.custodialBalance || 0,
-                        privy: privyWallet?.balance || 0
-                    },
-                    timestamp: Date.now()
-                });
-            }
-            
-        } catch (error) {
-            console.error('❌ Socket Privy to custodial transfer error:', error);
-            socket.emit('transferPrivyToCustodialResult', {
-                success: false,
-                error: 'Server error during transfer',
-                userId,
-                amount
-            });
-        }
-    });
-
-    // ===== GET WALLET OVERVIEW HANDLER =====
-    socket.on('getWalletOverview', async (data) => {
-        const { userId } = data;
-        
-        try {
-            const userHybridWallet = hybridUserWallets.get(userId);
-            const privyWallet = privyIntegrationManager.privyWallets.get(userId);
-            
-            // Update Privy balance if wallet exists
-            let privyBalance = 0;
-            if (privyWallet) {
-                privyBalance = await updatePrivyWalletBalance(userId);
-            }
-            
-            socket.emit('walletOverviewResponse', {
-                success: true,
-                userId,
-                wallets: {
-                    custodial: {
-                        balance: userHybridWallet?.custodialBalance || 0,
-                        totalDeposited: userHybridWallet?.custodialTotalDeposited || 0,
-                        lastDeposit: userHybridWallet?.lastCustodialDeposit || 0,
-                        canBet: (userHybridWallet?.custodialBalance || 0) >= 0.001,
-                        canTransferToPrivy: (userHybridWallet?.custodialBalance || 0) >= 0.01
-                    },
-                    privy: {
-                        address: privyWallet?.privyWalletAddress || null,
-                        balance: privyBalance,
-                        isConnected: privyWallet?.isConnected || false,
-                        lastUsed: privyWallet?.lastUsed || 0,
-                        canTransferToCustodial: privyBalance >= 0.01
-                    }
-                },
-                totals: {
-                    combinedBalance: (userHybridWallet?.custodialBalance || 0) + privyBalance,
-                    totalTransfersToPrivy: userHybridWallet?.totalTransfersToEmbedded || 0,
-                    totalTransfersToCustodial: userHybridWallet?.totalTransfersToCustodial || 0,
-                    lastTransfer: userHybridWallet?.lastTransferBetweenWallets || 0
-                },
-                capabilities: {
-                    custodialBetting: true,
-                    instantCashout: true,
-                    privyTransfers: !!privyWallet,
-                    crossWalletTransfers: !!(userHybridWallet && privyWallet)
-                },
-                timestamp: Date.now()
-            });
-            
-        } catch (error) {
-            console.error('❌ Socket wallet overview error:', error);
-            socket.emit('walletOverviewResponse', {
-                success: false,
-                error: 'Failed to get wallet overview',
-                userId
-            });
-        }
-    });
-
-    // ===== AUTO-INITIALIZE USER WITH PRIVY WALLET =====
-    socket.on('initializeUser', async (data) => {
-        const { userId, walletAddress } = data;
-        
-        try {
-            if (!userId || !walletAddress) {
-                socket.emit('userInitializeResult', {
-                    success: false,
-                    error: 'Missing userId or walletAddress'
-                });
-                return;
-            }
-            
-            console.log(`🔗 Initializing user ${userId} with existing embedded wallet: ${walletAddress}`);
-            
-            // FIXED: Check if this is an existing Privy wallet first
-            let privyWallet = privyIntegrationManager.privyWallets.get(userId);
-            let privyRegistrationNeeded = false;
-            
-            if (!privyWallet) {
-                console.log(`📝 No existing Privy wallet found for ${userId}, registering embedded wallet`);
-                privyRegistrationNeeded = true;
-            } else if (privyWallet.privyWalletAddress !== walletAddress) {
-                console.log(`🔄 Privy wallet address changed for ${userId}: ${privyWallet.privyWalletAddress} → ${walletAddress}`);
-                privyRegistrationNeeded = true;
-            } else {
-                console.log(`✅ Using existing Privy wallet for ${userId}: ${walletAddress}`);
-                // Just update connection status and last used time
-                privyWallet.isConnected = true;
-                privyWallet.lastUsed = Date.now();
-                await savePrivyWalletToDatabase(privyWallet);
-            }
-            
-            // Register/update Privy wallet if needed
-            if (privyRegistrationNeeded) {
-                const privyResult = await registerPrivyWallet(userId, walletAddress, undefined);
-                if (!privyResult.success) {
-                    console.warn(`⚠️ Privy wallet registration failed for ${userId}:`, privyResult.error);
-                    // Continue anyway - custodial system can still work
-                }
-            }
-            
-            // Ensure hybrid wallet exists - FIXED: Use embedded wallet as the primary external wallet
-            let userWallet = hybridUserWallets.get(userId);
-            if (!userWallet) {
-                console.log(`📝 Creating new hybrid wallet for ${userId}`);
-                userWallet = {
-                    userId,
-                    externalWalletAddress: walletAddress, // This IS the embedded wallet
-                    custodialBalance: 0,
-                    custodialTotalDeposited: 0,
-                    lastCustodialDeposit: 0,
-                    embeddedWalletId: walletAddress, // Store the embedded wallet address
-                    embeddedBalance: 0,
-                    lastEmbeddedWithdrawal: 0,
-                    lastTransferBetweenWallets: 0,
-                    totalTransfersToEmbedded: 0,
-                    totalTransfersToCustodial: 0,
-                    createdAt: Date.now()
-                };
-                
-                hybridUserWallets.set(userId, userWallet);
-                await saveHybridWallet(userWallet);
-            } else {
-                // Update existing wallet with embedded wallet info if needed
-                if (userWallet.embeddedWalletId !== walletAddress) {
-                    console.log(`🔄 Updating embedded wallet ID for ${userId}: ${userWallet.embeddedWalletId} → ${walletAddress}`);
-                    userWallet.embeddedWalletId = walletAddress;
-                    userWallet.externalWalletAddress = walletAddress; // Keep these in sync
-                    await saveHybridWallet(userWallet);
-                }
-            }
-            
-            // Update embedded wallet balance
-            let embeddedBalance = 0;
-            try {
-                embeddedBalance = await updatePrivyWalletBalance(userId);
-            } catch (error) {
-                console.warn(`⚠️ Could not update embedded balance for ${userId}:`, error);
-            }
-            
-            // Update hybrid system stats
-            updateHybridSystemStats();
-            updatePrivyIntegrationStats();
-            
-            socket.emit('userInitializeResult', {
-                success: true,
-                userId,
-                walletAddress,
-                custodialBalance: userWallet.custodialBalance,
-                embeddedBalance: embeddedBalance,
-                isNewUser: !privyWallet,
-                walletType: 'embedded',
-                message: 'User initialized successfully with embedded wallet'
-            });
-            
-            console.log(`✅ User ${userId} initialized - Custodial: ${userWallet.custodialBalance.toFixed(3)} SOL, Embedded: ${embeddedBalance.toFixed(3)} SOL`);
-            
-        } catch (error) {
-            console.error('❌ Error initializing user:', error);
-            socket.emit('userInitializeResult', {
-                success: false,
-                error: 'Failed to initialize user wallet',
-                details: error instanceof Error ? error.message : 'Unknown error'
-            });
-        }
-    });
-
-    // ===== GET TRANSFER HISTORY HANDLER =====
-    socket.on('getTransferHistory', async (data) => {
-        const { userId, limit = 20 } = data;
-        
-        try {
-            const { data: transfers, error } = await supabaseService
-                .from('wallet_transfers')
-                .select('*')
-                .eq('user_id', userId)
-                .order('created_at', { ascending: false })
-                .limit(limit);
-                
-            if (error) {
-                socket.emit('transferHistoryResponse', {
-                    success: false,
-                    error: 'Failed to fetch transfer history',
-                    userId
-                });
-                return;
-            }
-            
-            socket.emit('transferHistoryResponse', {
-                success: true,
-                userId,
-                transfers: transfers || [],
-                summary: {
-                    totalTransfers: transfers?.length || 0,
-                    completedTransfers: transfers?.filter(t => t.status === 'completed').length || 0,
-                    failedTransfers: transfers?.filter(t => t.status === 'failed').length || 0,
-                    totalVolume: transfers?.reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0) || 0
-                },
-                timestamp: Date.now()
-            });
-            
-        } catch (error) {
-            console.error('❌ Socket transfer history error:', error);
-            socket.emit('transferHistoryResponse', {
-                success: false,
-                error: 'Failed to get transfer history',
-                userId
-            });
-        }
-    });
-
-    // ===== UPDATE PRIVY BALANCE HANDLER =====
-    socket.on('updatePrivyBalance', async (data) => {
-        const { userId } = data;
-        
-        try {
-            const currentBalance = await updatePrivyWalletBalance(userId);
-            
-            socket.emit('privyBalanceUpdateResult', {
-                success: true,
-                userId,
-                balance: currentBalance,
-                timestamp: Date.now()
-            });
-            
-            // Broadcast balance update to all clients for this user
-            io.emit('privyBalanceUpdate', {
-                userId,
-                balance: currentBalance,
-                timestamp: Date.now()
-            });
-            
-        } catch (error) {
-            console.error('❌ Socket Privy balance update error:', error);
-            socket.emit('privyBalanceUpdateResult', {
-                success: false,
-                error: 'Failed to update Privy wallet balance',
-                userId
-            });
-        }
-    });
-
-    // ===== GET PRIVY INTEGRATION STATS HANDLER =====
-    socket.on('getPrivyIntegrationStats', () => {
-        try {
-            updatePrivyIntegrationStats();
-            updateHybridSystemStats();
-            
-            socket.emit('privyIntegrationStatsResponse', {
-                success: true,
-                stats: {
-                    totalPrivyWallets: privyIntegrationManager.totalPrivyWallets,
-                    connectedPrivyWallets: privyIntegrationManager.connectedPrivyWallets,
-                    totalPrivyBalance: privyIntegrationManager.totalPrivyBalance,
-                    averagePrivyBalance: privyIntegrationManager.totalPrivyWallets > 0 ? 
-                        privyIntegrationManager.totalPrivyBalance / privyIntegrationManager.totalPrivyWallets : 0
-                },
-                hybridSystem: {
-                    totalUsers: hybridSystemStats.totalUsers,
-                    totalCustodialBalance: hybridSystemStats.totalCustodialBalance,
-                    totalEmbeddedBalance: hybridSystemStats.totalEmbeddedBalance,
-                    balanceRatio: hybridSystemStats.totalCustodialBalance / Math.max(1, hybridSystemStats.totalEmbeddedBalance)
-                },
-                recentActivity: Array.from(privyIntegrationManager.privyWallets.values())
-                    .sort((a, b) => b.lastUsed - a.lastUsed)
-                    .slice(0, 5)
-                    .map(w => ({
-                        userId: w.userId,
-                        balance: w.balance,
-                        lastUsed: w.lastUsed,
-                        isConnected: w.isConnected
-                    })),
-                timestamp: Date.now()
-            });
-            
-        } catch (error) {
-            console.error('❌ Socket Privy integration stats error:', error);
-            socket.emit('privyIntegrationStatsResponse', {
-                success: false,
-                error: 'Failed to get Privy integration stats'
-            });
-        }
-    });
-
-    // ===== CUSTODIAL DEPOSIT HANDLER =====
-    socket.on('custodialDeposit', async (data) => {
-        const { userId, externalWalletAddress, depositAmount, signedTransaction } = data;
-        
-        try {
-            console.log(`💰 Processing custodial deposit from ${userId}: ${depositAmount} SOL`);
-            
-            const result = await depositToCustodialBalance(userId, externalWalletAddress, depositAmount, signedTransaction);
-            
-            if (!result.success && result.unsignedTransaction) {
-                socket.emit('custodialDepositResult', {
-                    success: false,
-                    reason: result.error,
-                    userId,
-                    depositAmount,
-                    unsignedTransaction: result.unsignedTransaction,
-                    instructions: {
-                        message: 'Please sign this deposit transaction with your wallet',
-                        steps: [
-                            '1. Your wallet will open automatically',
-                            '2. Review the transaction details carefully', 
-                            '3. Confirm the transaction to deposit to your gaming balance',
-                            '4. Funds will be available for instant betting once confirmed'
-                        ]
-                    }
-                });
-                return;
-            }
-            
-            socket.emit('custodialDepositResult', {
-                success: result.success,
-                error: result.error,
-                custodialBalance: result.custodialBalance,
-                userId,
-                depositAmount,
-                message: result.success ? 
-                    `Successfully deposited ${depositAmount} SOL to gaming balance!` : 
-                    `Deposit failed: ${result.error}`
-            });
-            
-            // Broadcast balance update to all clients for this user
-            if (result.success) {
-                io.emit('custodialBalanceUpdate', {
-                    userId,
-                    custodialBalance: result.custodialBalance,
-                    totalDeposited: hybridUserWallets.get(userId)?.custodialTotalDeposited || 0,
-                    timestamp: Date.now()
-                });
-            }
-            
-        } catch (error) {
-            console.error('❌ Socket custodial deposit processing error:', error);
-            socket.emit('custodialDepositResult', {
-                success: false,
-                error: 'Server error processing deposit request',
-                userId,
-                depositAmount
-            });
-        }
-    });
-
     // ===== CUSTODIAL BET HANDLER =====
     socket.on('custodialBet', async (data) => {
         const { userId, betAmount } = data;
@@ -4667,170 +4343,6 @@ io.on('connection', (socket: Socket) => {
                 betAmount
             });
         }
-    });
-
-    // ===== GET CUSTODIAL BALANCE HANDLER =====
-    socket.on('getCustodialBalance', (data) => {
-        const { userId } = data;
-        
-        try {
-            const userWallet = hybridUserWallets.get(userId);
-            
-            if (!userWallet) {
-                socket.emit('custodialBalanceResponse', {
-                    success: false,
-                    error: 'User wallet not found - please make a deposit first',
-                    userId
-                });
-                return;
-            }
-            
-            socket.emit('custodialBalanceResponse', {
-                success: true,
-                userId,
-                walletAddress: userWallet.externalWalletAddress,
-                custodialBalance: userWallet.custodialBalance,
-                totalDeposited: userWallet.custodialTotalDeposited,
-                lastDeposit: userWallet.lastCustodialDeposit,
-                embeddedBalance: userWallet.embeddedBalance,
-                canBet: userWallet.custodialBalance >= 0.001,
-                canWithdraw: userWallet.custodialBalance > 0,
-                timestamp: Date.now()
-            });
-            
-        } catch (error) {
-            console.error('❌ Socket get custodial balance error:', error);
-            socket.emit('custodialBalanceResponse', {
-                success: false,
-                error: 'Failed to get custodial balance',
-                userId
-            });
-        }
-    });
-
-    // ===== HYBRID SYSTEM STATUS HANDLER =====
-    socket.on('getHybridStatus', () => {
-        try {
-            updateHybridSystemStats();
-            
-            socket.emit('hybridStatusResponse', {
-                success: true,
-                stats: hybridSystemStats,
-                config: {
-                    maxCustodialBalance: 10.0,
-                    recommendedGamingBalance: 2.0,
-                    minBetAmount: 0.001,
-                    instantCashoutEnabled: true
-                },
-                currentGame: currentGame ? {
-                    gameId: currentGame.id,
-                    gameNumber: currentGame.gameNumber,
-                    status: currentGame.status,
-                    multiplier: currentGame.currentMultiplier,
-                    totalBets: currentGame.totalBets,
-                    totalPlayers: currentGame.totalPlayers,
-                    countdown: currentGame.status === 'waiting' ? countdownTimeRemaining * 1000 : undefined,
-                    houseBalance: currentGame.houseBalance,
-                    maxPayoutCapacity: currentGame.maxPayoutCapacity
-                } : null,
-                timestamp: Date.now()
-            });
-            
-        } catch (error) {
-            console.error('❌ Socket hybrid status error:', error);
-            socket.emit('hybridStatusResponse', {
-                success: false,
-                error: 'Failed to get hybrid system status'
-            });
-        }
-    });
-
-    // ===== ENHANCED GAME STATE HANDLER =====
-    socket.on('getGameState', () => {
-        try {
-            const currentServerTime = Date.now();
-            const config = getCurrentGameConfig();
-            
-            socket.emit('gameStateResponse', {
-                success: true,
-                game: currentGame ? {
-                    gameId: currentGame.id,
-                    gameNumber: currentGame.gameNumber,
-                    multiplier: currentGame.currentMultiplier,
-                    status: currentGame.status,
-                    totalBets: currentGame.totalBets,
-                    totalPlayers: currentGame.totalPlayers,
-                    startTime: currentGame.startTime,
-                    maxMultiplier: currentGame.maxMultiplier,
-                    serverTime: currentServerTime,
-                    chartData: currentGame.chartData.slice(-60),
-                    seed: currentGame.seed,
-                    countdown: currentGame.status === 'waiting' ? countdownTimeRemaining * 1000 : undefined,
-                    canBet: currentGame.status === 'waiting' || currentGame.status === 'active',
-                    houseBalance: currentGame.houseBalance,
-                    maxPayoutCapacity: currentGame.maxPayoutCapacity,
-                    tradingState: {
-                        trend: tradingState.trend,
-                        momentum: tradingState.momentum,
-                        rugPullRisk: tradingState.rugPullProbability
-                    },
-                    // Add custodial gaming info
-                    custodialBettingEnabled: true,
-                    instantCashoutEnabled: true,
-                    minBetAmount: config.MIN_BET,
-                    maxBetAmount: config.MAX_BET,
-                    houseEdge: config.HOUSE_EDGE,
-                    bootstrapMode: config._BOOTSTRAP_MODE,
-                    bootstrapLevel: config._BOOTSTRAP_LEVEL
-                } : null,
-                hybridStats: hybridSystemStats,
-                timestamp: currentServerTime
-            });
-            
-        } catch (error) {
-            console.error('❌ Socket game state error:', error);
-            socket.emit('gameStateResponse', {
-                success: false,
-                error: 'Failed to get game state'
-            });
-        }
-    });
-
-    // ===== USER ACTIVITY TRACKER =====
-    socket.on('userActivity', (data) => {
-        const { userId, activity, metadata } = data;
-        
-        try {
-            // Log user activity for analytics
-            console.log(`👤 User Activity: ${userId} - ${activity}`, metadata);
-            
-            // Update user's last activity
-            const userWallet = hybridUserWallets.get(userId);
-            if (userWallet) {
-                // You could add lastActivity timestamp to the user wallet if needed
-                // userWallet.lastActivity = Date.now();
-            }
-            
-            socket.emit('userActivityAck', {
-                success: true,
-                userId,
-                activity,
-                timestamp: Date.now()
-            });
-            
-        } catch (error) {
-            console.error('❌ Socket user activity error:', error);
-        }
-    });
-
-    // ===== CONNECTION HEALTH CHECK =====
-    socket.on('ping', () => {
-        socket.emit('pong', {
-            timestamp: Date.now(),
-            serverTime: new Date().toISOString(),
-            gameActive: currentGame?.status === 'active',
-            countdown: currentGame?.status === 'waiting' ? countdownTimeRemaining * 1000 : undefined
-        });
     });
 
     socket.on('custodialCashOut', async (data) => {
@@ -4894,9 +4406,6 @@ io.on('connection', (socket: Socket) => {
 
     socket.on('disconnect', (reason) => {
         console.log(`👋 Client disconnected: ${socket.id} (${reason})`);
-        
-        // Clean up any pending operations for this socket
-        // You could track socket-to-user mappings here if needed
     });
 });
 
@@ -4949,7 +4458,7 @@ setInterval(() => {
     }
 }, 5000);
 
-// Enhanced house balance update (find your existing 30-second interval and replace it)
+// Enhanced house balance update (PRIVATE - no user broadcasts)
 setInterval(async () => {
     const oldBalance = houseBalance;
     await updateHouseBalance();
@@ -4962,15 +4471,25 @@ setInterval(async () => {
     // Update hybrid system stats
     updateHybridSystemStats();
     
-    // Emit balance update if significant change
+    // 🔒 PRIVATE: Only log significant changes to server console
     if (Math.abs(houseBalance - oldBalance) > 0.01) {
-        io.emit('houseBalanceUpdate', {
+        console.log(`🏛️ House balance updated: ${oldBalance.toFixed(3)} → ${houseBalance.toFixed(3)} SOL (${(houseBalance - oldBalance >= 0 ? '+' : '')}${(houseBalance - oldBalance).toFixed(3)})`);
+        
+        // 🔒 ADMIN ONLY: Send sensitive data only to admin room
+        io.to('admin_monitoring').emit('adminHouseBalanceUpdate', {
             oldBalance,
             newBalance: houseBalance,
             change: houseBalance - oldBalance,
             maxPayoutCapacity: calculateMaxPayoutCapacity(),
             timestamp: Date.now(),
-            hybridStats: hybridSystemStats
+            source: 'periodic_update'
+        });
+        
+        // Only emit non-sensitive capacity info to users
+        io.emit('gameCapacityUpdate', {
+            maxPayoutCapacity: calculateMaxPayoutCapacity(),
+            canAcceptLargeBets: houseBalance > 50, // Boolean indicator only
+            timestamp: Date.now()
         });
     }
 }, 30000);
@@ -5032,202 +4551,6 @@ setInterval(async () => {
         console.error('❌ Privy wallet monitoring error:', error);
     }
 }, 120000); // Every 2 minutes
-
-// Enhanced transfer monitoring (every 30 seconds)
-setInterval(() => {
-    try {
-        // Clean up completed transfers older than 1 hour
-        const oneHourAgo = Date.now() - 60 * 60 * 1000;
-        let cleanedCount = 0;
-        
-        for (const [transferId, transfer] of activeTransfers) {
-            if ((transfer.status === 'completed' || transfer.status === 'failed') && 
-                transfer.createdAt < oneHourAgo) {
-                activeTransfers.delete(transferId);
-                cleanedCount++;
-            }
-        }
-        
-        if (cleanedCount > 0) {
-            console.log(`🧹 Cleaned up ${cleanedCount} old transfer records`);
-        }
-        
-        // Check for stuck pending transfers
-        const stuckTransfers = [];
-        for (const [transferId, transfer] of activeTransfers) {
-            if (transfer.status === 'pending' && Date.now() - transfer.createdAt > 300000) { // 5 minutes
-                stuckTransfers.push(transferId);
-            }
-        }
-        
-        if (stuckTransfers.length > 0) {
-            console.warn(`⚠️ Found ${stuckTransfers.length} stuck transfers: ${stuckTransfers.join(', ')}`);
-        }
-        
-        // Emit transfer monitoring stats
-        io.emit('transferMonitoringUpdate', {
-            activeTransfers: activeTransfers.size,
-            stuckTransfers: stuckTransfers.length,
-            recentActivity: Array.from(activeTransfers.values())
-                .sort((a, b) => b.createdAt - a.createdAt)
-                .slice(0, 5)
-                .map(t => ({
-                    transferId: t.transferId,
-                    userId: t.userId,
-                    amount: t.amount,
-                    status: t.status,
-                    age: Date.now() - t.createdAt
-                })),
-            timestamp: Date.now()
-        });
-        
-    } catch (error) {
-        console.error('❌ Transfer monitoring error:', error);
-    }
-}, 30000); // Every 30 seconds
-
-setInterval(() => {
-    try {
-        console.log('📊 Updating analytics...');
-        
-        // Update financial analytics
-        updateFinancialAnalytics('hour');
-        updateSystemAnalytics();
-        
-        // Save user analytics periodically
-        let savedCount = 0;
-        for (const [userId, analytics] of userAnalyticsCache) {
-            if (Math.random() < 0.1) { // Save 10% of users each cycle
-                saveUserAnalytics(analytics);
-                savedCount++;
-            }
-        }
-        
-        if (savedCount > 0) {
-            console.log(`📊 Saved analytics for ${savedCount} users`);
-        }
-        
-        // Broadcast live analytics to dashboard subscribers
-        const recentGames = gameAnalyticsHistory.slice(-24); // Last 24 games
-        const activeUsers = Array.from(userAnalyticsCache.values()).filter(
-            user => user.lastActive >= Date.now() - 60 * 60 * 1000 // Last hour
-        );
-        
-        io.to('analytics_dashboard').emit('analyticsUpdate', {
-            overview: {
-                recentGames: recentGames.length,
-                recentRevenue: recentGames.reduce((sum, game) => sum + game.totalWagered, 0),
-                recentProfit: recentGames.reduce((sum, game) => sum + game.houseProfit, 0),
-                activeUsers: activeUsers.length,
-                houseBalance
-            },
-            system: systemAnalytics,
-            timestamp: Date.now()
-        });
-        
-        // Check for alerts
-        const alerts = [];
-        
-        // Low house balance alert
-        if (houseBalance < 20) {
-            alerts.push({
-                type: 'low_house_balance',
-                message: `Low house balance: ${houseBalance.toFixed(3)} SOL`,
-                severity: 'warning'
-            });
-        }
-        
-        // High risk user alert
-        const highRiskUsers = activeUsers.filter(user => user.riskScore > 80);
-        if (highRiskUsers.length > 0) {
-            alerts.push({
-                type: 'high_risk_users',
-                message: `${highRiskUsers.length} high-risk users detected`,
-                severity: 'info'
-            });
-        }
-        
-        // Low profit margin alert
-        if (recentGames.length >= 5) {
-            const avgProfitMargin = recentGames.reduce((sum, g) => sum + g.houseProfitMargin, 0) / recentGames.length;
-            if (avgProfitMargin < 15) {
-                alerts.push({
-                    type: 'low_profit_margin',
-                    message: `Low profit margin: ${avgProfitMargin.toFixed(1)}%`,
-                    severity: 'warning'
-                });
-            }
-        }
-        
-        // Send alerts if any
-        if (alerts.length > 0) {
-            io.to('analytics_alerts').emit('analyticsAlerts', {
-                alerts,
-                timestamp: Date.now()
-            });
-        }
-        
-        console.log(`✅ Analytics update complete - ${recentGames.length} games, ${activeUsers.length} active users`);
-        
-    } catch (error) {
-        console.error('❌ Analytics update error:', error);
-    }
-}, 300000); // Every 5 minutes
-
-// Daily report generation (runs at midnight)
-setInterval(async () => {
-    const now = new Date();
-    if (now.getHours() === 0 && now.getMinutes() < 5) { // Around midnight
-        try {
-            console.log('📊 Generating daily report...');
-            
-            const report = generateDailyReport();
-            
-            // ✅ FIXED: Save to database with proper async/await
-            try {
-                await supabaseService
-                    .from('daily_reports')
-                    .insert({
-                        report_date: report.date,
-                        report_data: report,
-                        created_at: new Date().toISOString()
-                    });
-                console.log(`✅ Daily report saved for ${report.date}`);
-            } catch (error: any) {
-                console.warn('Daily report save failed:', error);
-            }
-                
-            // Broadcast to admin users
-            io.to('analytics_alerts').emit('dailyReport', {
-                report,
-                timestamp: Date.now()
-            });
-            
-        } catch (error: any) {
-            console.error('❌ Daily report generation error:', error);
-        }
-    }
-}, 300000); // Check every 5 minutes
-
-// New: Hybrid system health monitor (add this new interval)
-setInterval(() => {
-    updateHybridSystemStats();
-    
-    // Emit periodic stats update
-    io.emit('hybridStatsUpdate', {
-        stats: hybridSystemStats,
-        health: {
-            totalUsers: hybridSystemStats.totalUsers,
-            activeUsers: hybridSystemStats.activeGamingUsers,
-            totalCustodialBalance: hybridSystemStats.totalCustodialBalance,
-            totalEmbeddedBalance: hybridSystemStats.totalEmbeddedBalance,
-            balanceRatio: hybridSystemStats.totalCustodialBalance / Math.max(1, hybridSystemStats.totalEmbeddedBalance),
-            averageBalance: hybridSystemStats.totalUsers > 0 ? 
-                hybridSystemStats.totalCustodialBalance / hybridSystemStats.totalUsers : 0
-        },
-        timestamp: Date.now()
-    });
-}, 60000); // Every minute
 
 // TRANSACTION MONITORING - Add this to your startup sequence
 setInterval(async () => {
@@ -5355,1065 +4678,6 @@ app.get('/api/custodial/balance/:userId', (req, res): void => {
     }
 });
 
-// ===== CUSTODIAL BETTING API =====
-app.post('/api/custodial/bet', async (req, res): Promise<void> => {
-    try {
-        const { userId, betAmount } = req.body;
-        
-        if (!userId || !betAmount) {
-            res.status(400).json({
-                error: 'Missing required fields: userId, betAmount'
-            });
-            return;
-        }
-        
-        if (typeof betAmount !== 'number' || betAmount <= 0) {
-            res.status(400).json({
-                error: 'Invalid bet amount - must be a positive number'
-            });
-            return;
-        }
-        
-        const result = await placeBetFromCustodialBalance(userId, betAmount);
-        
-        if (result.success) {
-            res.json({
-                success: true,
-                entryMultiplier: result.entryMultiplier,
-                custodialBalance: result.custodialBalance,
-                message: `Successfully placed ${betAmount} SOL bet at ${result.entryMultiplier}x`,
-                gameState: currentGame ? {
-                    gameId: currentGame.id,
-                    gameNumber: currentGame.gameNumber,
-                    status: currentGame.status,
-                    multiplier: currentGame.currentMultiplier,
-                    totalBets: currentGame.totalBets,
-                    totalPlayers: currentGame.totalPlayers
-                } : null
-            });
-        } else {
-            res.status(400).json({
-                success: false,
-                error: result.reason,
-                custodialBalance: result.custodialBalance,
-                userId,
-                betAmount
-            });
-        }
-        
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: 'Server error during bet placement',
-            details: error instanceof Error ? error.message : 'Unknown error'
-        });
-    }
-});
-
-// ===== PRIVY WALLET REGISTRATION =====
-app.post('/api/privy/register', async (req, res): Promise<void> => {
-    try {
-        const { userId, privyWalletAddress, privyWalletId } = req.body;
-        
-        if (!userId || !privyWalletAddress) {
-            res.status(400).json({
-                error: 'Missing required fields: userId, privyWalletAddress'
-            });
-            return;
-        }
-        
-        const result = await registerPrivyWallet(userId, privyWalletAddress, privyWalletId);
-        
-        if (result.success) {
-            const privyWallet = privyIntegrationManager.privyWallets.get(userId);
-            res.json({
-                success: true,
-                message: 'Privy wallet registered successfully',
-                wallet: privyWallet ? {
-                    userId: privyWallet.userId,
-                    privyWalletAddress: privyWallet.privyWalletAddress,
-                    balance: privyWallet.balance,
-                    isConnected: privyWallet.isConnected,
-                    createdAt: privyWallet.createdAt
-                } : null,
-                integrationStats: {
-                    totalPrivyWallets: privyIntegrationManager.totalPrivyWallets,
-                    connectedWallets: privyIntegrationManager.connectedPrivyWallets
-                }
-            });
-        } else {
-            res.status(400).json({
-                success: false,
-                error: result.error,
-                userId,
-                privyWalletAddress
-            });
-        }
-        
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: 'Server error during Privy wallet registration',
-            details: error instanceof Error ? error.message : 'Unknown error'
-        });
-    }
-});
-
-// ===== GET PRIVY WALLET INFO =====
-app.get('/api/privy/:userId', async (req, res): Promise<void> => {
-    try {
-        const { userId } = req.params;
-        
-        const privyWallet = privyIntegrationManager.privyWallets.get(userId);
-        if (!privyWallet) {
-            res.status(404).json({
-                success: false,
-                error: 'Privy wallet not registered for this user',
-                userId,
-                hint: 'Use POST /api/privy/register to register the user\'s Privy wallet'
-            });
-            return;
-        }
-        
-        // Update balance from blockchain
-        const currentBalance = await updatePrivyWalletBalance(userId);
-        
-        res.json({
-            success: true,
-            wallet: {
-                userId: privyWallet.userId,
-                privyWalletAddress: privyWallet.privyWalletAddress,
-                privyWalletId: privyWallet.privyWalletId,
-                balance: currentBalance,
-                lastBalanceUpdate: privyWallet.lastBalanceUpdate,
-                isConnected: privyWallet.isConnected,
-                createdAt: privyWallet.createdAt,
-                lastUsed: privyWallet.lastUsed
-            },
-            capabilities: {
-                canReceive: true,
-                canSend: currentBalance > 0.001,
-                canTransferToCustodial: currentBalance > 0.01,
-                canTransferFromCustodial: true
-            },
-            timestamp: Date.now()
-        });
-        
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: 'Failed to get Privy wallet info',
-            userId: req.params.userId
-        });
-    }
-});
-
-// Add this endpoint or update your existing Privy withdrawal handler
-app.post('/api/privy/withdraw', async (req, res): Promise<void> => {
-    try {
-        const { userId, walletAddress, amount, destinationAddress } = req.body;
-        
-        if (!userId || !walletAddress || !amount || !destinationAddress) {
-            res.status(400).json({
-                error: 'Missing required fields: userId, walletAddress, amount, destinationAddress'
-            });
-            return;
-        }
-        
-        // Verify the wallet belongs to the user
-        const privyWallet = privyIntegrationManager.privyWallets.get(userId);
-        if (!privyWallet || privyWallet.privyWalletAddress !== walletAddress) {
-            res.status(400).json({
-                error: 'Wallet address does not match user\'s registered Privy wallet'
-            });
-            return;
-        }
-        
-        // Check current balance
-        const currentBalance = await updatePrivyWalletBalance(userId);
-        if (currentBalance < amount + 0.001) { // Include fee buffer
-            res.status(400).json({
-                error: `Insufficient Privy wallet balance: ${currentBalance.toFixed(3)} SOL available`
-            });
-            return;
-        }
-        
-        // Create unsigned transaction for user to sign
-        const userPublicKey = new PublicKey(walletAddress);
-        const destinationPublicKey = new PublicKey(destinationAddress);
-        const transaction = await createTransaction(userPublicKey, destinationPublicKey, amount);
-        
-        const { blockhash } = await solanaConnection.getLatestBlockhash();
-        transaction.recentBlockhash = blockhash;
-        transaction.feePayer = userPublicKey;
-        
-        const serializedTransaction = transaction.serialize({ requireAllSignatures: false });
-        const base64Transaction = serializedTransaction.toString('base64');
-        
-        res.json({
-            success: true,
-            unsignedTransaction: base64Transaction,
-            message: 'Transaction created - please sign with your Privy wallet',
-            withdrawalDetails: {
-                from: walletAddress,
-                to: destinationAddress,
-                amount: amount,
-                currentBalance: currentBalance,
-                estimatedFee: 0.001
-            }
-        });
-        
-    } catch (error) {
-        console.error('Error in /api/privy/withdraw:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Server error during withdrawal preparation'
-        });
-    }
-});
-
-// ===== TRANSFER: CUSTODIAL TO PRIVY =====
-app.post('/api/transfer/custodial-to-privy', async (req, res): Promise<void> => {
-    try {
-        const { userId, amount } = req.body;
-        
-        if (!userId || !amount) {
-            res.status(400).json({
-                error: 'Missing required fields: userId, amount'
-            });
-            return;
-        }
-        
-        if (typeof amount !== 'number' || amount <= 0) {
-            res.status(400).json({
-                error: 'Invalid amount - must be a positive number'
-            });
-            return;
-        }
-        
-        const result = await transferCustodialToPrivy(userId, amount);
-        
-        if (result.success) {
-            const userHybridWallet = hybridUserWallets.get(userId);
-            const privyWallet = privyIntegrationManager.privyWallets.get(userId);
-            
-            res.json({
-                success: true,
-                transferId: result.transferId,
-                message: `Successfully transferred ${amount} SOL from custodial to Privy wallet`,
-                balances: {
-                    custodial: userHybridWallet?.custodialBalance || 0,
-                    privy: privyWallet?.balance || 0
-                },
-                transfer: {
-                    amount,
-                    from: 'custodial',
-                    to: 'privy',
-                    status: 'completed'
-                }
-            });
-        } else {
-            res.status(400).json({
-                success: false,
-                error: result.error,
-                transferId: result.transferId,
-                userId,
-                amount
-            });
-        }
-        
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: 'Server error during transfer',
-            details: error instanceof Error ? error.message : 'Unknown error'
-        });
-    }
-});
-
-// ===== TRANSFER: PRIVY TO CUSTODIAL =====
-app.post('/api/transfer/privy-to-custodial', async (req, res): Promise<void> => {
-    try {
-        const { userId, amount, signedTransaction } = req.body;
-        
-        if (!userId || !amount) {
-            res.status(400).json({
-                error: 'Missing required fields: userId, amount'
-            });
-            return;
-        }
-        
-        if (typeof amount !== 'number' || amount <= 0) {
-            res.status(400).json({
-                error: 'Invalid amount - must be a positive number'
-            });
-            return;
-        }
-        
-        const result = await transferPrivyToCustodial(userId, amount, signedTransaction);
-        
-        if (!result.success && result.unsignedTransaction) {
-            res.json({
-                success: false,
-                action: 'signature_required',
-                transferId: result.transferId,
-                unsignedTransaction: result.unsignedTransaction,
-                message: 'Transaction created - please sign with your Privy wallet',
-                instructions: [
-                    'Use your Privy wallet to sign this transaction',
-                    'This will transfer funds from your Privy wallet to your gaming balance',
-                    'Send the signed transaction back to complete the transfer'
-                ],
-                amount,
-                from: 'privy',
-                to: 'custodial'
-            });
-            return;
-        } else if (result.success) {
-            const userHybridWallet = hybridUserWallets.get(userId);
-            const privyWallet = privyIntegrationManager.privyWallets.get(userId);
-            
-            res.json({
-                success: true,
-                transferId: result.transferId,
-                message: `Successfully transferred ${amount} SOL from Privy wallet to custodial balance`,
-                balances: {
-                    custodial: userHybridWallet?.custodialBalance || 0,
-                    privy: privyWallet?.balance || 0
-                },
-                transfer: {
-                    amount,
-                    from: 'privy',
-                    to: 'custodial',
-                    status: 'completed'
-                }
-            });
-        } else {
-            res.status(400).json({
-                success: false,
-                error: result.error,
-                transferId: result.transferId,
-                userId,
-                amount
-            });
-        }
-        
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: 'Server error during transfer',
-            details: error instanceof Error ? error.message : 'Unknown error'
-        });
-    }
-});
-
-// ===== WALLET OVERVIEW =====
-app.get('/api/wallet-overview/:userId', async (req, res): Promise<void> => {
-    try {
-        const { userId } = req.params;
-        
-        const userHybridWallet = hybridUserWallets.get(userId);
-        const privyWallet = privyIntegrationManager.privyWallets.get(userId);
-        
-        if (!userHybridWallet && !privyWallet) {
-            res.status(404).json({
-                error: 'No wallet data found for this user',
-                userId,
-                hint: 'User needs to register Privy wallet and/or make a custodial deposit first'
-            });
-            return;
-        }
-        
-        // Update Privy balance if wallet exists
-        let privyBalance = 0;
-        if (privyWallet) {
-            privyBalance = await updatePrivyWalletBalance(userId);
-        }
-        
-        res.json({
-            userId,
-            wallets: {
-                custodial: {
-                    balance: userHybridWallet?.custodialBalance || 0,
-                    totalDeposited: userHybridWallet?.custodialTotalDeposited || 0,
-                    lastDeposit: userHybridWallet?.lastCustodialDeposit || 0,
-                    canBet: (userHybridWallet?.custodialBalance || 0) >= 0.001,
-                    canTransferToPrivy: (userHybridWallet?.custodialBalance || 0) >= 0.01
-                },
-                privy: {
-                    address: privyWallet?.privyWalletAddress || null,
-                    balance: privyBalance,
-                    isConnected: privyWallet?.isConnected || false,
-                    lastUsed: privyWallet?.lastUsed || 0,
-                    canTransferToCustodial: privyBalance >= 0.01
-                }
-            },
-            totals: {
-                combinedBalance: (userHybridWallet?.custodialBalance || 0) + privyBalance,
-                totalTransfersToPrivy: userHybridWallet?.totalTransfersToEmbedded || 0,
-                totalTransfersToCustodial: userHybridWallet?.totalTransfersToCustodial || 0,
-                lastTransfer: userHybridWallet?.lastTransferBetweenWallets || 0
-            },
-            capabilities: {
-                custodialBetting: true,
-                instantCashout: true,
-                privyTransfers: !!privyWallet,
-                crossWalletTransfers: !!(userHybridWallet && privyWallet)
-            },
-            timestamp: Date.now()
-        });
-        
-    } catch (error) {
-        res.status(500).json({
-            error: 'Failed to get wallet overview',
-            userId: req.params.userId
-        });
-    }
-});
-
-// ===== TRANSFER HISTORY =====
-app.get('/api/transfers/:userId', async (req, res): Promise<void> => {
-    try {
-        const { userId } = req.params;
-        const { limit = 50, offset = 0 } = req.query;
-        
-        // FIXED: Use .range() instead of .offset()
-        const { data: transfers, error } = await supabaseService
-            .from('wallet_transfers')
-            .select('*')
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false })
-            .range(
-                parseInt(offset as string), 
-                parseInt(offset as string) + parseInt(limit as string) - 1
-            );
-            
-        if (error) {
-            res.status(500).json({
-                error: 'Failed to fetch transfer history',
-                details: error.message
-            });
-            return;
-        }
-        
-        res.json({
-            userId,
-            transfers: transfers || [],
-            pagination: {
-                limit: parseInt(limit as string),
-                offset: parseInt(offset as string),
-                total: transfers?.length || 0
-            },
-            summary: {
-                totalTransfers: transfers?.length || 0,
-                completedTransfers: transfers?.filter((t: any) => t.status === 'completed').length || 0,
-                failedTransfers: transfers?.filter((t: any) => t.status === 'failed').length || 0,
-                totalVolume: transfers?.reduce((sum: number, t: any) => sum + (parseFloat(t.amount) || 0), 0) || 0
-            },
-            timestamp: Date.now()
-        });
-        
-    } catch (error) {
-        res.status(500).json({
-            error: 'Failed to get transfer history',
-            userId: req.params.userId
-        });
-    }
-});
-
-// ===== PRIVY INTEGRATION STATS =====
-app.get('/api/privy/stats', (req, res) => {
-    try {
-        updatePrivyIntegrationStats();
-        updateHybridSystemStats();
-        
-        res.json({
-            system: 'privy_integration',
-            stats: {
-                totalPrivyWallets: privyIntegrationManager.totalPrivyWallets,
-                connectedPrivyWallets: privyIntegrationManager.connectedPrivyWallets,
-                totalPrivyBalance: privyIntegrationManager.totalPrivyBalance,
-                averagePrivyBalance: privyIntegrationManager.totalPrivyWallets > 0 ? 
-                    privyIntegrationManager.totalPrivyBalance / privyIntegrationManager.totalPrivyWallets : 0
-            },
-            hybridSystem: {
-                totalUsers: hybridSystemStats.totalUsers,
-                totalCustodialBalance: hybridSystemStats.totalCustodialBalance,
-                totalEmbeddedBalance: hybridSystemStats.totalEmbeddedBalance,
-                balanceRatio: hybridSystemStats.totalCustodialBalance / Math.max(1, hybridSystemStats.totalEmbeddedBalance)
-            },
-            recentActivity: Array.from(privyIntegrationManager.privyWallets.values())
-                .sort((a, b) => b.lastUsed - a.lastUsed)
-                .slice(0, 10)
-                .map(w => ({
-                    userId: w.userId,
-                    balance: w.balance,
-                    lastUsed: w.lastUsed,
-                    isConnected: w.isConnected
-                })),
-            timestamp: Date.now()
-        });
-        
-    } catch (error) {
-        res.status(500).json({
-            error: 'Failed to get Privy integration stats'
-        });
-    }
-});
-
-// ===== CUSTODIAL DEPOSIT API =====
-app.post('/api/custodial/deposit', async (req, res): Promise<void> => {
-    try {
-        const { userId, externalWalletAddress, depositAmount, signedTransaction } = req.body;
-        
-        if (!userId || !externalWalletAddress || !depositAmount) {
-            res.status(400).json({
-                error: 'Missing required fields: userId, externalWalletAddress, depositAmount'
-            });
-            return;
-        }
-        
-        if (typeof depositAmount !== 'number' || depositAmount <= 0) {
-            res.status(400).json({
-                error: 'Invalid deposit amount - must be a positive number'
-            });
-            return;
-        }
-        
-        const result = await depositToCustodialBalance(userId, externalWalletAddress, depositAmount, signedTransaction);
-        
-        if (!result.success && result.unsignedTransaction) {
-            res.json({
-                success: false,
-                action: 'signature_required',
-                unsignedTransaction: result.unsignedTransaction,
-                message: 'Transaction created - please sign with your wallet',
-                instructions: [
-                    'Copy the unsigned transaction',
-                    'Sign it with your Solana wallet',
-                    'Send the signed transaction back to complete the deposit'
-                ]
-            });
-        } else if (result.success) {
-            res.json({
-                success: true,
-                custodialBalance: result.custodialBalance,
-                message: `Successfully deposited ${depositAmount} SOL to custodial balance`,
-                newBalance: result.custodialBalance
-            });
-        } else {
-            res.status(400).json({
-                success: false,
-                error: result.error,
-                userId,
-                depositAmount
-            });
-        }
-        
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: 'Server error during deposit',
-            details: error instanceof Error ? error.message : 'Unknown error'
-        });
-    }
-});
-
-// ===== USER WALLET MANAGEMENT API =====
-app.get('/api/user/:userId/wallet', (req, res): void => {
-    try {
-        const { userId } = req.params;
-        const userWallet = hybridUserWallets.get(userId);
-        
-        if (!userWallet) {
-            res.status(404).json({
-                error: 'User wallet not found',
-                userId,
-                hint: 'User needs to make a deposit first to create wallet'
-            });
-            return;
-        }
-        
-        res.json({
-            userId,
-            wallet: {
-                externalWalletAddress: userWallet.externalWalletAddress,
-                custodialBalance: userWallet.custodialBalance,
-                totalDeposited: userWallet.custodialTotalDeposited,
-                lastDeposit: userWallet.lastCustodialDeposit,
-                embeddedWalletId: userWallet.embeddedWalletId,
-                embeddedBalance: userWallet.embeddedBalance,
-                lastEmbeddedWithdrawal: userWallet.lastEmbeddedWithdrawal,
-                totalTransfersToEmbedded: userWallet.totalTransfersToEmbedded,
-                totalTransfersToCustodial: userWallet.totalTransfersToCustodial,
-                createdAt: userWallet.createdAt
-            },
-            capabilities: {
-                canBet: userWallet.custodialBalance >= 0.001,
-                canCashOut: userWallet.custodialBalance > 0,
-                hasEmbeddedWallet: !!userWallet.embeddedWalletId,
-                canTransfer: userWallet.custodialBalance > 0.01
-            },
-            timestamp: Date.now()
-        });
-        
-    } catch (error) {
-        res.status(500).json({
-            error: 'Failed to get user wallet',
-            userId: req.params.userId
-        });
-    }
-});
-
-// ===== GAME STATISTICS WITH HYBRID DATA =====
-app.get('/api/game/stats', (req, res): void => {
-    try {
-        const config = getCurrentGameConfig();
-        updateHybridSystemStats();
-        
-        res.json({
-            currentGame: currentGame ? {
-                gameId: currentGame.id,
-                gameNumber: currentGame.gameNumber,
-                status: currentGame.status,
-                multiplier: currentGame.currentMultiplier,
-                startTime: currentGame.startTime,
-                totalBets: currentGame.totalBets,
-                totalPlayers: currentGame.totalPlayers,
-                houseBalance: currentGame.houseBalance,
-                maxPayoutCapacity: currentGame.maxPayoutCapacity,
-                countdown: currentGame.status === 'waiting' ? countdownTimeRemaining * 1000 : undefined,
-                tradingState: {
-                    trend: tradingState.trend,
-                    momentum: tradingState.momentum,
-                    rugPullRisk: tradingState.rugPullProbability
-                }
-            } : null,
-            
-            hybrid: {
-                stats: hybridSystemStats,
-                config: {
-                    custodialBettingEnabled: true,
-                    instantCashoutEnabled: true,
-                    maxCustodialBalance: 10.0,
-                    recommendedGamingBalance: 2.0
-                }
-            },
-            
-            gameConfig: {
-                minBetAmount: config.MIN_BET,
-                maxBetAmount: config.MAX_BET,
-                houseEdge: config.HOUSE_EDGE,
-                maxMultiplier: config.MAX_MULTIPLIER,
-                instantRugThreshold: config.INSTANT_RUG_THRESHOLD,
-                maxSinglePayout: config.MAX_SINGLE_PAYOUT,
-                bootstrapMode: config._BOOTSTRAP_MODE,
-                bootstrapLevel: config._BOOTSTRAP_LEVEL
-            },
-            
-            recentGames: gameHistory.slice(-5).map(game => ({
-                gameNumber: game.gameNumber,
-                crashMultiplier: game.crashMultiplier,
-                totalBets: game.totalBets,
-                totalPlayers: game.totalPlayers,
-                startTime: game.startTime
-            })),
-            
-            timestamp: Date.now(),
-            serverTime: new Date().toISOString()
-        });
-        
-    } catch (error) {
-        res.status(500).json({
-            error: 'Failed to get game statistics'
-        });
-    }
-});
-
-// ===== HYBRID SYSTEM ADMINISTRATION =====
-app.get('/api/admin/hybrid', (req, res): void => {
-    try {
-        updateHybridSystemStats();
-        
-        const walletDetails = Array.from(hybridUserWallets.values()).map(wallet => ({
-            userId: wallet.userId,
-            externalWalletAddress: wallet.externalWalletAddress,
-            custodialBalance: wallet.custodialBalance,
-            totalDeposited: wallet.custodialTotalDeposited,
-            embeddedBalance: wallet.embeddedBalance,
-            totalTransfers: wallet.totalTransfersToEmbedded + wallet.totalTransfersToCustodial,
-            lastActivity: Math.max(wallet.lastCustodialDeposit, wallet.lastEmbeddedWithdrawal, wallet.lastTransferBetweenWallets),
-            createdAt: wallet.createdAt
-        }));
-        
-        res.json({
-            systemStats: hybridSystemStats,
-            
-            walletBreakdown: {
-                totalWallets: walletDetails.length,
-                activeWallets: walletDetails.filter(w => w.custodialBalance > 0.001).length,
-                totalCustodialValue: walletDetails.reduce((sum, w) => sum + w.custodialBalance, 0),
-                totalEmbeddedValue: walletDetails.reduce((sum, w) => sum + w.embeddedBalance, 0),
-                totalDeposited: walletDetails.reduce((sum, w) => sum + w.totalDeposited, 0),
-                averageBalance: walletDetails.length > 0 ? 
-                    walletDetails.reduce((sum, w) => sum + w.custodialBalance, 0) / walletDetails.length : 0
-            },
-            
-            recentActivity: walletDetails
-                .filter(w => w.lastActivity > Date.now() - 24 * 60 * 60 * 1000) // Last 24 hours
-                .sort((a, b) => b.lastActivity - a.lastActivity)
-                .slice(0, 10),
-            
-            gameIntegration: {
-                currentGameActive: !!currentGame,
-                custodialBetsEnabled: true,
-                instantCashoutEnabled: true,
-                houseBalance: houseBalance,
-                totalGamingBalance: hybridSystemStats.totalCustodialBalance
-            },
-            
-            timestamp: Date.now()
-        });
-        
-    } catch (error) {
-        res.status(500).json({
-            error: 'Failed to get hybrid system admin data'
-        });
-    }
-});
-
-// ===== TRANSACTION HISTORY API =====
-app.get('/api/user/:userId/transactions', async (req, res): Promise<void> => {
-    try {
-        const { userId } = req.params;
-        const { limit = 50, offset = 0 } = req.query;
-        
-        // Fixed: Use .range() instead of .offset() for Supabase pagination
-        const { data: transactions, error } = await supabaseService
-            .from('player_bets')
-            .select('*')
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false })
-            .range(
-                parseInt(offset as string), 
-                parseInt(offset as string) + parseInt(limit as string) - 1
-            );
-            
-        if (error) {
-            res.status(500).json({
-                error: 'Failed to fetch transaction history',
-                details: error.message
-            });
-            return;
-        }
-        
-        const userWallet = hybridUserWallets.get(userId);
-        
-        res.json({
-            userId,
-            transactions: transactions || [],
-            pagination: {
-                limit: parseInt(limit as string),
-                offset: parseInt(offset as string),
-                total: transactions?.length || 0
-            },
-            currentBalance: userWallet ? {
-                custodial: userWallet.custodialBalance,
-                embedded: userWallet.embeddedBalance,
-                totalDeposited: userWallet.custodialTotalDeposited
-            } : null,
-            timestamp: Date.now()
-        });
-        
-    } catch (error) {
-        res.status(500).json({
-            error: 'Failed to get transaction history',
-            userId: req.params.userId
-        });
-    }
-});
-
-app.get('/api/wallet/balance/:address', async (req, res): Promise<void> => {
-    try {
-        const { address } = req.params;
-        const balance = await getUserWalletBalance(address);
-        void res.json({ address, balance, timestamp: Date.now() });
-    } catch (error) {
-        console.error('Error in /api/wallet/balance:', error);
-        res.status(400).json({ error: 'Invalid wallet address' });
-    }
-});
-
-app.post('/api/solana/balance', async (req, res): Promise<void> => {
-    try {
-        const { address } = req.body;
-        
-        if (!address) {
-            res.status(400).json({
-                error: 'Missing required field: address'
-            });
-            return;
-        }
-        
-        const balance = await getUserWalletBalance(address);
-        
-        res.json({
-            address,
-            balance,
-            timestamp: Date.now(),
-            source: 'solana_rpc'
-        });
-        
-    } catch (error) {
-        console.error('Error in /api/solana/balance:', error);
-        res.status(400).json({ 
-            error: 'Invalid wallet address or RPC error',
-            address: req.body?.address
-        });
-    }
-});
-
-app.get('/api/house/status', async (req, res): Promise<void> => {
-    try {
-        await updateHouseBalance();
-        const config = getCurrentGameConfig();
-        
-        void res.json({
-            address: housePublicKey.toString(),
-            balance: houseBalance,
-            maxPayoutCapacity: calculateMaxPayoutCapacity(),
-            minReserve: config.MIN_HOUSE_BALANCE,
-            maxSinglePayout: config.MAX_SINGLE_PAYOUT,
-            instantRugBetLimit: config.INSTANT_RUG_THRESHOLD,
-            instantRugPayoutLimit: config.MAX_SINGLE_PAYOUT,
-            houseEdge: config.HOUSE_EDGE,
-            rpcEndpoint: SOLANA_RPC_URL,
-            lastUpdated: lastHouseBalanceUpdate
-        });
-    } catch (error) {
-        console.error('Error in /api/house/status:', error);
-        res.status(500).json({ error: 'Failed to get house status' });
-    }
-});
-
-app.get('/api/multiplier/control', (req, res): void => {
-    try {
-        const stats = calculateRollingStats();
-        const now = Date.now();
-        
-        void res.json({
-            control: {
-                recentGames: multiplierControl.recentGames.map(game => ({
-                    gameNumber: game.gameNumber,
-                    crashMultiplier: game.crashMultiplier,
-                    totalBets: game.totalBets,
-                    totalPayouts: game.totalPayouts,
-                    houseProfit: game.houseProfit,
-                    timestamp: game.timestamp
-                })),
-                consecutiveHighCount: multiplierControl.consecutiveHighCount,
-                cooldownActive: multiplierControl.cooldownActive,
-                cooldownUntil: multiplierControl.cooldownUntil,
-                cooldownRemainingMs: Math.max(0, multiplierControl.cooldownUntil - now),
-                lastHighMultiplier: multiplierControl.lastHighMultiplier
-            },
-            stats: {
-                rollingHouseProfitRatio: stats.houseProfitRatio,
-                rollingHouseProfitPercentage: (stats.houseProfitRatio * 100).toFixed(1) + '%',
-                gamesInWindow: stats.gamesCount,
-                totalBetsInWindow: stats.totalBets,
-                totalPayoutsInWindow: stats.totalPayouts,
-                targetHouseEdge: (MULTIPLIER_CONTROL.TARGET_HOUSE_EDGE_RATIO * 100).toFixed(1) + '%'
-            },
-            thresholds: {
-                highMultiplier: MULTIPLIER_CONTROL.HIGH_MULTIPLIER_THRESHOLD,
-                veryHighMultiplier: MULTIPLIER_CONTROL.VERY_HIGH_MULTIPLIER_THRESHOLD,
-                maxConsecutiveHigh: MULTIPLIER_CONTROL.MAX_CONSECUTIVE_HIGH,
-                cooldownDuration: MULTIPLIER_CONTROL.COOLDOWN_DURATION,
-                maxMultiplierDuringCooldown: MULTIPLIER_CONTROL.MAX_MULTIPLIER_DURING_COOLDOWN,
-                rollingWindowSize: MULTIPLIER_CONTROL.ROLLING_WINDOW_SIZE
-            }
-        });
-    } catch (error) {
-        console.error('Error in /api/multiplier/control:', error);
-        res.status(500).json({ error: 'Failed to get multiplier control data' });
-    }
-});
-
-app.get('/api/verify-transaction/:signature', async (req, res): Promise<void> => {
-    try {
-        const { signature } = req.params;
-        
-        const transaction = await solanaConnection.getTransaction(signature, {
-            commitment: 'confirmed'
-        });
-        
-        if (!transaction) {
-            void res.status(404).json({
-                error: 'Transaction not found',
-                signature
-            });
-            return;
-        }
-        
-        const transferInstruction = findTransferInstruction(transaction);
-        
-        let transferDetails = null;
-        if (transferInstruction) {
-            try {
-                const decoded = decodeTransferInstruction(transferInstruction);
-                transferDetails = {
-                    from: decoded.fromPubkey.toString(),
-                    to: decoded.toPubkey.toString(),
-                    amount: decoded.lamports / LAMPORTS_PER_SOL
-                };
-            } catch (decodeError) {
-                console.warn('Failed to decode transfer instruction:', decodeError);
-            }
-        }
-        
-        void res.json({
-            signature,
-            confirmed: true,
-            slot: transaction.slot,
-            blockTime: transaction.blockTime,
-            fee: transaction.meta?.fee,
-            success: !transaction.meta?.err,
-            error: transaction.meta?.err,
-            transferDetails
-        });
-        
-    } catch (error) {
-        console.error('Error in /api/verify-transaction:', error);
-        res.status(500).json({
-            error: error instanceof Error ? error.message : 'Verification failed',
-            signature: req.params.signature
-        });
-    }
-});
-
-// Bootstrap API endpoints
-app.get('/api/bootstrap/status', (req, res): void => {
-    try {
-        const status = getBootstrapStatus(houseBalance);
-        const now = Date.now();
-        
-        void res.json({
-            bootstrap: {
-                masterEnabled: bootstrapState.masterEnabled,
-                currentlyActive: status.active,
-                mode: status.mode,
-                canReenter: status.canReenter,
-                reason: status.reason,
-                
-                sessionActive: bootstrapState.currentlyActive,
-                sessionStartTime: bootstrapState.currentSessionStart,
-                sessionDuration: bootstrapState.currentSessionStart > 0 ? now - bootstrapState.currentSessionStart : 0,
-                sessionGamesPlayed: bootstrapState.currentSessionGames,
-                sessionProfit: bootstrapState.currentSessionProfit,
-                
-                totalSessions: bootstrapState.totalSessions,
-                totalBootstrapTime: bootstrapState.totalBootstrapTime,
-                lifetimeGamesPlayed: bootstrapState.lifetimeGamesPlayed,
-                lifetimeProfitGenerated: bootstrapState.lifetimeProfitGenerated,
-                
-                lastExitTime: bootstrapState.lastExitTime,
-                cooldownRemaining: Math.max(0, (bootstrapState.lastExitTime + BOOTSTRAP_CONFIG.COOLDOWN_AFTER_EXIT) - now),
-                sessionTimeRemaining: bootstrapState.currentSessionStart > 0 ? 
-                    Math.max(0, (bootstrapState.currentSessionStart + BOOTSTRAP_CONFIG.MAX_SINGLE_SESSION) - now) : 0,
-                lifetimeTimeRemaining: Math.max(0, (BOOTSTRAP_CONFIG.INITIAL_START_TIME + BOOTSTRAP_CONFIG.MAX_TOTAL_DURATION) - now),
-                
-                thresholds: {
-                    emergency: BOOTSTRAP_CONFIG.EMERGENCY_THRESHOLD,
-                    enter: BOOTSTRAP_CONFIG.ENTER_BOOTSTRAP_THRESHOLD,
-                    exit: BOOTSTRAP_CONFIG.EXIT_BOOTSTRAP_THRESHOLD,
-                    current: houseBalance
-                }
-            },
-            
-            currentSettings: status.settings,
-            
-            controls: {
-                forceExit: '/api/bootstrap/force-exit',
-                disable: '/api/bootstrap/disable',
-                resetCooldown: '/api/bootstrap/reset-cooldown'
-            }
-        });
-    } catch (error) {
-        console.error('Error in /api/bootstrap/status:', error);
-        res.status(500).json({ error: 'Failed to get bootstrap status' });
-    }
-});
-
-function forceExitBootstrap(reason = 'Manual override'): void {
-    if (bootstrapState.currentlyActive) {
-        const sessionDuration = Date.now() - bootstrapState.currentSessionStart;
-        bootstrapState.totalBootstrapTime += sessionDuration;
-        bootstrapState.currentlyActive = false;
-        bootstrapState.lastExitTime = Date.now();
-        console.log(`🛑 Bootstrap force-exited: ${reason}`);
-    }
-}
-
-function disableBootstrapPermanently(reason = 'Manual disable'): void {
-    forceExitBootstrap(reason);
-    bootstrapState.masterEnabled = false;
-    console.log(`🚫 Bootstrap permanently disabled: ${reason}`);
-}
-
-function resetBootstrapCooldown(): void {
-    bootstrapState.lastExitTime = 0;
-    console.log('🔄 Bootstrap cooldown reset - can re-enter immediately');
-}
-
-app.post('/api/bootstrap/force-exit', (req, res): void => {
-    try {
-        forceExitBootstrap('API request');
-        void res.json({ success: true, message: 'Bootstrap force-exited' });
-    } catch (error) {
-        console.error('Error in /api/bootstrap/force-exit:', error);
-        res.status(500).json({ success: false, error: 'Failed to force-exit bootstrap' });
-    }
-});
-
-app.post('/api/bootstrap/disable', (req, res): void => {
-    try {
-        disableBootstrapPermanently('API request');
-        void res.json({ success: true, message: 'Bootstrap permanently disabled' });
-    } catch (error) {
-        console.error('Error in /api/bootstrap/disable:', error);
-        res.status(500).json({ success: false, error: 'Failed to disable bootstrap' });
-    }
-});
-
-app.post('/api/bootstrap/reset-cooldown', (req, res): void => {
-    try {
-        resetBootstrapCooldown();
-        void res.json({ success: true, message: 'Bootstrap cooldown reset' });
-    } catch (error) {
-        console.error('Error in /api/bootstrap/reset-cooldown:', error);
-        res.status(500).json({ success: false, error: 'Failed to reset cooldown' });
-    }
-});
-
-// GAME COUNTER FIX: Add optional endpoint to check game counter status
-app.get('/api/game/counter', (req, res): void => {
-    try {
-        void res.json({
-            currentGameCounter: globalGameCounter,
-            nextGameNumber: globalGameCounter >= 100 ? 1 : globalGameCounter + 1,
-            historyLength: gameHistory.length,
-            oldestGameInHistory: gameHistory.length > 0 ? gameHistory[0].gameNumber : null,
-            newestGameInHistory: gameHistory.length > 0 ? gameHistory[gameHistory.length - 1].gameNumber : null
-        });
-    } catch (error) {
-        console.error('Error in /api/game/counter:', error);
-        res.status(500).json({ error: 'Failed to get game counter status' });
-    }
-});
-
-// ===== TRANSACTION MONITORING ADMIN ENDPOINTS =====
-
 // Manual trigger endpoint for testing
 app.post('/api/admin/trigger-monitor', async (req, res): Promise<void> => {
     try {
@@ -6440,122 +4704,32 @@ app.post('/api/admin/trigger-monitor', async (req, res): Promise<void> => {
     }
 });
 
-// Check if user is registered and can receive deposits
-app.get('/api/admin/user-deposit-status/:userId', async (req, res): Promise<void> => {
+// 🔒 ADMIN ONLY: Private house balance endpoint (requires admin key)
+app.get('/api/admin/house-balance', async (req, res): Promise<void> => {
     try {
-        const { userId } = req.params;
+        const adminKey = req.headers['x-admin-key'] || req.query.adminKey;
         
-        console.log(`🔍 Checking deposit status for user ${userId}...`);
-        
-        // Check if user exists in hybrid wallets table
-        const { data: userWallet, error: walletError } = await supabaseService
-            .from('user_hybrid_wallets')
-            .select('*')
-            .eq('user_id', userId)
-            .single();
-        
-        // Check if there are any pending deposits for their wallet
-        let pendingDeposits = [];
-        if (userWallet) {
-            const { data: pending } = await supabaseService
-                .from('pending_deposits')
-                .select('*')
-                .eq('wallet_address', userWallet.external_wallet_address)
-                .eq('status', 'pending');
-            
-            pendingDeposits = pending || [];
-        }
-        
-        res.json({
-            userId,
-            isRegistered: !walletError && !!userWallet,
-            walletAddress: userWallet?.external_wallet_address || null,
-            currentBalance: userWallet ? parseFloat(userWallet.custodial_balance) || 0 : 0,
-            totalDeposited: userWallet ? parseFloat(userWallet.custodial_total_deposited) || 0 : 0,
-            pendingDeposits: pendingDeposits.length,
-            pendingAmount: pendingDeposits.reduce((sum, d) => sum + parseFloat(d.amount), 0),
-            canReceiveDeposits: !walletError && !!userWallet,
-            timestamp: Date.now()
-        });
-        
-    } catch (error) {
-        console.error('❌ User deposit status error:', error);
-        res.status(500).json({
-            error: 'Failed to check user deposit status',
-            userId: req.params.userId
-        });
-    }
-});
-
-// Register user for deposits (creates entry in user_hybrid_wallets table)
-app.post('/api/admin/register-user-deposits', async (req, res): Promise<void> => {
-    try {
-        const { userId, walletAddress } = req.body;
-        
-        if (!userId || !walletAddress) {
-            res.status(400).json({
-                error: 'Missing userId or walletAddress'
+        if (adminKey !== process.env.ADMIN_SECRET_KEY) {
+            res.status(401).json({
+                error: 'Unauthorized - Invalid admin key'
             });
             return;
         }
         
-        console.log(`👤 Registering user ${userId} for deposits with wallet ${walletAddress}...`);
-        
-        // Check if user already exists
-        const { data: existing } = await supabaseService
-            .from('user_hybrid_wallets')
-            .select('user_id')
-            .eq('user_id', userId)
-            .single();
-        
-        if (existing) {
-            res.json({
-                success: true,
-                message: 'User already registered for deposits',
-                userId,
-                walletAddress,
-                isNewRegistration: false
-            });
-            return;
-        }
-        
-        // Create new hybrid wallet entry
-        const { error: insertError } = await supabaseService
-            .from('user_hybrid_wallets')
-            .insert({
-                user_id: userId,
-                external_wallet_address: walletAddress,
-                custodial_balance: 0,
-                custodial_total_deposited: 0,
-                embedded_balance: 0,
-                total_transfers_to_embedded: 0,
-                total_transfers_to_custodial: 0,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-            });
-        
-        if (insertError) {
-            throw insertError;
-        }
-        
-        console.log(`✅ User ${userId} registered for deposits`);
-        
-        // Check for pending deposits for this wallet
-        setTimeout(() => resolvePendingDeposits(), 1000);
+        await updateHouseBalance();
         
         res.json({
-            success: true,
-            message: 'User registered for deposits successfully',
-            userId,
-            walletAddress,
-            isNewRegistration: true,
-            note: 'Checking for pending deposits...'
+            houseBalance: houseBalance,
+            maxPayoutCapacity: calculateMaxPayoutCapacity(),
+            lastUpdated: lastHouseBalanceUpdate,
+            timestamp: Date.now(),
+            status: 'healthy'
         });
         
     } catch (error) {
-        console.error('❌ User registration error:', error);
+        console.error('❌ Admin house balance error:', error);
         res.status(500).json({
-            error: 'Failed to register user for deposits',
+            error: 'Failed to get house balance',
             details: error instanceof Error ? error.message : 'Unknown error'
         });
     }
@@ -6626,8 +4800,6 @@ server.listen(PORT, async () => {
         
         console.log(`📡 Solana RPC: ${SOLANA_RPC_URL}`);
         console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-        console.log(`🔗 Privy integration: http://localhost:${PORT}/api/privy/stats`);
-        console.log(`💼 Wallet overview: http://localhost:${PORT}/api/wallet-overview/[userId]`);
         console.log(`🔧 Transaction monitor: http://localhost:${PORT}/api/admin/trigger-monitor`);
         
         // FIXED: Clear any existing game state and start fresh
@@ -6638,7 +4810,7 @@ server.listen(PORT, async () => {
         console.log(`🚀 Starting game loop with countdown...`);
         
         // Start transaction monitoring
-        console.log('🔍 Starting database-driven transaction monitoring...');
+        console.log('🔍 Starting enhanced database-driven transaction monitoring...');
         
         // Run initial scan
         monitorAndUpdateDatabase();
@@ -6646,7 +4818,7 @@ server.listen(PORT, async () => {
         // Check for pending deposits immediately
         resolvePendingDeposits();
         
-        console.log('✅ Transaction monitoring active - will update database automatically');
+        console.log('✅ Enhanced transaction monitoring active - will update database with real-time balance updates');
         
         // FIXED: Start the waiting period with a small delay to ensure everything is ready
         setTimeout(() => {

@@ -43,92 +43,14 @@ interface TradingControlsProps {
 }
 
 // 🔧 FIXED: Optimized wallet balance hook with stable update function  
-const useWalletBalance = (walletAddress: string) => {
-  const [balance, setBalance] = useState<number>(0);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [lastUpdated, setLastUpdated] = useState<number>(0);
-  const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const lastWalletRef = useRef<string>('');
-
-  // Create stable update function with useCallback
-  const updateBalance = useCallback(async () => {
-    if (!walletAddress) return;
-    
-    // Prevent multiple simultaneous updates
-    if (loading) return;
-    
-    setLoading(true);
-    
-    try {
-      const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-      const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
-      
-      if (!rpcUrl) {
-        console.error('Missing NEXT_PUBLIC_SOLANA_RPC_URL environment variable');
-        setBalance(0);
-        return;
-      }
-      
-      const connectionConfig: any = { commitment: 'confirmed' };
-      if (apiKey) {
-        connectionConfig.httpHeaders = { 'x-api-key': apiKey };
-      }
-      
-      const connection = new Connection(rpcUrl, connectionConfig);
-      const publicKey = new PublicKey(walletAddress);
-      const balanceResponse = await connection.getBalance(publicKey);
-      const solBalance = balanceResponse / LAMPORTS_PER_SOL;
-      
-      setBalance(solBalance);
-      setLastUpdated(Date.now());
-      
-    } catch (error) {
-      console.error('❌ useWalletBalance: Failed to fetch balance:', error);
-      setBalance(0);
-    } finally {
-      setLoading(false);
-    }
-  }, [walletAddress, loading]); // Stable dependencies
-
-  useEffect(() => {
-    // Only set up polling if walletAddress changes
-    if (walletAddress && walletAddress !== lastWalletRef.current) {
-      console.log(`🎯 Setting up wallet balance polling for: ${walletAddress}`);
-      lastWalletRef.current = walletAddress;
-      
-      // Clear existing interval
-      if (updateIntervalRef.current) {
-        clearInterval(updateIntervalRef.current);
-      }
-      
-      // Initial fetch
-      updateBalance();
-      
-      // Set new interval with longer delay to reduce re-renders
-      updateIntervalRef.current = setInterval(() => {
-        if (!loading) { // Only update if not currently loading
-          updateBalance();
-        }
-      }, 60000); // 1 minute
-      
-      return () => {
-        if (updateIntervalRef.current) {
-          clearInterval(updateIntervalRef.current);
-        }
-      };
-    }
-  }, [walletAddress, updateBalance]); // Now updateBalance is stable
-
-  return { balance, loading, lastUpdated };
-};
-
-// 🔧 FIXED: Optimized custodial balance hook with stable update function
+// 🔧 FIXED: Enhanced custodial balance hook with socket events and force refresh
 const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<number>(0);
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastUserIdRef = useRef<string>('');
+  const socketListenersRef = useRef<boolean>(false);
 
   // Create stable update function with useCallback
   const updateCustodialBalance = useCallback(async () => {
@@ -170,6 +92,32 @@ const useCustodialBalance = (userId: string) => {
     }
   }, [userId, loading]); // Stable dependencies
 
+  // 🔧 NEW: Force refresh function for immediate updates
+  const forceRefresh = useCallback(async () => {
+    if (!userId) return;
+    
+    console.log(`🔄 Force refreshing balance for ${userId}...`);
+    setLoading(true);
+    
+    try {
+      const response = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}`); // Cache bust
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.custodialBalance !== undefined) {
+          const newBalance = parseFloat(data.custodialBalance) || 0;
+          console.log(`💰 Force refresh - Balance: ${newBalance.toFixed(6)} SOL`);
+          setCustodialBalance(newBalance);
+          setLastUpdated(Date.now());
+        }
+      }
+    } catch (error) {
+      console.error('❌ Force refresh failed:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
   useEffect(() => {
     // Only set up polling if userId changes
     if (userId && userId !== lastUserIdRef.current) {
@@ -189,7 +137,7 @@ const useCustodialBalance = (userId: string) => {
         if (!loading) { // Only update if not currently loading
           updateCustodialBalance();
         }
-      }, 20000); // 20 seconds
+      }, 15000); // Reduced to 15 seconds for faster updates
       
       return () => {
         if (updateIntervalRef.current) {
@@ -197,9 +145,181 @@ const useCustodialBalance = (userId: string) => {
         }
       };
     }
-  }, [userId, updateCustodialBalance]); // Now updateCustodialBalance is stable
+  }, [userId, updateCustodialBalance]);
 
-  return { custodialBalance, loading, lastUpdated, updateCustodialBalance };
+  // 🔧 NEW: Socket event listeners for real-time updates
+  useEffect(() => {
+    if (!userId || socketListenersRef.current) return;
+
+    const socket = (window as any).gameSocket;
+    if (socket) {
+      console.log(`🔌 Setting up real-time balance listeners for user: ${userId}`);
+      socketListenersRef.current = true;
+      
+      const handleCustodialBalanceUpdate = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💰 Real-time custodial balance update: ${data.custodialBalance?.toFixed(6)} SOL`);
+          setCustodialBalance(parseFloat(data.custodialBalance) || 0);
+          setLastUpdated(Date.now());
+        }
+      };
+
+      const handleBalanceUpdate = (data: any) => {
+        if (data.userId === userId && data.type === 'custodial') {
+          console.log(`💰 Real-time balance update: ${data.balance?.toFixed(6)} SOL`);
+          setCustodialBalance(parseFloat(data.balance) || 0);
+          setLastUpdated(Date.now());
+        }
+      };
+
+      const handleDepositConfirmation = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💰 Deposit confirmed, refreshing balance...`);
+          // Force refresh after deposit
+          setTimeout(forceRefresh, 1000);
+        }
+      };
+  
+      socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+      socket.on('balanceUpdate', handleBalanceUpdate);
+      socket.on('depositConfirmed', handleDepositConfirmation);
+      
+      return () => {
+        console.log(`🔌 Cleaning up balance listeners for user: ${userId}`);
+        socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+        socket.off('balanceUpdate', handleBalanceUpdate);
+        socket.off('depositConfirmed', handleDepositConfirmation);
+        socketListenersRef.current = false;
+      };
+    }
+  }, [userId, forceRefresh]);
+
+  return { custodialBalance, loading, lastUpdated, updateCustodialBalance, forceRefresh };
+};
+
+// 🔧 ENHANCED: Better embedded wallet balance hook with socket events
+const useWalletBalance = (walletAddress: string) => {
+  const [balance, setBalance] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [lastUpdated, setLastUpdated] = useState<number>(0);
+  const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastWalletRef = useRef<string>('');
+  const socketListenersRef = useRef<boolean>(false);
+
+  // Create stable update function with useCallback
+  const updateBalance = useCallback(async () => {
+    if (!walletAddress) return;
+    
+    // Prevent multiple simultaneous updates
+    if (loading) return;
+    
+    setLoading(true);
+    
+    try {
+      const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+      const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+      
+      if (!rpcUrl) {
+        console.error('Missing NEXT_PUBLIC_SOLANA_RPC_URL environment variable');
+        setBalance(0);
+        return;
+      }
+      
+      const connectionConfig: any = { commitment: 'confirmed' };
+      if (apiKey) {
+        connectionConfig.httpHeaders = { 'x-api-key': apiKey };
+      }
+      
+      const connection = new Connection(rpcUrl, connectionConfig);
+      const publicKey = new PublicKey(walletAddress);
+      const balanceResponse = await connection.getBalance(publicKey);
+      const solBalance = balanceResponse / LAMPORTS_PER_SOL;
+      
+      setBalance(solBalance);
+      setLastUpdated(Date.now());
+      
+    } catch (error) {
+      console.error('❌ useWalletBalance: Failed to fetch balance:', error);
+      // Don't reset balance on error
+    } finally {
+      setLoading(false);
+    }
+  }, [walletAddress, loading]);
+
+  // 🔧 NEW: Force refresh for immediate updates
+  const forceRefresh = useCallback(async () => {
+    if (!walletAddress) return;
+    
+    console.log(`🔄 Force refreshing wallet balance for: ${walletAddress}`);
+    await updateBalance();
+  }, [walletAddress, updateBalance]);
+
+  useEffect(() => {
+    // Only set up polling if walletAddress changes
+    if (walletAddress && walletAddress !== lastWalletRef.current) {
+      console.log(`🎯 Setting up wallet balance polling for: ${walletAddress}`);
+      lastWalletRef.current = walletAddress;
+      
+      // Clear existing interval
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+      }
+      
+      // Initial fetch
+      updateBalance();
+      
+      // Set new interval with shorter delay for better responsiveness
+      updateIntervalRef.current = setInterval(() => {
+        if (!loading) { // Only update if not currently loading
+          updateBalance();
+        }
+      }, 30000); // 30 seconds
+      
+      return () => {
+        if (updateIntervalRef.current) {
+          clearInterval(updateIntervalRef.current);
+        }
+      };
+    }
+  }, [walletAddress, updateBalance]);
+
+  // 🔧 NEW: Socket listeners for wallet balance updates
+  useEffect(() => {
+    if (!walletAddress || socketListenersRef.current) return;
+
+    const socket = (window as any).gameSocket;
+    if (socket) {
+      console.log(`🔌 Setting up wallet balance listeners for: ${walletAddress}`);
+      socketListenersRef.current = true;
+      
+      const handleWalletBalanceUpdate = (data: any) => {
+        if (data.walletAddress === walletAddress) {
+          console.log(`💰 Real-time wallet balance update: ${data.balance?.toFixed(6)} SOL`);
+          setBalance(parseFloat(data.balance) || 0);
+          setLastUpdated(Date.now());
+        }
+      };
+
+      const handleTransactionConfirmed = (data: any) => {
+        if (data.walletAddress === walletAddress) {
+          console.log(`🔗 Transaction confirmed for ${walletAddress}, refreshing balance...`);
+          setTimeout(forceRefresh, 2000); // Wait 2 seconds for blockchain confirmation
+        }
+      };
+  
+      socket.on('walletBalanceUpdate', handleWalletBalanceUpdate);
+      socket.on('transactionConfirmed', handleTransactionConfirmed);
+      
+      return () => {
+        console.log(`🔌 Cleaning up wallet balance listeners for: ${walletAddress}`);
+        socket.off('walletBalanceUpdate', handleWalletBalanceUpdate);
+        socket.off('transactionConfirmed', handleTransactionConfirmed);
+        socketListenersRef.current = false;
+      };
+    }
+  }, [walletAddress, forceRefresh]);
+
+  return { balance, loading, lastUpdated, updateBalance, forceRefresh };
 };
 
 // 🔧 FIXED: Simplified RUGGED balance hook with stable update function
@@ -207,6 +327,7 @@ const useRuggedBalance = (walletAddress: string) => {
   const [ruggedBalance, setRuggedBalance] = useState<number>(1000);
   const [loading, setLoading] = useState<boolean>(false);
   const lastWalletRef = useRef<string>('');
+  const socketListenersRef = useRef<boolean>(false);
 
   // Create stable update function with useCallback
   const updateRuggedBalance = useCallback(async () => {
@@ -216,12 +337,21 @@ const useRuggedBalance = (walletAddress: string) => {
     try {
       // TODO: Implement actual SPL token balance fetching
       console.log(`🎯 RUGGED balance check for: ${walletAddress}`);
+      // For now, keep the static 1000 balance
     } catch (error) {
       console.error('Failed to fetch RUGGED balance:', error);
     } finally {
       setLoading(false);
     }
-  }, [walletAddress, loading]); // Stable dependencies
+  }, [walletAddress, loading]);
+
+  // 🔧 NEW: Force refresh for immediate updates
+  const forceRefresh = useCallback(async () => {
+    if (!walletAddress) return;
+    
+    console.log(`🔄 Force refreshing RUGGED balance for: ${walletAddress}`);
+    await updateRuggedBalance();
+  }, [walletAddress, updateRuggedBalance]);
 
   useEffect(() => {
     // Only run once per wallet address
@@ -230,10 +360,296 @@ const useRuggedBalance = (walletAddress: string) => {
       lastWalletRef.current = walletAddress;
       updateRuggedBalance();
     }
-  }, [walletAddress, updateRuggedBalance]); // Now updateRuggedBalance is stable
+  }, [walletAddress, updateRuggedBalance]);
 
-  return { ruggedBalance, loading, updateRuggedBalance };
+  // 🔧 NEW: Socket listeners for RUGGED balance updates  
+  useEffect(() => {
+    if (!walletAddress || socketListenersRef.current) return;
+
+    const socket = (window as any).gameSocket;
+    if (socket) {
+      console.log(`🔌 Setting up RUGGED balance listeners for: ${walletAddress}`);
+      socketListenersRef.current = true;
+      
+      const handleRuggedBalanceUpdate = (data: any) => {
+        if (data.walletAddress === walletAddress) {
+          console.log(`💰 Real-time RUGGED balance update: ${data.balance?.toFixed(0)} RUGGED`);
+          setRuggedBalance(parseFloat(data.balance) || 1000);
+        }
+      };
+
+      socket.on('ruggedBalanceUpdate', handleRuggedBalanceUpdate);
+      
+      return () => {
+        console.log(`🔌 Cleaning up RUGGED balance listeners for: ${walletAddress}`);
+        socket.off('ruggedBalanceUpdate', handleRuggedBalanceUpdate);
+        socketListenersRef.current = false;
+      };
+    }
+  }, [walletAddress]);
+
+  return { ruggedBalance, loading, updateRuggedBalance, forceRefresh };
 };
+
+// 🔧 NEW: Add manual refresh button to BalanceDisplay component
+const BalanceDisplay: FC<{
+  currentToken: TokenType;
+  custodialBalance: number;
+  embeddedWalletBalance: number;
+  ruggedBalance: number;
+  onTokenChange: (token: TokenType) => void;
+  onDepositClick: () => void;
+  onWithdrawClick: () => void;
+  onAirdropClick: () => void;
+  isMobile: boolean;
+  showExpanded: boolean;
+  onToggleExpanded: () => void;
+  isLoading: boolean;
+  onRefresh?: () => void; // 🔧 NEW: Manual refresh callback
+}> = React.memo(({ 
+  currentToken, 
+  custodialBalance,
+  embeddedWalletBalance,
+  ruggedBalance,
+  onTokenChange, 
+  onDepositClick, 
+  onWithdrawClick, 
+  onAirdropClick, 
+  isMobile, 
+  showExpanded, 
+  onToggleExpanded,
+  isLoading,
+  onRefresh
+}) => {
+  const activeBalance = currentToken === TokenType.SOL ? custodialBalance : ruggedBalance;
+  
+  const formatBalance = (balance: number, token: TokenType) => {
+    if (token === TokenType.SOL) {
+      return balance.toFixed(3);
+    } else {
+      return balance.toFixed(0);
+    }
+  };
+
+  if (isMobile) {
+    return (
+      <div className="mb-2">
+        <div 
+          className="flex items-center justify-between bg-gray-800 rounded-lg p-2 cursor-pointer"
+          onClick={onToggleExpanded}
+        >
+          <div className="flex items-center space-x-2">
+            <div className={`w-5 h-5 rounded-full flex items-center justify-center ${
+              currentToken === TokenType.SOL ? 'bg-blue-500' : 'bg-green-500'
+            }`}>
+              <span className="text-white font-bold text-xs">
+                {currentToken === TokenType.SOL ? 'S' : 'R'}
+              </span>
+            </div>
+            <div>
+              {currentToken === TokenType.SOL ? (
+                <div>
+                  <div className="text-sm font-bold text-blue-400">
+                    {formatBalance(custodialBalance, currentToken)} SOL
+                    {isLoading && <span className="ml-1 text-xs text-gray-400">↻</span>}
+                  </div>
+                  <div className="text-xs text-gray-400">Game Balance</div>
+                </div>
+              ) : (
+                <div className="text-sm font-bold text-green-400">
+                  {formatBalance(activeBalance, currentToken)} {currentToken}
+                  {isLoading && <span className="ml-1 text-xs text-gray-400">↻</span>}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center space-x-2">
+            {/* 🔧 NEW: Manual refresh button */}
+            {onRefresh && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRefresh();
+                }}
+                className="text-gray-400 hover:text-white transition-colors"
+                disabled={isLoading}
+              >
+                <span className={`text-xs ${isLoading ? 'animate-spin' : ''}`}>↻</span>
+              </button>
+            )}
+            <Wallet className="w-4 h-4 text-gray-400" />
+            <span className="text-gray-400 text-sm">{showExpanded ? '▲' : '▼'}</span>
+          </div>
+        </div>
+
+        {showExpanded && (
+          <div className="bg-gray-800 rounded-lg p-2 mt-1">
+            {currentToken === TokenType.SOL && (
+              <div className="mb-2 p-2 bg-gray-900 rounded text-xs">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-green-400">🎮 Game Balance:</span>
+                  <span className="text-white font-bold">{custodialBalance.toFixed(3)} SOL</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-blue-400">💼 Wallet Balance:</span>
+                  <span className="text-white font-bold">{embeddedWalletBalance.toFixed(3)} SOL</span>
+                </div>
+              </div>
+            )}
+            
+            <div className="flex space-x-2 mb-2">
+              <button
+                onClick={() => onTokenChange(TokenType.SOL)}
+                className={`flex-1 px-2 py-1 text-xs rounded ${
+                  currentToken === TokenType.SOL 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-700 text-gray-300'
+                }`}
+              >
+                SOL
+              </button>
+              <button
+                onClick={() => {
+                  onTokenChange(TokenType.RUGGED);
+                  if (ruggedBalance < 10) {
+                    onAirdropClick();
+                  }
+                }}
+                className={`flex-1 px-2 py-1 text-xs rounded ${
+                  currentToken === TokenType.RUGGED 
+                    ? 'bg-green-600 text-white' 
+                    : 'bg-gray-700 text-gray-300'
+                }`}
+              >
+                RUGGED
+              </button>
+            </div>
+
+            <div className="flex space-x-2">
+              <button
+                onClick={onDepositClick}
+                className="flex-1 bg-green-600 hover:bg-green-700 text-white py-1 px-2 rounded text-xs flex items-center justify-center"
+              >
+                <ArrowDownLeft className="w-3 h-3 mr-1" />
+                Deposit
+              </button>
+              <button
+                onClick={onWithdrawClick}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-1 px-2 rounded text-xs flex items-center justify-center"
+              >
+                <ArrowUpRight className="w-3 h-3 mr-1" />
+                Withdraw
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Desktop version with refresh button (similar pattern)
+  return (
+    <div className="bg-gray-800 rounded-lg p-3 mb-3">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center space-x-3">
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+            currentToken === TokenType.SOL ? 'bg-blue-500' : 'bg-green-500'
+          }`}>
+            <span className="text-white font-bold text-sm">
+              {currentToken === TokenType.SOL ? 'SOL' : 'RUG'}
+            </span>
+          </div>
+          
+          <div>
+            <div className="text-xs text-gray-400">
+              {currentToken === TokenType.SOL ? 'Game Balance' : 'Balance'}
+            </div>
+            <div className={`text-lg font-bold ${
+              currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
+            }`}>
+              {formatBalance(activeBalance, currentToken)} {currentToken}
+              {isLoading && <span className="ml-2 text-xs text-gray-400">Updating...</span>}
+            </div>
+          </div>
+        </div>
+        
+        <div className="flex items-center space-x-2">
+          {/* 🔧 NEW: Manual refresh button for desktop */}
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              className="text-gray-400 hover:text-white transition-colors p-1"
+              disabled={isLoading}
+              title="Refresh balance"
+            >
+              <span className={`text-sm ${isLoading ? 'animate-spin' : ''}`}>↻</span>
+            </button>
+          )}
+          
+          <button
+            onClick={() => onTokenChange(TokenType.SOL)}
+            className={`px-3 py-1 text-xs rounded ${
+              currentToken === TokenType.SOL 
+                ? 'bg-blue-600 text-white' 
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            SOL
+          </button>
+          <button
+            onClick={() => {
+              onTokenChange(TokenType.RUGGED);
+              if (ruggedBalance < 10) {
+                onAirdropClick();
+              }
+            }}
+            className={`px-3 py-1 text-xs rounded ${
+              currentToken === TokenType.RUGGED 
+                ? 'bg-green-600 text-white' 
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            RUGGED
+          </button>
+        </div>
+      </div>
+
+      {currentToken === TokenType.SOL && (
+        <div className="mb-3 p-2 bg-gray-900 rounded-md">
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <div className="text-green-400 text-xs mb-1">🎮 Game Balance</div>
+              <div className="text-white font-bold">{custodialBalance.toFixed(3)} SOL</div>
+              <div className="text-xs text-gray-500">For gaming</div>
+            </div>
+            <div>
+              <div className="text-blue-400 text-xs mb-1">💼 Wallet Balance</div>
+              <div className="text-white font-bold">{embeddedWalletBalance.toFixed(3)} SOL</div>
+              <div className="text-xs text-gray-500">For deposits</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={onDepositClick}
+          className="bg-green-600 hover:bg-green-700 text-white py-2 px-3 rounded text-sm flex items-center justify-center"
+        >
+          <ArrowDownLeft className="w-4 h-4 mr-2" />
+          Deposit
+        </button>
+        <button
+          onClick={onWithdrawClick}
+          className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm flex items-center justify-center"
+        >
+          <ArrowUpRight className="w-4 h-4 mr-2" />
+          Withdraw
+        </button>
+      </div>
+    </div>
+  );
+});
 
 // 🔧 OPTIMIZED: Memoized components to prevent unnecessary re-renders
 const CompactGameInfo: FC<{
@@ -342,238 +758,6 @@ const CompactGameInfo: FC<{
   );
 });
 
-// 🔧 OPTIMIZED: Memoized balance display
-const BalanceDisplay: FC<{
-  currentToken: TokenType;
-  custodialBalance: number;
-  embeddedWalletBalance: number;
-  ruggedBalance: number;
-  onTokenChange: (token: TokenType) => void;
-  onDepositClick: () => void;
-  onWithdrawClick: () => void;
-  onAirdropClick: () => void;
-  isMobile: boolean;
-  showExpanded: boolean;
-  onToggleExpanded: () => void;
-  isLoading: boolean;
-}> = React.memo(({ 
-  currentToken, 
-  custodialBalance,
-  embeddedWalletBalance,
-  ruggedBalance,
-  onTokenChange, 
-  onDepositClick, 
-  onWithdrawClick, 
-  onAirdropClick, 
-  isMobile, 
-  showExpanded, 
-  onToggleExpanded,
-  isLoading
-}) => {
-  const activeBalance = currentToken === TokenType.SOL ? custodialBalance : ruggedBalance;
-  
-  const formatBalance = (balance: number, token: TokenType) => {
-    if (token === TokenType.SOL) {
-      return balance.toFixed(3);
-    } else {
-      return balance.toFixed(0);
-    }
-  };
-
-  if (isMobile) {
-    return (
-      <div className="mb-2">
-        <div 
-          className="flex items-center justify-between bg-gray-800 rounded-lg p-2 cursor-pointer"
-          onClick={onToggleExpanded}
-        >
-          <div className="flex items-center space-x-2">
-            <div className={`w-5 h-5 rounded-full flex items-center justify-center ${
-              currentToken === TokenType.SOL ? 'bg-blue-500' : 'bg-green-500'
-            }`}>
-              <span className="text-white font-bold text-xs">
-                {currentToken === TokenType.SOL ? 'S' : 'R'}
-              </span>
-            </div>
-            <div>
-              {currentToken === TokenType.SOL ? (
-                <div>
-                  <div className="text-sm font-bold text-blue-400">
-                    {formatBalance(custodialBalance, currentToken)} SOL
-                    {isLoading && <span className="ml-1 text-xs text-gray-400">↻</span>}
-                  </div>
-                  <div className="text-xs text-gray-400">Game Balance</div>
-                </div>
-              ) : (
-                <div className="text-sm font-bold text-green-400">
-                  {formatBalance(activeBalance, currentToken)} {currentToken}
-                  {isLoading && <span className="ml-1 text-xs text-gray-400">↻</span>}
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Wallet className="w-4 h-4 text-gray-400" />
-            <span className="text-gray-400 text-sm">{showExpanded ? '▲' : '▼'}</span>
-          </div>
-        </div>
-
-        {showExpanded && (
-          <div className="bg-gray-800 rounded-lg p-2 mt-1">
-            {currentToken === TokenType.SOL && (
-              <div className="mb-2 p-2 bg-gray-900 rounded text-xs">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-green-400">🎮 Game Balance:</span>
-                  <span className="text-white font-bold">{custodialBalance.toFixed(3)} SOL</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-blue-400">💼 Wallet Balance:</span>
-                  <span className="text-white font-bold">{embeddedWalletBalance.toFixed(3)} SOL</span>
-                </div>
-              </div>
-            )}
-            
-            <div className="flex space-x-2 mb-2">
-              <button
-                onClick={() => onTokenChange(TokenType.SOL)}
-                className={`flex-1 px-2 py-1 text-xs rounded ${
-                  currentToken === TokenType.SOL 
-                    ? 'bg-blue-600 text-white' 
-                    : 'bg-gray-700 text-gray-300'
-                }`}
-              >
-                SOL
-              </button>
-              <button
-                onClick={() => {
-                  onTokenChange(TokenType.RUGGED);
-                  if (ruggedBalance < 10) {
-                    onAirdropClick();
-                  }
-                }}
-                className={`flex-1 px-2 py-1 text-xs rounded ${
-                  currentToken === TokenType.RUGGED 
-                    ? 'bg-green-600 text-white' 
-                    : 'bg-gray-700 text-gray-300'
-                }`}
-              >
-                RUGGED
-              </button>
-            </div>
-
-            <div className="flex space-x-2">
-              <button
-                onClick={onDepositClick}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white py-1 px-2 rounded text-xs flex items-center justify-center"
-              >
-                <ArrowDownLeft className="w-3 h-3 mr-1" />
-                Deposit
-              </button>
-              <button
-                onClick={onWithdrawClick}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-1 px-2 rounded text-xs flex items-center justify-center"
-              >
-                <ArrowUpRight className="w-3 h-3 mr-1" />
-                Withdraw
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-gray-800 rounded-lg p-3 mb-3">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center space-x-3">
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-            currentToken === TokenType.SOL ? 'bg-blue-500' : 'bg-green-500'
-          }`}>
-            <span className="text-white font-bold text-sm">
-              {currentToken === TokenType.SOL ? 'SOL' : 'RUG'}
-            </span>
-          </div>
-          
-          <div>
-            <div className="text-xs text-gray-400">
-              {currentToken === TokenType.SOL ? 'Game Balance' : 'Balance'}
-            </div>
-            <div className={`text-lg font-bold ${
-              currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
-            }`}>
-              {formatBalance(activeBalance, currentToken)} {currentToken}
-              {isLoading && <span className="ml-2 text-xs text-gray-400">Updating...</span>}
-            </div>
-          </div>
-        </div>
-        
-        <div className="flex space-x-2">
-          <button
-            onClick={() => onTokenChange(TokenType.SOL)}
-            className={`px-3 py-1 text-xs rounded ${
-              currentToken === TokenType.SOL 
-                ? 'bg-blue-600 text-white' 
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
-          >
-            SOL
-          </button>
-          <button
-            onClick={() => {
-              onTokenChange(TokenType.RUGGED);
-              if (ruggedBalance < 10) {
-                onAirdropClick();
-              }
-            }}
-            className={`px-3 py-1 text-xs rounded ${
-              currentToken === TokenType.RUGGED 
-                ? 'bg-green-600 text-white' 
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
-          >
-            RUGGED
-          </button>
-        </div>
-      </div>
-
-      {currentToken === TokenType.SOL && (
-        <div className="mb-3 p-2 bg-gray-900 rounded-md">
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <div className="text-green-400 text-xs mb-1">🎮 Game Balance</div>
-              <div className="text-white font-bold">{custodialBalance.toFixed(3)} SOL</div>
-              <div className="text-xs text-gray-500">For gaming</div>
-            </div>
-            <div>
-              <div className="text-blue-400 text-xs mb-1">💼 Wallet Balance</div>
-              <div className="text-white font-bold">{embeddedWalletBalance.toFixed(3)} SOL</div>
-              <div className="text-xs text-gray-500">For deposits</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          onClick={onDepositClick}
-          className="bg-green-600 hover:bg-green-700 text-white py-2 px-3 rounded text-sm flex items-center justify-center"
-        >
-          <ArrowDownLeft className="w-4 h-4 mr-2" />
-          Deposit
-        </button>
-        <button
-          onClick={onWithdrawClick}
-          className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm flex items-center justify-center"
-        >
-          <ArrowUpRight className="w-4 h-4 mr-2" />
-          Withdraw
-        </button>
-      </div>
-    </div>
-  );
-});
-
 // 🔧 FIXED: Better button state management
 const BettingSection: FC<{
   activeBet: ActiveBet | null;
@@ -616,6 +800,7 @@ const BettingSection: FC<{
   isMobile,
   betValidationError
 }) => {
+
   // 🔧 FIXED: Memoize complex calculations
   const { amountValid, amountInRange, minBetAmount, maxBetAmount } = useMemo(() => {
     const amountNum = parseFloat(amount);
@@ -947,11 +1132,78 @@ const TradingControls: FC<TradingControlsProps> = ({
     getCustodialBalance
   } = useGameSocket(walletAddress, userId || undefined);
   
-  // 🔧 FIXED: Balance hooks with optimized updates
-  const { balance: embeddedWalletBalance, loading: embeddedWalletLoading } = useWalletBalance(walletAddress);
-  const { custodialBalance, loading: custodialBalanceLoading, updateCustodialBalance } = useCustodialBalance(userId || '');
-  const { ruggedBalance, loading: ruggedBalanceLoading, updateRuggedBalance } = useRuggedBalance(walletAddress);
+  // 🔧 UPDATED: Enhanced balance hooks with force refresh capability
+  const { 
+    balance: embeddedWalletBalance, 
+    loading: embeddedWalletLoading, 
+    forceRefresh: refreshEmbeddedBalance 
+  } = useWalletBalance(walletAddress);
   
+  const { 
+    custodialBalance, 
+    loading: custodialBalanceLoading, 
+    updateCustodialBalance, 
+    forceRefresh: refreshCustodialBalance 
+  } = useCustodialBalance(userId || '');
+  
+  const { 
+    ruggedBalance, 
+    loading: ruggedBalanceLoading, 
+    updateRuggedBalance, 
+    forceRefresh: refreshRuggedBalance 
+  } = useRuggedBalance(walletAddress);
+
+  // 🔧 NEW: Manual refresh function for all balances
+  const refreshAllBalances = useCallback(async () => {
+    console.log('🔄 Manually refreshing all balances...');
+    
+    try {
+      // Refresh all balances concurrently
+      await Promise.all([
+        refreshEmbeddedBalance(),
+        refreshCustodialBalance(),
+        refreshRuggedBalance()
+      ]);
+      
+      console.log('✅ All balances refreshed successfully');
+      toast.success('Balances updated!');
+    } catch (error) {
+      console.error('❌ Failed to refresh balances:', error);
+      toast.error('Failed to refresh balances');
+    }
+  }, [refreshEmbeddedBalance, refreshCustodialBalance, refreshRuggedBalance]);
+
+  // 🔧 NEW: Socket listener for deposit confirmations
+  useEffect(() => {
+    const socket = (window as any).gameSocket;
+    if (socket && userId) {
+      console.log(`🔌 Setting up deposit confirmation listeners for user: ${userId}`);
+      
+      const handleDepositConfirmed = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💰 Deposit confirmed for ${userId}, refreshing all balances...`);
+          // Refresh all balances after deposit confirmation
+          setTimeout(refreshAllBalances, 1000);
+        }
+      };
+
+      const handleTransactionConfirmed = (data: any) => {
+        if (data.walletAddress === walletAddress || data.userId === userId) {
+          console.log(`🔗 Transaction confirmed, refreshing balances...`);
+          setTimeout(refreshAllBalances, 2000);
+        }
+      };
+
+      socket.on('depositConfirmed', handleDepositConfirmed);
+      socket.on('transactionConfirmed', handleTransactionConfirmed);
+      
+      return () => {
+        console.log(`🔌 Cleaning up deposit confirmation listeners for user: ${userId}`);
+        socket.off('depositConfirmed', handleDepositConfirmed);
+        socket.off('transactionConfirmed', handleTransactionConfirmed);
+      };
+    }
+  }, [userId, walletAddress, refreshAllBalances]);
   // 🔧 FIXED: Memoize expensive calculations
   const gameState = useMemo(() => {
     const countdownSeconds = countdown ? Math.ceil(countdown / 1000) : 0;
@@ -1845,19 +2097,20 @@ serverError
         </div>
 
         <BalanceDisplay
-          currentToken={currentToken}
-          custodialBalance={custodialBalance}
-          embeddedWalletBalance={embeddedWalletBalance}
-          ruggedBalance={ruggedBalance}
-          onTokenChange={handleTokenChange}
-          onDepositClick={() => setShowDepositModal(true)}
-          onWithdrawClick={() => setShowWithdrawModal(true)}
-          onAirdropClick={() => setShowAirdropModal(true)}
-          isMobile={isMobile}
-          showExpanded={showBalanceExpanded}
-          onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
-          isLoading={custodialBalanceLoading || embeddedWalletLoading || ruggedBalanceLoading}
-        />
+  currentToken={currentToken}
+  custodialBalance={custodialBalance}
+  embeddedWalletBalance={embeddedWalletBalance}
+  ruggedBalance={ruggedBalance}
+  onTokenChange={handleTokenChange}
+  onDepositClick={() => setShowDepositModal(true)}
+  onWithdrawClick={() => setShowWithdrawModal(true)}
+  onAirdropClick={() => setShowAirdropModal(true)}
+  isMobile={isMobile}
+  showExpanded={showBalanceExpanded}
+  onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
+  isLoading={custodialBalanceLoading || embeddedWalletLoading || ruggedBalanceLoading}
+  onRefresh={refreshAllBalances} // 🔧 ADD THIS LINE
+/>
 
         {/* Quick Transfer Section */}
         {currentToken === TokenType.SOL && embeddedWalletBalance > 0.001 && (
@@ -1940,20 +2193,21 @@ serverError
         isMobile={isMobile}
       />
 
-      <BalanceDisplay
-        currentToken={currentToken}
-        custodialBalance={custodialBalance}
-        embeddedWalletBalance={embeddedWalletBalance}
-        ruggedBalance={ruggedBalance}
-        onTokenChange={handleTokenChange}
-        onDepositClick={() => setShowDepositModal(true)}
-        onWithdrawClick={() => setShowWithdrawModal(true)}
-        onAirdropClick={() => setShowAirdropModal(true)}
-        isMobile={isMobile}
-        showExpanded={showBalanceExpanded}
-        onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
-        isLoading={custodialBalanceLoading || embeddedWalletLoading || ruggedBalanceLoading}
-      />
+<BalanceDisplay
+  currentToken={currentToken}
+  custodialBalance={custodialBalance}
+  embeddedWalletBalance={embeddedWalletBalance}
+  ruggedBalance={ruggedBalance}
+  onTokenChange={handleTokenChange}
+  onDepositClick={() => setShowDepositModal(true)}
+  onWithdrawClick={() => setShowWithdrawModal(true)}
+  onAirdropClick={() => setShowAirdropModal(true)}
+  isMobile={isMobile}
+  showExpanded={showBalanceExpanded}
+  onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
+  isLoading={custodialBalanceLoading || embeddedWalletLoading || ruggedBalanceLoading}
+  onRefresh={refreshAllBalances} // 🔧 ADD THIS LINE
+/>
 
       {/* Quick Transfer Section - Desktop */}
       {currentToken === TokenType.SOL && embeddedWalletBalance > 0.001 && (

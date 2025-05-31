@@ -1,30 +1,23 @@
-// src/components/trading/DepositModal.tsx - FIXED: Infinite loop and state issues
+// src/components/modals/DepositModal.tsx - Enhanced with Instant Transfer and Balance Management
 import { FC, useState, useRef, useEffect, useCallback } from 'react';
-import { usePrivy } from '@privy-io/react-auth';
+import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
-import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, QrCode, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, QrCode, RefreshCw, ArrowDownLeft, Zap, ArrowRightLeft } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
+import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
-// Feature flags - same pattern as your withdrawal modal
-const DEBUG_FEATURE_FLAGS = {
-  CUSTODIAL_ONLY_MODE: process.env.NEXT_PUBLIC_CUSTODIAL_ONLY_MODE === 'true',
-  ENABLE_EMBEDDED_WALLETS: process.env.NEXT_PUBLIC_ENABLE_EMBEDDED_WALLETS === 'true',
-  ENABLE_HYBRID_SYSTEM: process.env.NEXT_PUBLIC_ENABLE_HYBRID_SYSTEM === 'true'
-};
-
-function isCustodialOnlyMode(): boolean {
-  return DEBUG_FEATURE_FLAGS.CUSTODIAL_ONLY_MODE || !DEBUG_FEATURE_FLAGS.ENABLE_HYBRID_SYSTEM;
-}
-
-function getWalletMode(): 'custodial' | 'hybrid' | 'embedded' {
-  if (DEBUG_FEATURE_FLAGS.CUSTODIAL_ONLY_MODE) return 'custodial';
-  if (DEBUG_FEATURE_FLAGS.ENABLE_HYBRID_SYSTEM) return 'hybrid';
-  return 'embedded';
-}
+// 🚩 ADD: Import feature flags (matching your other modals)
+import { 
+  isCustodialOnlyMode, 
+  shouldShowEmbeddedWalletUI, 
+  getWalletMode, 
+  getModeDescription,
+  logFeatureFlags 
+} from '../../utils/featureFlags';
 
 enum TokenType {
   SOL = 'SOL',
@@ -40,29 +33,277 @@ interface DepositModalProps {
   userId?: string | null;
 }
 
-interface CustodialDepositResponse {
-  success: boolean;
-  message: string;
-  depositInfo: {
-    depositAddress: string;
-    requestedAmount: string | number;
-    minDeposit: number;
-    maxDeposit: number;
-    network: string;
-    mode: string;
-  };
-  instructions: string[];
-  important: string[];
-  timing: {
-    estimatedCreditTime: string;
-    blockchainConfirmations: string;
-    supportContact: string;
-  };
-  depositAddress: string;
-  qrCodeUrl: string;
-  explorerUrl: string;
-  timestamp: string;
-}
+type DepositTab = 'instant' | 'external';
+
+// 🔧 ENHANCED: Embedded wallet balance hook with socket events (from TradingControls)
+const useEmbeddedWalletBalance = (walletAddress: string) => {
+  const [balance, setBalance] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [lastUpdated, setLastUpdated] = useState<number>(0);
+  const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastWalletRef = useRef<string>('');
+  const socketListenersRef = useRef<boolean>(false);
+
+  // 🚩 ADD: Only fetch if embedded wallets are enabled
+  const embeddedEnabled = shouldShowEmbeddedWalletUI();
+
+  const updateBalance = useCallback(async () => {
+    if (!embeddedEnabled) {
+      console.log('🚩 DepositModal: Embedded wallets disabled, skipping balance fetch');
+      setBalance(0);
+      return;
+    }
+
+    if (!walletAddress || loading) return;
+    
+    setLoading(true);
+    
+    try {
+      const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+      const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+      
+      if (!rpcUrl) {
+        console.error('DepositModal: Missing NEXT_PUBLIC_SOLANA_RPC_URL environment variable');
+        setBalance(0);
+        return;
+      }
+      
+      const connectionConfig: any = { commitment: 'confirmed' };
+      if (apiKey) {
+        connectionConfig.httpHeaders = { 'x-api-key': apiKey };
+      }
+      
+      const connection = new Connection(rpcUrl, connectionConfig);
+      const publicKey = new PublicKey(walletAddress);
+      const balanceResponse = await connection.getBalance(publicKey);
+      const solBalance = balanceResponse / LAMPORTS_PER_SOL;
+      
+      setBalance(solBalance);
+      setLastUpdated(Date.now());
+      
+    } catch (error) {
+      console.error('❌ DepositModal: Failed to fetch embedded wallet balance:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [walletAddress, loading, embeddedEnabled]);
+
+  const forceRefresh = useCallback(async () => {
+    if (!walletAddress || !embeddedEnabled) return;
+    
+    console.log(`🔄 DepositModal: Force refreshing embedded wallet balance for: ${walletAddress}`);
+    await updateBalance();
+  }, [walletAddress, updateBalance, embeddedEnabled]);
+
+  useEffect(() => {
+    if (walletAddress && embeddedEnabled && walletAddress !== lastWalletRef.current) {
+      console.log(`🎯 DepositModal: Setting up embedded wallet balance polling for: ${walletAddress}`);
+      lastWalletRef.current = walletAddress;
+      
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+      }
+      
+      updateBalance();
+      
+      updateIntervalRef.current = setInterval(() => {
+        if (!loading) {
+          updateBalance();
+        }
+      }, 30000);
+      
+      return () => {
+        if (updateIntervalRef.current) {
+          clearInterval(updateIntervalRef.current);
+        }
+      };
+    } else if (!embeddedEnabled) {
+      setBalance(0);
+      setLoading(false);
+    }
+  }, [walletAddress, updateBalance, embeddedEnabled]);
+
+  // 🔧 NEW: Socket listeners for wallet balance updates
+  useEffect(() => {
+    if (!walletAddress || socketListenersRef.current || !embeddedEnabled) return;
+
+    const socket = (window as any).gameSocket;
+    if (socket) {
+      console.log(`🔌 DepositModal: Setting up wallet balance listeners for: ${walletAddress}`);
+      socketListenersRef.current = true;
+      
+      const handleWalletBalanceUpdate = (data: any) => {
+        if (data.walletAddress === walletAddress) {
+          console.log(`💰 DepositModal: Real-time wallet balance update: ${data.balance?.toFixed(6)} SOL`);
+          setBalance(parseFloat(data.balance) || 0);
+          setLastUpdated(Date.now());
+        }
+      };
+
+      const handleTransactionConfirmed = (data: any) => {
+        if (data.walletAddress === walletAddress) {
+          console.log(`🔗 DepositModal: Transaction confirmed for ${walletAddress}, refreshing balance...`);
+          setTimeout(forceRefresh, 2000);
+        }
+      };
+  
+      socket.on('walletBalanceUpdate', handleWalletBalanceUpdate);
+      socket.on('transactionConfirmed', handleTransactionConfirmed);
+      
+      return () => {
+        console.log(`🔌 DepositModal: Cleaning up wallet balance listeners for: ${walletAddress}`);
+        socket.off('walletBalanceUpdate', handleWalletBalanceUpdate);
+        socket.off('transactionConfirmed', handleTransactionConfirmed);
+        socketListenersRef.current = false;
+      };
+    }
+  }, [walletAddress, forceRefresh, embeddedEnabled]);
+
+  return { balance, loading, lastUpdated, updateBalance, forceRefresh };
+};
+
+// 🔧 ENHANCED: Custodial balance hook with socket events (from TradingControls)
+const useCustodialBalance = (userId: string) => {
+  const [custodialBalance, setCustodialBalance] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [lastUpdated, setLastUpdated] = useState<number>(0);
+  const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastUserIdRef = useRef<string>('');
+  const socketListenersRef = useRef<boolean>(false);
+
+  const updateCustodialBalance = useCallback(async () => {
+    if (!userId || loading) return;
+    
+    setLoading(true);
+    try {
+      console.log(`🔄 DepositModal: Fetching custodial balance for user ${userId}...`);
+      
+      const response = await fetch(`/api/custodial/balance/${userId}`);
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`👤 DepositModal: User ${userId} not found - balance remains 0`);
+          setCustodialBalance(0);
+          return;
+        }
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.custodialBalance !== undefined) {
+        const newBalance = parseFloat(data.custodialBalance) || 0;
+        console.log(`💰 DepositModal: Custodial balance updated: ${newBalance.toFixed(6)} SOL`);
+        setCustodialBalance(newBalance);
+        setLastUpdated(Date.now());
+      } else {
+        console.warn('DepositModal: Invalid response format:', data);
+      }
+    } catch (error) {
+      console.error('❌ DepositModal: Failed to fetch custodial balance:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, loading]);
+
+  const forceRefresh = useCallback(async () => {
+    if (!userId) return;
+    
+    console.log(`🔄 DepositModal: Force refreshing custodial balance for ${userId}...`);
+    setLoading(true);
+    
+    try {
+      const response = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.custodialBalance !== undefined) {
+          const newBalance = parseFloat(data.custodialBalance) || 0;
+          console.log(`💰 DepositModal: Force refresh - Balance: ${newBalance.toFixed(6)} SOL`);
+          setCustodialBalance(newBalance);
+          setLastUpdated(Date.now());
+        }
+      }
+    } catch (error) {
+      console.error('❌ DepositModal: Force refresh failed:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    if (userId && userId !== lastUserIdRef.current) {
+      console.log(`🎯 DepositModal: Setting up custodial balance polling for user: ${userId}`);
+      lastUserIdRef.current = userId;
+      
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+      }
+      
+      updateCustodialBalance();
+      
+      updateIntervalRef.current = setInterval(() => {
+        if (!loading) {
+          updateCustodialBalance();
+        }
+      }, 15000);
+      
+      return () => {
+        if (updateIntervalRef.current) {
+          clearInterval(updateIntervalRef.current);
+        }
+      };
+    }
+  }, [userId, updateCustodialBalance]);
+
+  // Socket event listeners for real-time updates
+  useEffect(() => {
+    if (!userId || socketListenersRef.current) return;
+
+    const socket = (window as any).gameSocket;
+    if (socket) {
+      console.log(`🔌 DepositModal: Setting up real-time balance listeners for user: ${userId}`);
+      socketListenersRef.current = true;
+      
+      const handleCustodialBalanceUpdate = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💰 DepositModal: Real-time custodial balance update: ${data.custodialBalance?.toFixed(6)} SOL`);
+          setCustodialBalance(parseFloat(data.custodialBalance) || 0);
+          setLastUpdated(Date.now());
+        }
+      };
+
+      const handleBalanceUpdate = (data: any) => {
+        if (data.userId === userId && data.type === 'custodial') {
+          console.log(`💰 DepositModal: Real-time balance update: ${data.balance?.toFixed(6)} SOL`);
+          setCustodialBalance(parseFloat(data.balance) || 0);
+          setLastUpdated(Date.now());
+        }
+      };
+
+      const handleDepositConfirmation = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💰 DepositModal: Deposit confirmed, refreshing balance...`);
+          setTimeout(forceRefresh, 1000);
+        }
+      };
+  
+      socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+      socket.on('balanceUpdate', handleBalanceUpdate);
+      socket.on('depositConfirmed', handleDepositConfirmation);
+      
+      return () => {
+        console.log(`🔌 DepositModal: Cleaning up balance listeners for user: ${userId}`);
+        socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+        socket.off('balanceUpdate', handleBalanceUpdate);
+        socket.off('depositConfirmed', handleDepositConfirmation);
+        socketListenersRef.current = false;
+      };
+    }
+  }, [userId, forceRefresh]);
+
+  return { custodialBalance, loading, lastUpdated, updateCustodialBalance, forceRefresh };
+};
 
 const DepositModal: FC<DepositModalProps> = ({ 
   isOpen, 
@@ -72,19 +313,41 @@ const DepositModal: FC<DepositModalProps> = ({
   walletAddress,
   userId: propUserId
 }) => {
-  console.log('🔄 DepositModal render - Props:', { isOpen, walletAddress, propUserId });
-  
-  // Feature flag setup
+  // 🚩 Feature flag checks
   const custodialOnlyMode = isCustodialOnlyMode();
+  const showEmbeddedUI = shouldShowEmbeddedWalletUI();
   const walletMode = getWalletMode();
+
+  // Privy wallet setup
+  const { authenticated, user } = usePrivy();
+  const { wallets } = useSolanaWallets();
+  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   
-  // User management - FIXED: Simplified state management
-  const { authenticated } = usePrivy();
+  // House wallet for instant transfers (from TradingControls)
+  const HOUSE_WALLET = '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
+  
+  // User management
   const [internalUserId, setInternalUserId] = useState<string | null>(propUserId || null);
   const [fetchingUserId, setFetchingUserId] = useState<boolean>(false);
-  const [userInitComplete, setUserInitComplete] = useState<boolean>(false);
+  
+  const effectiveUserId = internalUserId || propUserId;
+  
+  // Balance hooks
+  const { 
+    balance: embeddedBalance, 
+    loading: embeddedLoading, 
+    forceRefresh: refreshEmbeddedBalance 
+  } = useEmbeddedWalletBalance(showEmbeddedUI ? walletAddress : '');
+  
+  const { 
+    custodialBalance, 
+    loading: custodialLoading, 
+    forceRefresh: refreshCustodialBalance 
+  } = useCustodialBalance(effectiveUserId || '');
   
   // State management
+  const [activeTab, setActiveTab] = useState<DepositTab>('instant');
+  const [amount, setAmount] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [showQR, setShowQR] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -92,271 +355,242 @@ const DepositModal: FC<DepositModalProps> = ({
   const [successMessage, setSuccessMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   
-  // Custodial-specific state
-  const [custodialDepositInfo, setCustodialDepositInfo] = useState<CustodialDepositResponse | null>(null);
-  const [fetchingDepositInfo, setFetchingDepositInfo] = useState<boolean>(false);
-  const [serverConfigError, setServerConfigError] = useState<boolean>(false);
-  const [showDebugInfo, setShowDebugInfo] = useState<boolean>(false);
-  const [hasAttemptedFetch, setHasAttemptedFetch] = useState<boolean>(false);
-  
   const modalRef = useRef<HTMLDivElement>(null);
   const tokenSymbol = currentToken;
   
-  // FIXED: Stable derived values
-  const effectiveUserId = internalUserId || propUserId;
-  const FALLBACK_HOUSE_WALLET = '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
-  
-  // FIXED: Simplified user fetch function - removed from useEffect deps
-  const fetchUserIdFromAPI = useCallback(async () => {
-    if (!walletAddress || fetchingUserId) {
-      console.log('🚫 fetchUserIdFromAPI: Skipping - no wallet or already fetching');
-      return;
+  // 🔧 Enhanced refresh function
+  const refreshAllBalances = useCallback(() => {
+    console.log('🔄 DepositModal: Manual balance refresh triggered');
+    refreshCustodialBalance();
+    if (showEmbeddedUI) {
+      refreshEmbeddedBalance();
     }
-    
-    console.log('🔍 fetchUserIdFromAPI: Starting for wallet:', walletAddress);
-    setFetchingUserId(true);
-    
-    try {
-      const response = await fetch('/api/users/get-or-create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress })
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ fetchUserIdFromAPI: API error:', errorText);
-        throw new Error(`API error: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      if (data.user && data.user.id) {
-        setInternalUserId(data.user.id);
-        setUserInitComplete(true);
-        console.log('✅ fetchUserIdFromAPI: Success, got userId:', data.user.id);
-      } else {
-        console.error('❌ fetchUserIdFromAPI: No user in response:', data);
-        setError('Failed to initialize user account');
-      }
-    } catch (error) {
-      console.error('❌ fetchUserIdFromAPI: Error:', error);
-      setError('Failed to connect to user service');
-    } finally {
-      setFetchingUserId(false);
-    }
-  }, [walletAddress]); // Only depend on walletAddress
-  
-  // FIXED: Simplified custodial fetch function
-  const fetchCustodialInfo = useCallback(async () => {
-    if (!custodialOnlyMode || !effectiveUserId || fetchingDepositInfo) {
-      console.log('🚫 fetchCustodialInfo: Skipping', { custodialOnlyMode, effectiveUserId, fetchingDepositInfo });
-      return;
-    }
-    
-    console.log('🚀 fetchCustodialInfo: Starting for user:', effectiveUserId);
-    setFetchingDepositInfo(true);
-    setError(null);
-    setServerConfigError(false);
-    
-    try {
-      const response = await fetch('/api/custodial/deposit-info', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: effectiveUserId })
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ fetchCustodialInfo: API error:', errorText);
-        
-        if (errorText.includes('House wallet not configured') || errorText.includes('Deposit service not available')) {
-          setServerConfigError(true);
-          setError('Custodial deposits temporarily unavailable. Using fallback address.');
-          console.log('⚠️ Using fallback wallet due to server config error');
-        } else {
-          setError(`Server error: ${response.status}`);
+  }, [refreshCustodialBalance, refreshEmbeddedBalance, showEmbeddedUI]);
+
+  // 🔧 User initialization (simplified)
+  useEffect(() => {
+    if (authenticated && walletAddress && !propUserId && !internalUserId && !fetchingUserId) {
+      const fetchUserId = async () => {
+        try {
+          setFetchingUserId(true);
+          console.log('🔍 DepositModal: Fetching userId via API for walletAddress:', walletAddress);
+          
+          const response = await fetch('/api/users/get-or-create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ walletAddress })
+          });
+          
+          if (!response.ok) {
+            throw new Error(`API error: ${response.status}`);
+          }
+          
+          const data = await response.json();
+          if (data.user && data.user.id) {
+            setInternalUserId(data.user.id);
+            console.log('✅ DepositModal: Got userId from API:', data.user.id);
+          }
+        } catch (error) {
+          console.error('❌ DepositModal: Failed to fetch userId:', error);
+          setError('Failed to initialize user account');
+        } finally {
+          setFetchingUserId(false);
         }
-        return;
-      }
+      };
       
-      const data: CustodialDepositResponse = await response.json();
-      console.log('✅ fetchCustodialInfo: Success:', data);
-      
-      if (data.success) {
-        setCustodialDepositInfo(data);
-        setServerConfigError(false);
-      } else {
-        setError(data.message || 'Failed to get deposit info');
-        setServerConfigError(true);
-      }
-    } catch (error) {
-      console.error('❌ fetchCustodialInfo: Error:', error);
-      setError('Failed to connect to deposit service');
-      setServerConfigError(true);
-    } finally {
-      setFetchingDepositInfo(false);
+      fetchUserId();
     }
-  }, [custodialOnlyMode, effectiveUserId]); // Only essential deps
-  
-  // FIXED: User initialization effect - only run when modal opens and we need a user
-  useEffect(() => {
-    if (!isOpen) return;
-    
-    console.log('🔄 User init effect triggered:', { 
-      authenticated, 
-      walletAddress, 
-      propUserId, 
-      internalUserId,
-      userInitComplete,
-      fetchingUserId 
-    });
-    
-    // If we have a prop userId, use it immediately
-    if (propUserId && !internalUserId) {
-      console.log('✅ Using provided propUserId:', propUserId);
-      setInternalUserId(propUserId);
-      setUserInitComplete(true);
+  }, [authenticated, walletAddress, propUserId, internalUserId, fetchingUserId]);
+
+  // 🔧 NEW: Instant transfer function (from TradingControls)
+  const handleInstantTransfer = useCallback(async () => {
+    if (!embeddedWallet || !walletAddress || !effectiveUserId) {
+      toast.error('Wallet not ready for transfer');
       return;
     }
-    
-    // If we need to fetch user ID and haven't completed init
-    if (authenticated && walletAddress && !propUserId && !internalUserId && !userInitComplete && !fetchingUserId) {
-      console.log('🔍 Need to fetch user ID from API...');
-      fetchUserIdFromAPI();
+
+    const transferAmount = parseFloat(amount);
+    if (!transferAmount || transferAmount <= 0 || transferAmount > embeddedBalance) {
+      setError(`Invalid amount. Available: ${embeddedBalance.toFixed(3)} SOL`);
+      return;
     }
-  }, [isOpen, authenticated, walletAddress, propUserId, internalUserId, userInitComplete, fetchingUserId, fetchUserIdFromAPI]);
-  
-  // FIXED: Custodial info fetch effect - only run when we have a user and modal is open
-  useEffect(() => {
-    if (!isOpen || !custodialOnlyMode) return;
+
+    console.log('🚀 DepositModal: Starting instant transfer:', { amount: transferAmount, from: walletAddress, to: HOUSE_WALLET });
     
-    console.log('🔄 Custodial fetch effect triggered:', { 
-      effectiveUserId, 
-      hasAttemptedFetch, 
-      fetchingDepositInfo,
-      userInitComplete 
-    });
-    
-    // Only fetch if we have a user ID and haven't attempted yet
-    if (effectiveUserId && userInitComplete && !hasAttemptedFetch && !fetchingDepositInfo) {
-      console.log('🚀 Fetching custodial deposit info...');
-      setHasAttemptedFetch(true);
-      fetchCustodialInfo();
-    }
-  }, [isOpen, custodialOnlyMode, effectiveUserId, userInitComplete, hasAttemptedFetch, fetchingDepositInfo, fetchCustodialInfo]);
-  
-  // FIXED: Modal reset effect - simplified dependencies
-  useEffect(() => {
-    if (isOpen) {
-      console.log('🚀 DepositModal: Modal opened, resetting state');
-      setCopied(false);
-      setShowQR(false);
-      setIsLoading(false);
-      setError(null);
-      setSuccess(false);
-      setSuccessMessage('');
-      setCustodialDepositInfo(null);
-      setServerConfigError(false);
-      setHasAttemptedFetch(false);
-      
-      // Reset user init if we don't have a prop userId
-      if (!propUserId) {
-        setUserInitComplete(false);
-      }
-    } else {
-      // Reset everything when modal closes
-      console.log('🔒 DepositModal: Modal closed, full reset');
-      if (!propUserId) {
-        setInternalUserId(null);
-        setUserInitComplete(false);
-      }
-      setHasAttemptedFetch(false);
-      setServerConfigError(false);
-      setError(null);
-      setCustodialDepositInfo(null);
-      setFetchingUserId(false);
-      setFetchingDepositInfo(false);
-    }
-  }, [isOpen, propUserId]); // Minimal dependencies
-  
-  // Manual retry function
-  const handleRetry = useCallback(() => {
-    console.log('🔄 Manual retry triggered');
+    setIsLoading(true);
     setError(null);
-    setHasAttemptedFetch(false);
-    setServerConfigError(false);
     
-    if (!effectiveUserId) {
-      setUserInitComplete(false);
-      fetchUserIdFromAPI();
-    } else {
-      fetchCustodialInfo();
-    }
-  }, [effectiveUserId, fetchUserIdFromAPI, fetchCustodialInfo]);
-  
-  // Determine display address
-  const getDisplayAddress = () => {
-    if (custodialOnlyMode) {
-      if (custodialDepositInfo?.depositAddress) {
-        return custodialDepositInfo.depositAddress;
-      }
-      if (serverConfigError) {
-        return FALLBACK_HOUSE_WALLET;
-      }
-      return null;
-    }
-    return walletAddress;
-  };
-  
-  const displayAddress = getDisplayAddress();
-  
-  const copyAddress = async () => {
-    if (!displayAddress) return;
     try {
-      await navigator.clipboard.writeText(displayAddress);
+      toast.loading('Transferring SOL to game balance...', { id: 'transfer' });
+      
+      const connection = new Connection(
+        process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVzzNb_M2I0WQ0b85sYoNEYx'
+      );
+      
+      const fromPubkey = new PublicKey(walletAddress);
+      const toPubkey = new PublicKey(HOUSE_WALLET);
+      const lamports = Math.floor(transferAmount * LAMPORTS_PER_SOL);
+      
+      const { blockhash } = await connection.getLatestBlockhash();
+      
+      const transaction = new Transaction({
+        recentBlockhash: blockhash,
+        feePayer: fromPubkey
+      }).add(
+        SystemProgram.transfer({
+          fromPubkey,
+          toPubkey,
+          lamports
+        })
+      );
+      
+      const signature = await embeddedWallet.sendTransaction(transaction, connection); 
+      
+      const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+      
+      if (confirmation.value.err) {
+        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      }
+      
+      toast.success(`Transferred ${transferAmount} SOL to game balance!`, { id: 'transfer' });
+      
+      // Manual credit trigger
+      try {
+        await fetch('/api/custodial/balance/' + effectiveUserId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            action: 'credit',
+            amount: transferAmount,
+            source: 'embedded_wallet_transfer',
+            transactionId: signature
+          })
+        });
+      } catch (error) {
+        console.log('⚠️ Manual credit failed:', error);
+      }
+      
+      setSuccess(true);
+      setSuccessMessage(`Successfully transferred ${transferAmount} SOL to your game balance!`);
+      
+      // Refresh balances
+      setTimeout(() => {
+        refreshAllBalances();
+      }, 2000);
+      
+      if (onSuccess) onSuccess();
+      
+    } catch (error) {
+      console.error('❌ Instant transfer failed:', error);
+      
+      let errorMessage = 'Transfer failed';
+      if (error instanceof Error) {
+        if (error.message.includes('User rejected')) {
+          errorMessage = 'Transfer cancelled by user';
+        } else if (error.message.includes('insufficient funds')) {
+          errorMessage = 'Insufficient SOL for transfer + fees';
+        } else {
+          errorMessage = `Transfer failed: ${error.message}`;
+        }
+      }
+      
+      setError(errorMessage);
+      toast.error(errorMessage, { id: 'transfer' });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [embeddedWallet, walletAddress, effectiveUserId, amount, embeddedBalance, onSuccess, refreshAllBalances]);
+
+  // Handle amount change
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (/^(\d+)?(\.\d{0,6})?$/.test(value) || value === '') {
+      setAmount(value);
+      setError(null);
+    }
+  };
+
+  // Quick amount buttons
+  const quickAmounts = [0.01, 0.05, 0.1, 0.5];
+  
+  const setQuickAmount = (amt: number) => {
+    setAmount(amt.toString());
+    setError(null);
+  };
+
+  const setMaxAmount = () => {
+    if (embeddedBalance > 0) {
+      const maxAmount = Math.max(0, embeddedBalance - 0.001); // Reserve for fees
+      setAmount(maxAmount.toFixed(6));
+      setError(null);
+    }
+  };
+
+  // External deposit address - use user's embedded wallet address
+  const externalDepositAddress = walletAddress;
+
+  const copyAddress = async () => {
+    try {
+      await navigator.clipboard.writeText(externalDepositAddress);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-      console.log('📋 Address copied:', displayAddress?.slice(0, 8) + '...');
+      toast.success('Address copied!');
     } catch (error) {
       console.error('Failed to copy address:', error);
       toast.error('Failed to copy address');
     }
   };
 
-  const handleDepositConfirmation = () => {
-    setIsLoading(true);
-    setTimeout(() => {
+  // Reset state when modal opens/closes
+  useEffect(() => {
+    if (isOpen) {
+      console.log('🚀 DepositModal: Modal opened, resetting state');
+      setAmount('');
+      setCopied(false);
+      setShowQR(false);
       setIsLoading(false);
-      setSuccess(true);
-      setSuccessMessage(`Deposit initiated! Your ${tokenSymbol} will be credited to your ${custodialOnlyMode ? 'game balance' : 'account'} shortly.`);
-      if (onSuccess) onSuccess();
-    }, 3000);
-  };
+      setError(null);
+      setSuccess(false);
+      setSuccessMessage('');
+      setActiveTab(showEmbeddedUI ? 'instant' : 'external');
+      
+      setTimeout(() => {
+        refreshAllBalances();
+      }, 500);
+    }
+  }, [isOpen, refreshAllBalances, showEmbeddedUI]);
 
-  const getNetworkInfo = () => {
-    if (custodialOnlyMode && custodialDepositInfo) {
-      return {
-        network: custodialDepositInfo.depositInfo.network,
-        minDeposit: `${custodialDepositInfo.depositInfo.minDeposit} SOL`,
-        maxDeposit: `${custodialDepositInfo.depositInfo.maxDeposit} SOL`,
-        confirmations: custodialDepositInfo.timing.blockchainConfirmations,
-        depositType: 'Custodial Deposit',
-        processingTime: custodialDepositInfo.timing.estimatedCreditTime
+  // Socket listeners for real-time updates
+  useEffect(() => {
+    const socket = (window as any).gameSocket;
+    if (socket && effectiveUserId) {
+      console.log(`🔌 DepositModal: Setting up transaction listeners for user: ${effectiveUserId}`);
+      
+      const handleDepositConfirmed = (data: any) => {
+        if (data.userId === effectiveUserId) {
+          console.log(`💰 DepositModal: Deposit confirmed for ${effectiveUserId}, refreshing balances...`);
+          setTimeout(refreshAllBalances, 1000);
+        }
+      };
+
+      const handleTransactionConfirmed = (data: any) => {
+        if (data.walletAddress === walletAddress || data.userId === effectiveUserId) {
+          console.log(`🔗 DepositModal: Transaction confirmed, refreshing balances...`);
+          setTimeout(refreshAllBalances, 2000);
+        }
+      };
+
+      socket.on('depositConfirmed', handleDepositConfirmed);
+      socket.on('transactionConfirmed', handleTransactionConfirmed);
+      
+      return () => {
+        console.log(`🔌 DepositModal: Cleaning up transaction listeners for user: ${effectiveUserId}`);
+        socket.off('depositConfirmed', handleDepositConfirmed);
+        socket.off('transactionConfirmed', handleTransactionConfirmed);
       };
     }
-    
-    return {
-      network: currentToken === TokenType.SOL ? 'Solana Mainnet' : 'Solana (SPL Token)',
-      minDeposit: currentToken === TokenType.SOL ? '0.001 SOL' : '1 RUGGED',
-      maxDeposit: 'No limit',
-      confirmations: '1 confirmation',
-      depositType: serverConfigError ? 'Manual Deposit (Fallback)' : 'Direct Wallet Deposit',
-      processingTime: serverConfigError ? '~1 minute' : 'Instant'
-    };
-  };
+  }, [effectiveUserId, walletAddress, refreshAllBalances]);
 
-  const networkInfo = getNetworkInfo();
-  
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
     if (isOpen && !isLoading) onClose();
   });
@@ -364,10 +598,10 @@ const DepositModal: FC<DepositModalProps> = ({
   if (!isOpen) return null;
   
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-2">
+    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
       <div 
         ref={modalRef} 
-        className="bg-[#0d0d0f] border border-gray-800 rounded-lg w-full max-w-sm max-h-[90vh] overflow-y-auto shadow-xl"
+        className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
       >
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
@@ -380,7 +614,7 @@ const DepositModal: FC<DepositModalProps> = ({
           </h2>
           <button
             onClick={onClose}
-            disabled={isLoading || fetchingDepositInfo || fetchingUserId}
+            disabled={isLoading}
             className="text-gray-400 hover:text-white transition-colors"
           >
             <X size={20} />
@@ -388,7 +622,6 @@ const DepositModal: FC<DepositModalProps> = ({
         </div>
         
         {success ? (
-          // Success state
           <div className="text-center py-8">
             <div className="flex justify-center mb-4">
               <div className="w-16 h-16 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
@@ -405,146 +638,197 @@ const DepositModal: FC<DepositModalProps> = ({
             </button>
           </div>
         ) : (
-          <div className="p-4">
-            {/* MOBILE-OPTIMIZED: Improved debug info */}
+          <>
+            {/* Debug info */}
             {process.env.NODE_ENV === 'development' && (
               <div className="bg-gray-900 p-3 rounded mb-4 text-xs space-y-1">
                 <div className="text-gray-400 font-bold">🔍 Debug Info:</div>
                 <div className="text-purple-400">Wallet Mode: {walletMode}</div>
                 <div className="text-orange-400">Custodial Only: {custodialOnlyMode ? 'Yes' : 'No'}</div>
-                <div className="text-green-400">Prop UserId: {propUserId || 'None'}</div>
-                <div className="text-cyan-400">Internal UserId: {internalUserId || 'None'}</div>
-                <div className="text-lime-400">Effective UserId: {effectiveUserId || 'None'}</div>
+                <div className="text-cyan-400">Show Embedded UI: {showEmbeddedUI ? 'Yes' : 'No'}</div>
+                <div className="text-green-400">UserId: {effectiveUserId || 'None'}</div>
                 <div className="text-blue-400">WalletAddress: {walletAddress || 'None'}</div>
-                <div className="text-yellow-400">Authenticated: {authenticated ? 'Yes' : 'No'}</div>
-                <div className="text-purple-400">Fetching UserId: {fetchingUserId ? 'Yes' : 'No'}</div>
-                <div className="text-teal-400">User Init Complete: {userInitComplete ? 'Yes' : 'No'}</div>
-                <div className="text-pink-400">Fetching Deposit Info: {fetchingDepositInfo ? 'Yes' : 'No'}</div>
-                <div className="text-red-400">Has Attempted Fetch: {hasAttemptedFetch ? 'Yes' : 'No'}</div>
-                <div className="text-orange-400">Server Config Error: {serverConfigError ? 'Yes' : 'No'}</div>
+                <div className="text-yellow-400">Embedded Balance: {embeddedBalance.toFixed(6)} SOL</div>
+                <div className="text-purple-400">Game Balance: {custodialBalance.toFixed(6)} SOL</div>
               </div>
             )}
             
             {/* Mode description */}
-            {custodialOnlyMode && (
-              <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md mb-4 text-sm">
-                <div className="font-medium mb-1">🏦 Custodial Deposit Mode</div>
-                <div className="text-xs">
-                  Send SOL from any wallet to this address. Your game balance will be credited automatically.
-                </div>
+            <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md mb-4 text-sm">
+              <div className="font-medium mb-1">💰 {getModeDescription()}</div>
+              <div className="text-xs">
+                {showEmbeddedUI 
+                  ? 'Use instant transfer for immediate deposits from your embedded wallet, or external address for deposits from other wallets to your embedded wallet first.'
+                  : 'All deposits are processed directly to your game balance.'
+                }
               </div>
-            )}
-            
-            {/* User ID status notification */}
-            {authenticated && walletAddress && !effectiveUserId && !fetchingUserId && (
-              <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md mb-4 text-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-bold mb-1">⚠️ User Setup Required</div>
-                    <div className="text-xs">Unable to initialize user account. Please retry.</div>
-                  </div>
-                  <button
-                    onClick={handleRetry}
-                    className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-xs"
-                  >
-                    Retry
-                  </button>
-                </div>
+            </div>
+
+            {/* Balance display */}
+            <div className="bg-gray-800 p-4 rounded-md mb-6">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-gray-400 text-sm">Your Balances</span>
+                <button 
+                  onClick={refreshAllBalances}
+                  disabled={custodialLoading || embeddedLoading}
+                  className="text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-1"
+                  title="Refresh balances"
+                >
+                  <RefreshCw size={14} className={(custodialLoading || embeddedLoading) ? 'animate-spin' : ''} />
+                  <span className="text-xs">Refresh</span>
+                </button>
               </div>
-            )}
-            
-            {/* Server configuration error */}
-            {serverConfigError && (
-              <div className="bg-orange-900 bg-opacity-30 border border-orange-800 text-orange-400 p-3 rounded-md mb-4 text-sm">
-                <div className="font-medium mb-2">⚠️ Server Configuration Issue</div>
-                <div className="text-xs mb-2">
-                  The custodial deposit service is temporarily unavailable. Using fallback address.
-                </div>
-                <div className="text-xs text-orange-300">
-                  • Your deposit will be manually processed
-                  • Allow 1-2 minutes for credit
-                </div>
-              </div>
-            )}
-            
-            {/* Loading states - Mobile optimized */}
-            {fetchingUserId && (
-              <div className="bg-blue-800 p-3 rounded-md mb-4 text-center">
-                <Loader size={20} className="animate-spin text-blue-500 mx-auto mb-2" />
-                <div className="text-white text-sm">Initializing account...</div>
-                <div className="text-gray-400 text-xs">Getting user ID...</div>
-              </div>
-            )}
-            
-            {fetchingDepositInfo && (
-              <div className="bg-gray-800 p-3 rounded-md mb-4 text-center">
-                <Loader size={20} className="animate-spin text-green-500 mx-auto mb-2" />
-                <div className="text-white text-sm">Getting deposit address...</div>
-                <div className="text-gray-400 text-xs">Contacting server...</div>
-              </div>
-            )}
-            
-            {/* Network info */}
-            {displayAddress && (
-              <div className="bg-gray-800 p-4 rounded-md mb-6">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-gray-400 text-sm">Deposit Information</span>
-                  <button 
-                    onClick={handleRetry}
-                    disabled={fetchingDepositInfo || fetchingUserId}
-                    className="text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-1"
-                    title="Refresh deposit info"
-                  >
-                    <RefreshCw size={14} className={(fetchingDepositInfo || fetchingUserId) ? 'animate-spin' : ''} />
-                    <span className="text-xs">Refresh</span>
-                  </button>
+              
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-green-400 text-sm">🎮 Game Balance</span>
+                  <span className="text-white font-bold">
+                    {custodialLoading ? (
+                      <span className="flex items-center">
+                        <Loader size={12} className="animate-spin mr-1" />
+                        Loading...
+                      </span>
+                    ) : (
+                      `${custodialBalance.toFixed(6)} SOL`
+                    )}
+                  </span>
                 </div>
                 
-                <div className="space-y-3">
+                {showEmbeddedUI && (
                   <div className="flex justify-between items-center">
-                    <span className="text-gray-400 text-sm">Network:</span>
-                    <span className="text-white font-medium">{networkInfo.network}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400 text-sm">Type:</span>
-                    <span className="text-white">{networkInfo.depositType}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400 text-sm">Min Deposit:</span>
-                    <span className="text-white">{networkInfo.minDeposit}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400 text-sm">Credit Time:</span>
-                    <span className="text-white">{networkInfo.processingTime}</span>
-                  </div>
-                </div>
-                
-                {walletAddress && (
-                  <div className="mt-3 pt-2 border-t border-gray-700">
-                    <div className="text-xs text-gray-500">
-                      Your Wallet: {walletAddress.slice(0, 8)}...{walletAddress.slice(-8)}
-                    </div>
+                    <span className="text-blue-400 text-sm">💼 Embedded Wallet</span>
+                    <span className="text-white font-bold">
+                      {embeddedLoading ? (
+                        <span className="flex items-center">
+                          <Loader size={12} className="animate-spin mr-1" />
+                          Loading...
+                        </span>
+                      ) : (
+                        `${embeddedBalance.toFixed(6)} SOL`
+                      )}
+                    </span>
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* Tab navigation */}
+            {showEmbeddedUI && (
+              <div className="flex mb-6 bg-gray-800 rounded-md p-1">
+                <button
+                  onClick={() => setActiveTab('instant')}
+                  className={`flex-1 py-2 px-4 rounded text-sm font-medium transition-colors ${
+                    activeTab === 'instant'
+                      ? 'bg-green-600 text-white'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <Zap size={16} className="inline mr-2" />
+                  Instant Transfer
+                </button>
+                <button
+                  onClick={() => setActiveTab('external')}
+                  className={`flex-1 py-2 px-4 rounded text-sm font-medium transition-colors ${
+                    activeTab === 'external'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  <ArrowUpToLine size={16} className="inline mr-2" />
+                  External
+                </button>
+              </div>
             )}
-            
-            {/* Address display - Mobile optimized */}
-            {displayAddress && (
-              <div className="space-y-3">
+
+            {/* Tab content */}
+            {(activeTab === 'instant' && showEmbeddedUI) ? (
+              <div className="space-y-4">
+                <div className="bg-green-900 bg-opacity-20 border border-green-800 text-green-400 p-3 rounded-md text-sm">
+                  <div className="font-medium mb-1">⚡ Instant Transfer</div>
+                  <div className="text-xs">
+                    Transfer SOL from your embedded wallet directly to your game balance. Instant and gasless!
+                  </div>
+                </div>
+
+                {/* Amount Input */}
                 <div>
-                  <label className="block text-xs text-gray-400 mb-2">
-                    {custodialOnlyMode ? 'Send SOL to this Address' : 'Your Deposit Address'}
-                    {serverConfigError && (
-                      <span className="ml-2 text-xs text-orange-400">(Fallback Address)</span>
-                    )}
-                  </label>
-                  
+                  <label className="block text-sm text-gray-400 mb-2">Amount (SOL)</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={amount}
+                      onChange={handleAmountChange}
+                      placeholder="0.000"
+                      className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 pr-16 text-white placeholder-gray-500 focus:border-green-500 focus:outline-none"
+                    />
+                    <button
+                      onClick={setMaxAmount}
+                      className="absolute right-2 top-1/2 transform -translate-y-1/2 text-green-400 text-xs hover:text-green-300"
+                    >
+                      MAX
+                    </button>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Available: {embeddedBalance.toFixed(6)} SOL
+                  </div>
+                </div>
+
+                {/* Quick amounts */}
+                <div className="grid grid-cols-4 gap-2">
+                  {quickAmounts.map((amt) => (
+                    <button
+                      key={amt}
+                      onClick={() => setQuickAmount(amt)}
+                      disabled={amt > embeddedBalance}
+                      className={`px-2 py-1 text-xs rounded transition-colors ${
+                        parseFloat(amount) === amt
+                          ? 'bg-green-600 text-white'
+                          : amt > embeddedBalance
+                          ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      {amt} SOL
+                    </button>
+                  ))}
+                </div>
+
+                {/* Transfer button */}
+                <button
+                  onClick={handleInstantTransfer}
+                  disabled={isLoading || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > embeddedBalance}
+                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-md transition-colors flex items-center justify-center"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader size={16} className="animate-spin mr-2" />
+                      Transferring...
+                    </>
+                  ) : (
+                    <>
+                      <ArrowRightLeft size={16} className="mr-2" />
+                      Transfer {amount || '0'} SOL
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md text-sm">
+                  <div className="font-medium mb-1">🌐 External Deposit</div>
+                  <div className="text-xs">
+                    Send SOL from any external wallet to your embedded wallet address. Then use "Instant Transfer" to move funds to your game balance.
+                  </div>
+                </div>
+
+                {/* Address display */}
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Your Embedded Wallet Address</label>
                   <div className="bg-gray-800 border border-gray-700 rounded-md p-3">
                     <div className="flex items-center justify-between">
                       <div className="flex-1 mr-2">
-                        <div className="text-white font-mono text-xs break-all">
-                          {displayAddress}
+                        <div className="text-white font-mono text-sm break-all">
+                          {externalDepositAddress}
                         </div>
                       </div>
                       <button
@@ -566,8 +850,8 @@ const DepositModal: FC<DepositModalProps> = ({
                     </div>
                   </div>
                 </div>
-                
-                {/* QR Code toggle - Mobile optimized */}
+
+                {/* QR Code */}
                 <div className="flex justify-center">
                   <button
                     onClick={() => setShowQR(!showQR)}
@@ -577,62 +861,37 @@ const DepositModal: FC<DepositModalProps> = ({
                     {showQR ? 'Hide QR' : 'Show QR'}
                   </button>
                 </div>
-                
-                {/* QR Code display - Mobile optimized */}
+
                 {showQR && (
-                  <div className="flex justify-center bg-white p-3 rounded-lg">
+                  <div className="flex justify-center bg-white p-4 rounded-lg">
                     <QRCodeSVG 
-                      value={displayAddress} 
-                      size={150} // Smaller for mobile
+                      value={externalDepositAddress} 
+                      size={200}
                       level="M"
                       includeMargin={true}
                     />
                   </div>
                 )}
-                
-                {/* Instructions */}
+
+                {/* Important notes */}
                 <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md text-sm">
-                  <div className="font-medium mb-2">Important Notes:</div>
+                  <div className="font-medium mb-2">⚠️ Important Notes:</div>
                   <ul className="list-disc list-inside space-y-1 text-xs">
-                    <li>Only send {tokenSymbol} to this address</li>
+                    <li>Only send SOL to this address</li>
+                    <li>Minimum deposit: 0.001 SOL</li>
+                    <li>Funds will appear in your embedded wallet balance</li>
+                    <li>Use "Instant Transfer" tab to move funds to game balance</li>
                     <li>Double-check the address before sending</li>
-                    {custodialOnlyMode && <li>Your game balance will be credited automatically</li>}
-                    {serverConfigError && <li>Manual processing may take 1-2 minutes</li>}
                   </ul>
                 </div>
-                
-                {/* Action button */}
-                <button
-                  onClick={handleDepositConfirmation}
-                  disabled={isLoading}
-                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-md transition-colors flex items-center justify-center"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader size={16} className="animate-spin mr-2" />
-                      Checking...
-                    </>
-                  ) : (
-                    <>
-                      <Wallet size={16} className="mr-2" />
-                      I've Sent {tokenSymbol}
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-            
-            {/* No address available state */}
-            {!displayAddress && !fetchingUserId && !fetchingDepositInfo && (
-              <div className="text-center py-8">
-                <div className="text-gray-400 mb-4">Unable to generate deposit address</div>
-                <button
-                  onClick={handleRetry}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md transition-colors"
-                >
-                  <RefreshCw size={16} className="mr-2 inline" />
-                  Retry
-                </button>
+
+                {/* Additional helper */}
+                <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md text-sm">
+                  <div className="font-medium mb-1">💡 Next Steps</div>
+                  <div className="text-xs">
+                    After your external deposit arrives, switch to the "Instant Transfer" tab to instantly move your SOL to your game balance for trading.
+                  </div>
+                </div>
               </div>
             )}
             
@@ -640,15 +899,9 @@ const DepositModal: FC<DepositModalProps> = ({
             {error && (
               <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-500 p-3 rounded-md mt-4">
                 {error}
-                <button
-                  onClick={handleRetry}
-                  className="ml-2 text-xs underline hover:no-underline"
-                >
-                  Retry
-                </button>
               </div>
             )}
-          </div>
+          </>
         )}
       </div>
     </div>

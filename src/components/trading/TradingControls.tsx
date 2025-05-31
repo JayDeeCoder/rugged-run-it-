@@ -1153,15 +1153,18 @@ const TradingControls: FC<TradingControlsProps> = ({
   const activeBalance = currentToken === TokenType.SOL ? custodialBalance : ruggedBalance;
   const effectiveCanBet = gameStatus === 'active' ? true : canBet;
 
+  // Balance debug logging - only when balances actually change
+useEffect(() => {
   console.log('💰 TradingControls Balance Debug:', {
     currentToken,
     embeddedWalletBalance: embeddedWalletBalance.toFixed(3),
     custodialBalance: custodialBalance.toFixed(3), 
     ruggedBalance: ruggedBalance.toFixed(3),
     activeBalance: activeBalance.toFixed(3),
-    gamingBalance: 'custodial', // Now using custodial for gaming
+    gamingBalance: 'custodial',
     embeddedWalletLoading
   });
+}, [currentToken, embeddedWalletBalance, custodialBalance, ruggedBalance, activeBalance, embeddedWalletLoading]);
 
   // Validation error message
   const getBetValidationError = () => {

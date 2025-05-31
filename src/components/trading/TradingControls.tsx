@@ -1175,78 +1175,92 @@ const TradingControls: FC<TradingControlsProps> = ({
 
   // 🔧 FIXED: Socket listeners with stable dependencies and better cleanup
   useEffect(() => {
-    if (!userId) return;
-    
     const socket = (window as any).gameSocket;
-    if (!socket) return;
-    
-    console.log(`🔌 Setting up socket listeners for user: ${userId}`);
-    
-    // Store the functions in refs to avoid recreating handlers
-    const handleCustodialBalanceUpdate = (data: any) => {
-      if (data.userId === userId) {
-        console.log(`💰 Real-time custodial balance update: ${data.custodialBalance?.toFixed(6)} SOL`);
-        // Force update the balance immediately by calling the update function
-        try {
+    if (socket && userId) {
+      console.log(`🔌 Setting up enhanced socket listeners for user: ${userId}`);
+      
+      const handleCustodialBalanceUpdate = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💰 Real-time custodial balance update: ${data.custodialBalance?.toFixed(6)} SOL`);
           updateCustodialBalance();
-        } catch (error) {
-          console.warn('⚠️ Balance update failed:', error);
         }
-      }
-    };
-
-    const handleCustodialCashout = (data: any) => {
-      if (data.userId === userId) {
-        console.log(`💸 Real-time custodial cashout: ${data.amount?.toFixed(6)} SOL`);
-        // Clear active bet and update balance
-        setActiveBet(null);
-        try {
+      };
+  
+      const handleCustodialCashout = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💸 Real-time custodial cashout: ${data.amount?.toFixed(6)} SOL`);
+          
+          setActiveBet(null);
+          
+          if (data.payout && data.betAmount) {
+            const winAmount = data.payout - data.betAmount;
+            toast.success(`Cashout confirmed! Win: +${winAmount.toFixed(3)} SOL`);
+          }
+          
           updateCustodialBalance();
-        } catch (error) {
-          console.warn('⚠️ Balance update failed:', error);
         }
-      }
-    };
-
-    const handleGameCrashed = (data: any) => {
-      // Use a ref or check current active bet state
-      if (activeBet) {
-        console.log(`💥 Game crashed at ${data.crashMultiplier?.toFixed(2)}x - clearing active bet`);
-        // Clear active bet when game crashes (user lost)
-        setActiveBet(null);
+      };
+  
+      const handleGameCrashed = (data: any) => {
+        console.log(`💥 Game crashed at ${data.crashMultiplier?.toFixed(2)}x`);
         
-        // Show loss message
-        toast.error(`Game crashed at ${data.crashMultiplier?.toFixed(2)}x - Bet lost`);
-      }
-    };
-
-    const handleCustodialBetPlaced = (data: any) => {
-      if (data.userId === userId) {
-        console.log(`🎯 Custodial bet placed via socket: ${data.betAmount} SOL at ${data.entryMultiplier}x`);
-        // Update balance if provided
-        try {
-          updateCustodialBalance();
-        } catch (error) {
-          console.warn('⚠️ Balance update failed:', error);
+        if (activeBet) {
+          console.log('🗑️ Clearing active bet due to game crash');
+          setActiveBet(null);
+          
+          toast.error(`Game crashed at ${data.crashMultiplier?.toFixed(2)}x - Bet lost`);
+          
+          if (activeBet.tokenType === TokenType.SOL) {
+            updateCustodialBalance();
+          } else {
+            updateRuggedBalance();
+          }
         }
-      }
-    };
-
-    // Add event listeners
-    socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-    socket.on('custodialCashout', handleCustodialCashout);
-    socket.on('gameCrashed', handleGameCrashed);
-    socket.on('custodialBetPlaced', handleCustodialBetPlaced);
-
-    return () => {
-      console.log(`🔌 Cleaning up socket listeners for user: ${userId}`);
-      socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-      socket.off('custodialCashout', handleCustodialCashout);
-      socket.off('gameCrashed', handleGameCrashed);
-      socket.off('custodialBetPlaced', handleCustodialBetPlaced);
-    };
-  }, [userId]); // Only depend on userId - the handlers are stable
-
+      };
+  
+      const handleGameEnded = (data: any) => {
+        console.log(`🏁 Game ended:`, data);
+        
+        if (activeBet) {
+          console.log('🗑️ Clearing active bet - game ended, ready for new round');
+          setActiveBet(null);
+        }
+      };
+  
+      const handleGameWaiting = (data: any) => {
+        console.log(`⏳ New game waiting period started:`, data);
+        
+        if (activeBet) {
+          console.log('🗑️ Clearing stuck active bet - new game starting');
+          setActiveBet(null);
+        }
+      };
+  
+      const handleCustodialBetPlaced = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`🎯 Custodial bet placed via socket: ${data.betAmount} SOL at ${data.entryMultiplier}x`);
+          updateCustodialBalance();
+        }
+      };
+  
+      socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+      socket.on('custodialCashout', handleCustodialCashout);
+      socket.on('gameCrashed', handleGameCrashed);
+      socket.on('gameEnded', handleGameEnded);
+      socket.on('gameWaiting', handleGameWaiting);
+      socket.on('custodialBetPlaced', handleCustodialBetPlaced);
+  
+      return () => {
+        console.log(`🔌 Cleaning up enhanced socket listeners for user: ${userId}`);
+        socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+        socket.off('custodialCashout', handleCustodialCashout);
+        socket.off('gameCrashed', handleGameCrashed);
+        socket.off('gameEnded', handleGameEnded);
+        socket.off('gameWaiting', handleGameWaiting);
+        socket.off('custodialBetPlaced', handleCustodialBetPlaced);
+      };
+    }
+  }, [userId, activeBet, updateCustodialBalance, updateRuggedBalance]);
   // Handle token switch
   const handleTokenChange = useCallback((token: TokenType) => {
     setCurrentToken(token);
@@ -1255,25 +1269,24 @@ const TradingControls: FC<TradingControlsProps> = ({
   // 🔧 FIXED: Optimized cashout with stable dependencies
   const handleCashout = useCallback(async () => {
     if (!authenticated || !walletAddress || !isConnected || !activeBet) {
+      console.log('❌ Cannot cashout: missing requirements');
       return;
     }
   
-    // ✅ FIXED: Add null check for userId
     if (!userId) {
       setServerError('User not initialized');
       toast.error('User not initialized');
       return;
     }
   
-    // Prevent multiple simultaneous attempts
     if (isCashingOut || operationTimeouts.has('cashout')) {
+      console.log('❌ Cashout already in progress');
       return;
     }
   
     setIsCashingOut(true);
     setOperationTimeouts(prev => new Set(prev).add('cashout'));
     
-    // Add operation timeout
     const operationTimeout = setTimeout(() => {
       setIsCashingOut(false);
       setOperationTimeouts(prev => {
@@ -1287,30 +1300,36 @@ const TradingControls: FC<TradingControlsProps> = ({
   
     try {
       let success = false;
+      let payout = 0;
   
       if (activeBet.tokenType === TokenType.SOL) {
         console.log('💸 Using custodialCashOut hook method...');
         
-        // ✅ FIXED: Use the hook method instead of direct socket access
         const result = await custodialCashOut(userId, walletAddress);
         success = result.success;
+        payout = result.payout || 0;
         
         if (success) {
           console.log('✅ Custodial cashout successful:', result);
-          toast.success(`Cashed out: ${result.payout?.toFixed(3)} SOL`);
-          // Update balance immediately
-          try {
+          
+          const winAmount = payout - activeBet.amount;
+          const currentMultiplier = gameState.activeCurrentMultiplier;
+          
+          toast.success(`Cashed out at ${currentMultiplier.toFixed(2)}x! Win: +${winAmount.toFixed(3)} SOL`);
+          
+          setActiveBet(null);
+          
+          setTimeout(() => {
             updateCustodialBalance();
-          } catch (error) {
-            console.warn('⚠️ Balance update failed:', error);
-          }
+          }, 100);
+          
         } else {
           console.error('❌ Custodial cashout failed:', result.reason);
           setServerError(result.reason || 'Cashout failed');
           toast.error(result.reason || 'Cashout failed');
+          setActiveBet(null);
         }
       } else {
-        // RUGGED token cashout with timeout
         try {
           const cashoutResult = await Promise.race([
             cashOut(walletAddress),
@@ -1320,31 +1339,41 @@ const TradingControls: FC<TradingControlsProps> = ({
           ]);
           
           success = cashoutResult.success || false;
+          payout = cashoutResult.payout || 0;
           
           if (success) {
-            try {
+            const winAmount = payout - activeBet.amount;
+            const currentMultiplier = gameState.activeCurrentMultiplier;
+            
+            toast.success(`Cashed out at ${currentMultiplier.toFixed(2)}x! Win: +${winAmount.toFixed(0)} RUGGED`);
+            
+            setActiveBet(null);
+            
+            setTimeout(() => {
               updateRuggedBalance();
-            } catch (error) {
-              console.warn('⚠️ Balance update failed:', error);
-            }
-            toast.success('Cashed out RUGGED tokens!');
+            }, 100);
           }
         } catch (error) {
+          console.error('❌ RUGGED cashout error:', error);
           success = false;
+          setActiveBet(null);
         }
       }
   
-      if (success) {
+      if (!success && activeBet) {
+        console.log('⚠️ Cashout failed but clearing active bet to prevent stuck state');
         setActiveBet(null);
-        if (onSell) onSell(100);
-      } else {
-        setServerError('Failed to RUG');
-        toast.error('Failed to RUG');
       }
+  
+      if (success && onSell) {
+        onSell(100);
+      }
+  
     } catch (error) {
-      console.error('Error cashing out:', error);
+      console.error('❌ Error cashing out:', error);
       setServerError('Failed to RUG');
       toast.error('Failed to RUG');
+      setActiveBet(null);
     } finally {
       clearTimeout(operationTimeout);
       setIsCashingOut(false);
@@ -1354,7 +1383,7 @@ const TradingControls: FC<TradingControlsProps> = ({
         return newSet;
       });
     }
-  }, [authenticated, walletAddress, isConnected, activeBet, userId, isCashingOut, operationTimeouts, custodialCashOut, cashOut, onSell]); // Added custodialCashOut dependency
+  }, [authenticated, walletAddress, isConnected, activeBet, userId, isCashingOut, operationTimeouts, custodialCashOut, cashOut, gameState.activeCurrentMultiplier, onSell, updateCustodialBalance, updateRuggedBalance]);
   
   // Auto transfer function with stable dependencies
   const autoTransferToGameBalance = useCallback(async (amount: number) => {
@@ -1489,6 +1518,27 @@ const TradingControls: FC<TradingControlsProps> = ({
       handleCashout();
     }
   }, [gameState.activeCurrentMultiplier, autoCashoutEnabled, autoCashoutValue, activeBet, gameState.activeIsGameActive, gameState.gameStatus, handleCashout, isCashingOut]);
+  
+  useEffect(() => {
+    // Clear active bet if game is not active and we have a bet
+    if (activeBet && gameState.gameStatus !== 'active') {
+      console.log(`🔄 Game status changed to ${gameState.gameStatus}, clearing active bet`);
+      setActiveBet(null);
+    }
+  }, [gameState.gameStatus, activeBet]);
+
+  useEffect(() => {
+    if (activeBet) {
+      // Clear bet after 5 minutes if it's still active (safety net for stuck states)
+      const timeout = setTimeout(() => {
+        console.log('⏰ Clearing stuck active bet after timeout');
+        setActiveBet(null);
+      }, 5 * 60 * 1000); // 5 minutes
+  
+      return () => clearTimeout(timeout);
+    }
+  }, [activeBet]);
+
 
   // Handle amount change
   const handleAmountChange = useCallback((value: string) => {

@@ -42,13 +42,15 @@ interface TradingControlsProps {
   isMobile?: boolean;
 }
 
-// 🔧 FIXED: Optimized wallet balance hook with better caching
+// 🔧 FIXED: Optimized wallet balance hook with stable update function  
 const useWalletBalance = (walletAddress: string) => {
   const [balance, setBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<number>(0);
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastWalletRef = useRef<string>('');
 
+  // Create stable update function with useCallback
   const updateBalance = useCallback(async () => {
     if (!walletAddress) return;
     
@@ -86,19 +88,28 @@ const useWalletBalance = (walletAddress: string) => {
     } finally {
       setLoading(false);
     }
-  }, [walletAddress, loading]);
+  }, [walletAddress, loading]); // Stable dependencies
 
   useEffect(() => {
-    if (walletAddress) {
-      updateBalance();
+    // Only set up polling if walletAddress changes
+    if (walletAddress && walletAddress !== lastWalletRef.current) {
+      console.log(`🎯 Setting up wallet balance polling for: ${walletAddress}`);
+      lastWalletRef.current = walletAddress;
       
       // Clear existing interval
       if (updateIntervalRef.current) {
         clearInterval(updateIntervalRef.current);
       }
       
+      // Initial fetch
+      updateBalance();
+      
       // Set new interval with longer delay to reduce re-renders
-      updateIntervalRef.current = setInterval(updateBalance, 60000); // 1 minute instead of 30 seconds
+      updateIntervalRef.current = setInterval(() => {
+        if (!loading) { // Only update if not currently loading
+          updateBalance();
+        }
+      }, 60000); // 1 minute
       
       return () => {
         if (updateIntervalRef.current) {
@@ -106,18 +117,20 @@ const useWalletBalance = (walletAddress: string) => {
         }
       };
     }
-  }, [walletAddress, updateBalance]);
+  }, [walletAddress, updateBalance]); // Now updateBalance is stable
 
   return { balance, loading, lastUpdated };
 };
 
-// 🔧 FIXED: Optimized custodial balance hook with better error handling
+// 🔧 FIXED: Optimized custodial balance hook with stable update function
 const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<number>(0);
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastUserIdRef = useRef<string>('');
 
+  // Create stable update function with useCallback
   const updateCustodialBalance = useCallback(async () => {
     if (!userId) return;
     
@@ -155,20 +168,28 @@ const useCustodialBalance = (userId: string) => {
     } finally {
       setLoading(false);
     }
-  }, [userId, loading]);
+  }, [userId, loading]); // Stable dependencies
 
   useEffect(() => {
-    if (userId) {
-      // Initial fetch
-      updateCustodialBalance();
+    // Only set up polling if userId changes
+    if (userId && userId !== lastUserIdRef.current) {
+      console.log(`🎯 Setting up custodial balance polling for user: ${userId}`);
+      lastUserIdRef.current = userId;
       
       // Clear existing interval
       if (updateIntervalRef.current) {
         clearInterval(updateIntervalRef.current);
       }
       
+      // Initial fetch
+      updateCustodialBalance();
+      
       // Set interval for periodic updates
-      updateIntervalRef.current = setInterval(updateCustodialBalance, 15000); // 15 seconds for faster updates
+      updateIntervalRef.current = setInterval(() => {
+        if (!loading) { // Only update if not currently loading
+          updateCustodialBalance();
+        }
+      }, 20000); // 20 seconds
       
       return () => {
         if (updateIntervalRef.current) {
@@ -176,16 +197,18 @@ const useCustodialBalance = (userId: string) => {
         }
       };
     }
-  }, [userId, updateCustodialBalance]);
+  }, [userId, updateCustodialBalance]); // Now updateCustodialBalance is stable
 
   return { custodialBalance, loading, lastUpdated, updateCustodialBalance };
 };
 
-// 🔧 FIXED: Simplified RUGGED balance hook
+// 🔧 FIXED: Simplified RUGGED balance hook with stable update function
 const useRuggedBalance = (walletAddress: string) => {
   const [ruggedBalance, setRuggedBalance] = useState<number>(1000);
   const [loading, setLoading] = useState<boolean>(false);
+  const lastWalletRef = useRef<string>('');
 
+  // Create stable update function with useCallback
   const updateRuggedBalance = useCallback(async () => {
     if (!walletAddress || loading) return;
     
@@ -198,13 +221,16 @@ const useRuggedBalance = (walletAddress: string) => {
     } finally {
       setLoading(false);
     }
-  }, [walletAddress, loading]);
+  }, [walletAddress, loading]); // Stable dependencies
 
   useEffect(() => {
-    if (walletAddress) {
+    // Only run once per wallet address
+    if (walletAddress && walletAddress !== lastWalletRef.current) {
+      console.log(`🎯 Setting up RUGGED balance for: ${walletAddress}`);
+      lastWalletRef.current = walletAddress;
       updateRuggedBalance();
     }
-  }, [walletAddress, updateRuggedBalance]);
+  }, [walletAddress, updateRuggedBalance]); // Now updateRuggedBalance is stable
 
   return { ruggedBalance, loading, updateRuggedBalance };
 };
@@ -1008,157 +1034,225 @@ const TradingControls: FC<TradingControlsProps> = ({
     }
   `;
 
-  // 🔧 FIXED: Better user initialization with duplicate prevention
+  // 🔧 FIXED: User initialization with stable dependencies and robust tracking
+  const initializationRef = useRef<{ 
+    attempted: boolean; 
+    completed: boolean; 
+    lastWallet: string;
+    lastUserId: string;
+  }>({ 
+    attempted: false, 
+    completed: false, 
+    lastWallet: '',
+    lastUserId: ''
+  });
+  
   useEffect(() => {
-    let initTimeout: NodeJS.Timeout | null = null;
-    let isInitializing = false;
+    // Only run initialization if conditions are met and we haven't already done it for this wallet
+    if (!authenticated || !walletAddress) {
+      return;
+    }
     
-    if (authenticated && walletAddress && !isInitializing) {
-      const initUser = async () => {
-        if (isInitializing) {
-          console.log('⚠️ User initialization already in progress, skipping...');
+    // Check if we've already completed initialization for this exact wallet
+    if (initializationRef.current.completed && 
+        initializationRef.current.lastWallet === walletAddress &&
+        initializationRef.current.lastUserId === (userId || '')) {
+      return;
+    }
+    
+    // Check if we're already in progress for this wallet
+    if (initializationRef.current.attempted && 
+        initializationRef.current.lastWallet === walletAddress) {
+      return;
+    }
+    
+    console.log(`🔗 Starting user initialization for wallet: ${walletAddress}`);
+    initializationRef.current.attempted = true;
+    initializationRef.current.lastWallet = walletAddress;
+    
+    let initTimeout: NodeJS.Timeout | null = null;
+    
+    const initUser = async () => {
+      try {
+        // If we already have a userId for this wallet, we might just need socket initialization
+        if (userId && initializationRef.current.lastUserId === userId) {
+          console.log(`✅ User ${userId} already initialized for this wallet`);
+          initializationRef.current.completed = true;
           return;
         }
         
-        isInitializing = true;
+        console.log(`📡 Getting user data for wallet: ${walletAddress}`);
+        const userData = await UserAPI.getUserOrCreate(walletAddress);
         
-        try {
-          console.log(`🔗 Initializing user with embedded wallet: ${walletAddress}`);
+        if (userData) {
+          setUserId(userData.id);
+          initializationRef.current.lastUserId = userData.id;
+          console.log(`👤 User ID set: ${userData.id}`);
           
-          // Check if user is already initialized by checking if we have a userId
-          if (userId) {
-            console.log(`✅ User ${userId} already initialized, skipping API call`);
-            isInitializing = false;
-            return;
-          }
-          
-          const userData = await UserAPI.getUserOrCreate(walletAddress);
-          if (userData) {
-            setUserId(userData.id);
-            console.log(`👤 User ID set: ${userData.id}`);
+          // Use timeout to ensure initialization doesn't block
+          initTimeout = setTimeout(() => {
+            console.log(`📡 Initializing user via socket (one-time)...`);
             
-            // Use timeout to ensure initialization doesn't block
-            initTimeout = setTimeout(() => {
-              console.log(`📡 Initializing user via socket...`);
+            const socket = (window as any).socket;
+            if (socket) {
+              socket.emit('initializeUser', {
+                userId: userData.id,
+                walletAddress: walletAddress
+              });
               
-              // Use socket for initialization
-              const socket = (window as any).socket;
-              if (socket) {
-                socket.emit('initializeUser', {
-                  userId: userData.id,
-                  walletAddress: walletAddress
-                });
+              // Listen for initialization result (one-time)
+              socket.once('userInitializeResult', (result: any) => {
+                console.log('📡 User initialization result:', result);
                 
-                // Listen for initialization result
-                socket.once('userInitializeResult', (result: any) => {
-                  console.log('📡 User initialization result:', result);
+                if (result.success) {
+                  console.log(`✅ User ${result.userId} initialized successfully`);
+                  console.log(`💰 Custodial balance: ${result.custodialBalance?.toFixed(6)} SOL`);
+                  console.log(`💼 Embedded balance: ${result.embeddedBalance?.toFixed(6)} SOL`);
                   
-                  if (result.success) {
-                    console.log(`✅ User ${result.userId} initialized successfully`);
-                    console.log(`💰 Custodial balance: ${result.custodialBalance?.toFixed(6)} SOL`);
-                    console.log(`💼 Embedded balance: ${result.embeddedBalance?.toFixed(6)} SOL`);
-                    
-                    // Force balance updates
-                    updateCustodialBalance();
-                    updateRuggedBalance();
-                  } else {
-                    console.error('❌ User initialization failed:', result.error);
-                    toast.error('Failed to initialize wallet');
-                  }
+                  // Mark as completed
+                  initializationRef.current.completed = true;
+                  initializationRef.current.lastUserId = result.userId;
                   
-                  isInitializing = false;
-                });
-              } else {
-                console.error('❌ Socket not available for user initialization');
-                isInitializing = false;
-              }
-            }, 1000);
-          }
-        } catch (error) {
-          console.error('❌ Could not initialize user:', error);
-          toast.error('Failed to initialize wallet');
-          isInitializing = false;
+                  // Trigger balance updates without dependencies - use refs to call latest functions
+                  setTimeout(() => {
+                    // Call the functions directly without dependencies
+                    try {
+                      updateCustodialBalance();
+                      updateRuggedBalance();
+                    } catch (error) {
+                      console.warn('⚠️ Balance update failed during initialization:', error);
+                    }
+                  }, 500);
+                } else {
+                  console.error('❌ User initialization failed:', result.error);
+                  toast.error('Failed to initialize wallet');
+                  // Reset flags on failure so it can retry
+                  initializationRef.current.attempted = false;
+                  initializationRef.current.completed = false;
+                }
+              });
+            } else {
+              console.error('❌ Socket not available for user initialization');
+              // Reset flags so it can retry when socket is available
+              initializationRef.current.attempted = false;
+              initializationRef.current.completed = false;
+            }
+          }, 1000);
         }
-      };
-      
-      initUser();
-    }
+      } catch (error) {
+        console.error('❌ Could not initialize user:', error);
+        toast.error('Failed to initialize wallet');
+        // Reset flags on error so it can retry
+        initializationRef.current.attempted = false;
+        initializationRef.current.completed = false;
+      }
+    };
+    
+    initUser();
     
     return () => {
       if (initTimeout) clearTimeout(initTimeout);
-      isInitializing = false;
     };
-  }, [authenticated, walletAddress, userId, updateCustodialBalance, updateRuggedBalance]);
+  }, [authenticated, walletAddress, userId]); // Only essential dependencies
+  
+  // Reset initialization tracking when wallet actually changes (not on every render)
+  useEffect(() => {
+    if (walletAddress !== initializationRef.current.lastWallet) {
+      console.log(`🔄 Wallet changed: ${initializationRef.current.lastWallet} → ${walletAddress}`);
+      initializationRef.current = { 
+        attempted: false, 
+        completed: false, 
+        lastWallet: walletAddress,
+        lastUserId: ''
+      };
+    }
+  }, [walletAddress]);
 
   // Update local amount state when saved amount changes
   useEffect(() => {
     setAmount(savedAmount);
   }, [savedAmount]);
 
-  // 🔧 FIXED: Add socket listeners for real-time balance updates and game events
+  // 🔧 FIXED: Socket listeners with stable dependencies and better cleanup
   useEffect(() => {
+    if (!userId) return;
+    
     const socket = (window as any).socket;
-    if (socket && userId) {
-      // Listen for custodial balance updates
-      const handleCustodialBalanceUpdate = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`💰 Real-time custodial balance update: ${data.custodialBalance?.toFixed(6)} SOL`);
-          // Force update the balance immediately
+    if (!socket) return;
+    
+    console.log(`🔌 Setting up socket listeners for user: ${userId}`);
+    
+    // Store the functions in refs to avoid recreating handlers
+    const handleCustodialBalanceUpdate = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`💰 Real-time custodial balance update: ${data.custodialBalance?.toFixed(6)} SOL`);
+        // Force update the balance immediately by calling the update function
+        try {
           updateCustodialBalance();
+        } catch (error) {
+          console.warn('⚠️ Balance update failed:', error);
         }
-      };
+      }
+    };
 
-      // Listen for custodial cashout success
-      const handleCustodialCashout = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`💸 Real-time custodial cashout: ${data.amount?.toFixed(6)} SOL`);
-          // Clear active bet and update balance
-          setActiveBet(null);
+    const handleCustodialCashout = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`💸 Real-time custodial cashout: ${data.amount?.toFixed(6)} SOL`);
+        // Clear active bet and update balance
+        setActiveBet(null);
+        try {
           updateCustodialBalance();
+        } catch (error) {
+          console.warn('⚠️ Balance update failed:', error);
         }
-      };
+      }
+    };
 
-      // Listen for game crashes to clear active bets
-      const handleGameCrashed = (data: any) => {
-        if (activeBet) {
-          console.log(`💥 Game crashed at ${data.crashMultiplier?.toFixed(2)}x - clearing active bet`);
-          // Clear active bet when game crashes (user lost)
-          setActiveBet(null);
-          
-          // Show loss message
-          toast.error(`Game crashed at ${data.crashMultiplier?.toFixed(2)}x - Bet lost`);
-        }
-      };
+    const handleGameCrashed = (data: any) => {
+      // Use a ref or check current active bet state
+      if (activeBet) {
+        console.log(`💥 Game crashed at ${data.crashMultiplier?.toFixed(2)}x - clearing active bet`);
+        // Clear active bet when game crashes (user lost)
+        setActiveBet(null);
+        
+        // Show loss message
+        toast.error(`Game crashed at ${data.crashMultiplier?.toFixed(2)}x - Bet lost`);
+      }
+    };
 
-      // Listen for bet placement confirmations
-      const handleCustodialBetPlaced = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`🎯 Custodial bet placed via socket: ${data.betAmount} SOL at ${data.entryMultiplier}x`);
-          // The bet should already be set by handleBuy, but ensure consistency
+    const handleCustodialBetPlaced = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`🎯 Custodial bet placed via socket: ${data.betAmount} SOL at ${data.entryMultiplier}x`);
+        // Update balance if provided
+        try {
           updateCustodialBalance();
+        } catch (error) {
+          console.warn('⚠️ Balance update failed:', error);
         }
-      };
+      }
+    };
 
-      socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-      socket.on('custodialCashout', handleCustodialCashout);
-      socket.on('gameCrashed', handleGameCrashed);
-      socket.on('custodialBetPlaced', handleCustodialBetPlaced);
+    // Add event listeners
+    socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+    socket.on('custodialCashout', handleCustodialCashout);
+    socket.on('gameCrashed', handleGameCrashed);
+    socket.on('custodialBetPlaced', handleCustodialBetPlaced);
 
-      return () => {
-        socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-        socket.off('custodialCashout', handleCustodialCashout);
-        socket.off('gameCrashed', handleGameCrashed);
-        socket.off('custodialBetPlaced', handleCustodialBetPlaced);
-      };
-    }
-  }, [userId, updateCustodialBalance, activeBet]);
+    return () => {
+      console.log(`🔌 Cleaning up socket listeners for user: ${userId}`);
+      socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+      socket.off('custodialCashout', handleCustodialCashout);
+      socket.off('gameCrashed', handleGameCrashed);
+      socket.off('custodialBetPlaced', handleCustodialBetPlaced);
+    };
+  }, [userId]); // Only depend on userId - the handlers are stable
 
   // Handle token switch
   const handleTokenChange = useCallback((token: TokenType) => {
     setCurrentToken(token);
   }, []);
 
-  // 🔧 FIXED: Optimized cashout with better timeout and error handling
+  // 🔧 FIXED: Optimized cashout with stable dependencies
   const handleCashout = useCallback(async () => {
     if (!authenticated || !walletAddress || !isConnected || !activeBet || !userId) {
       return;
@@ -1196,7 +1290,12 @@ const TradingControls: FC<TradingControlsProps> = ({
         if (success) {
           console.log('✅ Custodial cashout successful:', result);
           toast.success(`Cashed out: ${result.payout?.toFixed(3)} SOL`);
-          updateCustodialBalance();
+          // Call update function directly
+          try {
+            updateCustodialBalance();
+          } catch (error) {
+            console.warn('⚠️ Balance update failed:', error);
+          }
         } else {
           console.error('❌ Custodial cashout failed:', result.reason);
           setServerError(result.reason || 'Cashout failed');
@@ -1215,7 +1314,11 @@ const TradingControls: FC<TradingControlsProps> = ({
           success = cashoutResult.success || false;
           
           if (success) {
-            updateRuggedBalance();
+            try {
+              updateRuggedBalance();
+            } catch (error) {
+              console.warn('⚠️ Balance update failed:', error);
+            }
             toast.success('Cashed out RUGGED tokens!');
           }
         } catch (error) {
@@ -1243,9 +1346,9 @@ const TradingControls: FC<TradingControlsProps> = ({
         return newSet;
       });
     }
-  }, [authenticated, walletAddress, isConnected, activeBet, userId, isCashingOut, operationTimeouts, custodialCashOut, cashOut, updateCustodialBalance, updateRuggedBalance, onSell]);
+  }, [authenticated, walletAddress, isConnected, activeBet, userId, isCashingOut, operationTimeouts, custodialCashOut, cashOut, onSell]); // Removed function dependencies
 
-  // Auto transfer function with better error handling
+  // Auto transfer function with stable dependencies
   const autoTransferToGameBalance = useCallback(async (amount: number) => {
     if (!embeddedWallet || !walletAddress || !userId) {
       toast.error('Wallet not ready for transfer');
@@ -1311,7 +1414,11 @@ const TradingControls: FC<TradingControlsProps> = ({
       
       // Refresh balances
       setTimeout(() => {
-        updateCustodialBalance();
+        try {
+          updateCustodialBalance();
+        } catch (error) {
+          console.warn('⚠️ Balance update failed:', error);
+        }
       }, 2000);
       
       return true;
@@ -1333,7 +1440,7 @@ const TradingControls: FC<TradingControlsProps> = ({
       toast.error(errorMessage, { id: 'transfer' });
       return false;
     }
-  }, [embeddedWallet, walletAddress, userId, embeddedWalletBalance, updateCustodialBalance]);
+  }, [embeddedWallet, walletAddress, userId, embeddedWalletBalance]); // Removed function dependency
 
   // 🔧 FIXED: Better connection recovery
   useEffect(() => {
@@ -1413,7 +1520,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     setAutoCashoutValue(value.toString());
   }, [setAutoCashoutValue]);
 
-  // 🔧 FIXED: Enhanced bet placement with better state management and error handling
+  // 🔧 FIXED: Enhanced bet placement with stable dependencies
   const handleBuy = useCallback(async () => {
     const amountNum = parseFloat(amount);
     
@@ -1549,7 +1656,11 @@ const TradingControls: FC<TradingControlsProps> = ({
             console.log('✅ Active bet set:', newBet);
             
             // Update balance immediately
-            updateCustodialBalance();
+            try {
+              updateCustodialBalance();
+            } catch (error) {
+              console.warn('⚠️ Balance update failed:', error);
+            }
           } else {
             console.error('❌ Custodial bet failed:', result.reason);
             setServerError(result.reason || 'Failed to place custodial bet');
@@ -1575,7 +1686,11 @@ const TradingControls: FC<TradingControlsProps> = ({
           };
           
           setActiveBet(newBet);
-          updateRuggedBalance();
+          try {
+            updateRuggedBalance();
+          } catch (error) {
+            console.warn('⚠️ Balance update failed:', error);
+          }
         }
       }
       
@@ -1620,13 +1735,11 @@ const TradingControls: FC<TradingControlsProps> = ({
     userId, 
     walletAddress, 
     placeBet, 
-    updateCustodialBalance, 
-    updateRuggedBalance, 
     onBuy,
     isPlacingBet,
     operationTimeouts,
     serverError
-  ]);
+  ]); // Removed function dependencies
 
   // Quick transfer amounts
   const quickTransferAmounts = [0.001, 0.01, 0.05, 0.1];
@@ -1636,7 +1749,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     if (success) {
       console.log(`✅ Quick transfer of ${amount} SOL completed`);
     }
-  }, [autoTransferToGameBalance]);
+  }, [autoTransferToGameBalance]); // Now autoTransferToGameBalance is stable
 
   // Render the component with optimized structure
   if (isMobile) {

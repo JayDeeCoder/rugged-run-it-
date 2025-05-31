@@ -1101,7 +1101,11 @@ const TradingControls: FC<TradingControlsProps> = ({
     isWaitingPeriod, 
     canBet,
     connectionError,
-    connectionAttempts
+    connectionAttempts,
+    // ADD THESE NEW METHODS:
+    placeCustodialBet,
+    custodialCashOut,
+    getCustodialBalance
   } = useGameSocket(walletAddress, userId || undefined);
   
   // 🔧 FIXED: Dual balance system with embedded wallet balance
@@ -1257,53 +1261,19 @@ const handleCashout = useCallback(async () => {
 
     // Route cashout based on bet token type
     if (activeBet.tokenType === TokenType.SOL) {
-      // Enhanced SOL cashout with timeout and better error handling
-      success = await new Promise<boolean>((resolve) => {
-        const socket = (window as any).gameSocket;
-        
-        if (!socket || !socket.connected) {
-          resolve(false);
-          return;
-        }
-
-        // Set up timeout to prevent hanging
-        const timeoutId = setTimeout(() => {
-          resolve(false);
-        }, 10000); // 10 second timeout
-
-        // Set up response handler
-        const handleCashoutResult = (result: any) => {
-          clearTimeout(timeoutId);
-          if (result.success) {
-            updateCustodialBalance(); // Refresh custodial balance
-            resolve(true);
-          } else {
-            resolve(false);
-          }
-        };
-
-        // Register listeners (use once to prevent multiple responses)
-        socket.once('custodialCashOutResult', handleCashoutResult);
-        socket.once('error', () => {
-          clearTimeout(timeoutId);
-          resolve(false);
-        });
-        socket.once('disconnect', () => {
-          clearTimeout(timeoutId);
-          resolve(false);
-        });
-
-        // Send cashout request
-        try {
-          socket.emit('custodialCashOut', { userId, walletAddress });
-        } catch (emitError) {
-          clearTimeout(timeoutId);
-          resolve(false);
-        }
-      });
-
+      console.log('💸 Using custodialCashOut method from useGameSocket...');
+      
+      const result = await custodialCashOut(userId, walletAddress);
+      success = result.success;
+      
       if (success) {
-        toast.success('Cashed out to SOL game balance!');
+        console.log('✅ Custodial cashout successful:', result);
+        toast.success(`Cashed out: ${result.payout?.toFixed(3)} SOL`);
+        updateCustodialBalance();
+      } else {
+        console.error('❌ Custodial cashout failed:', result.reason);
+        setServerError(result.reason || 'Cashout failed');
+        toast.error(result.reason || 'Cashout failed');
       }
     } else {
       // Enhanced RUGGED token cashout with timeout
@@ -1312,12 +1282,12 @@ const handleCashout = useCallback(async () => {
         const timeoutPromise = new Promise<never>((_, reject) => {
           setTimeout(() => reject(new Error('timeout')), 15000);
         });
-
+    
         const cashoutResult = await Promise.race([cashoutPromise, timeoutPromise]);
         success = cashoutResult.success || false;
         
         if (success) {
-          updateRuggedBalance(); // Refresh RUGGED balance
+          updateRuggedBalance();
           toast.success('Cashed out RUGGED tokens!');
         }
       } catch (error) {
@@ -1913,34 +1883,24 @@ const BettingSection: FC<{
 
       // Route betting based on token type
       if (currentToken === TokenType.SOL) {
-        console.log('📡 Using custodial SOL betting system...');
+        console.log('📡 Using placeCustodialBet method from useGameSocket...');
         
-        success = await new Promise<boolean>((resolve) => {
-          const socket = (window as any).gameSocket;
-          if (socket) {
-            socket.emit('custodialBet', { userId, betAmount: amountNum });
-            socket.once('custodialBetResult', (result: any) => {
-              console.log('📡 Custodial SOL bet response:', result);
-              if (result.success) {
-                entryMultiplier = result.entryMultiplier;
-                updateCustodialBalance(); // Refresh custodial balance
-                resolve(true);
-              } else {
-                setServerError(result.reason || 'Failed to place custodial bet');
-                resolve(false);
-              }
-            });
-          } else {
-            setServerError('Socket connection not available');
-            resolve(false);
-          }
-        });
+        success = await placeCustodialBet(userId!, amountNum);
+        
+        if (success) {
+          console.log('✅ Custodial bet placed successfully');
+          entryMultiplier = gameStatus === 'waiting' ? 1.0 : activeCurrentMultiplier;
+          updateCustodialBalance();
+        } else {
+          console.error('❌ Custodial bet failed');
+          setServerError('Failed to place custodial bet');
+        }
       } else {
         // Use existing RUGGED token betting
         console.log('📡 Using RUGGED token betting system...');
         success = await placeBet(walletAddress, amountNum, userId || undefined);
         if (success) {
-          updateRuggedBalance(); // Refresh RUGGED balance
+          updateRuggedBalance();
         }
       }
       

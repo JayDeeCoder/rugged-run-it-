@@ -6,7 +6,8 @@ import cors from 'cors';
 import { createClient } from '@supabase/supabase-js';
 import { 
     Connection, 
-    PublicKey, 
+    PublicKey,
+    SystemInstruction, 
     LAMPORTS_PER_SOL, 
     Transaction,
     SystemProgram,
@@ -1309,30 +1310,45 @@ function decodeTransferInstruction(instruction: TransactionInstruction): {
     fromPubkey: PublicKey;
     toPubkey: PublicKey;
     lamports: number;
-} {
-    // For SystemProgram transfers, manually extract the data
-    const data = instruction.data;
-    
-    // SystemProgram transfer instruction has a specific layout
-    // First 4 bytes are the instruction discriminator (should be [2, 0, 0, 0] for transfer)
-    if (data.length < 12 || data[0] !== 2) {
+  } {
+    try {
+      console.log('🔍 Trying SystemInstruction.decodeTransfer...');
+      // Use Solana's built-in decoder
+      const decoded = SystemInstruction.decodeTransfer(instruction);
+      console.log('✅ Successfully decoded transfer:', {
+        from: decoded.fromPubkey.toString(),
+        to: decoded.toPubkey.toString(),
+        lamports: Number(decoded.lamports)
+      });
+      return {
+        fromPubkey: decoded.fromPubkey,
+        toPubkey: decoded.toPubkey,
+        lamports: Number(decoded.lamports)  // ← Convert bigint to number
+      };
+    } catch (error) {
+      console.log('❌ SystemInstruction.decodeTransfer failed:', error);
+      console.log('🔍 Falling back to manual decode...');
+      
+      // Fallback to your existing manual decoder
+      const data = instruction.data;
+      if (data.length < 12 || data[0] !== 2) {
+        console.log('❌ Manual decode also failed:', {
+          length: data.length,
+          firstByte: data[0],
+          allBytes: Array.from(data)
+        });
         throw new Error('Not a valid transfer instruction');
-    }
-    
-    // Next 8 bytes are the lamports amount (little-endian u64)
-    const lamportsBuffer = data.slice(4, 12);
-    const lamports = Number(lamportsBuffer.readBigUInt64LE(0));
-    
-    // Keys: [0] = from (signer), [1] = to (writable)
-    const fromPubkey = instruction.keys[0].pubkey;
-    const toPubkey = instruction.keys[1].pubkey;
-    
-    return {
-        fromPubkey,
-        toPubkey,
+      }
+      
+      const lamportsBuffer = data.slice(4, 12);
+      const lamports = Number(lamportsBuffer.readBigUInt64LE(0));
+      return {
+        fromPubkey: instruction.keys[0].pubkey,
+        toPubkey: instruction.keys[1].pubkey,
         lamports
-    };
-}
+      };
+    }
+  }
 
 // Helper function to find transfer instruction in transaction
 function findTransferInstruction(transaction: TransactionResponse): TransactionInstruction | null {
@@ -1729,110 +1745,173 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                 }
 
                 // Find transfer instruction to house wallet
-                const transferInstruction = findTransferInstruction(transaction);
-                
-                if (transferInstruction) {
-                    const decoded = decodeTransferInstruction(transferInstruction);
+const transferInstruction = findTransferInstruction(transaction);
+
+// Method 1: Try balance change analysis first (works with Privy)
+let decoded: { fromPubkey: PublicKey; toPubkey: PublicKey; lamports: number } | null = null;
+
+try {
+    console.log('🔍 Attempting balance change analysis...');
+    
+    // Get pre and post balances
+    const preBalances = transaction.meta?.preBalances || [];
+    const postBalances = transaction.meta?.postBalances || [];
+    const accountKeys = transaction.transaction.message.accountKeys;
+    
+    // Find the house wallet in the account keys
+    const houseWalletIndex = accountKeys.findIndex(key => key.equals(housePublicKey));
+    
+    if (houseWalletIndex !== -1) {
+        // Calculate the change in house wallet balance
+        const preBalance = preBalances[houseWalletIndex] || 0;
+        const postBalance = postBalances[houseWalletIndex] || 0;
+        const balanceChange = postBalance - preBalance;
+        
+        console.log('🏠 House wallet balance change:', {
+            preBalance, postBalance, change: balanceChange
+        });
+        
+        if (balanceChange > 0) {
+            // Find the sender (account that lost balance)
+            for (let i = 0; i < accountKeys.length; i++) {
+                if (i !== houseWalletIndex) {
+                    const accountPreBalance = preBalances[i] || 0;
+                    const accountPostBalance = postBalances[i] || 0;
+                    const accountChange = accountPostBalance - accountPreBalance;
                     
-                    // Check if this is a transfer TO the house wallet (incoming deposit)
-                    if (decoded.toPubkey.equals(housePublicKey)) {
-                        const fromAddress = decoded.fromPubkey.toString();
-                        const amount = decoded.lamports / LAMPORTS_PER_SOL;
-                        
-                        console.log(`💰 Detected incoming deposit: ${amount} SOL from ${fromAddress}`);
-                        
-                        // Try to find user by wallet address in database
-                        const { data: existingWallet, error: walletError } = await supabaseService
-                            .from('user_hybrid_wallets')
-                            .select('*')
-                            .eq('external_wallet_address', fromAddress)
-                            .single();
-
-                        if (!walletError && existingWallet) {
-                            // User found - update their balance
-                            const userId = existingWallet.user_id;
-                            const currentBalance = parseFloat(existingWallet.custodial_balance) || 0;
-                            const currentDeposited = parseFloat(existingWallet.custodial_total_deposited) || 0;
-                            
-                            const newBalance = currentBalance + amount;
-                            const newTotalDeposited = currentDeposited + amount;
-                            
-                            console.log(`👤 Found user ${userId} - updating balance: ${currentBalance.toFixed(3)} → ${newBalance.toFixed(3)} SOL`);
-                            
-                            // Update user's custodial balance in database
-                            const { error: updateError } = await supabaseService
-                                .from('user_hybrid_wallets')
-                                .update({
-                                    custodial_balance: newBalance,
-                                    custodial_total_deposited: newTotalDeposited,
-                                    last_custodial_deposit: new Date().toISOString(),
-                                    updated_at: new Date().toISOString()
-                                })
-                                .eq('user_id', userId);
-
-                            if (updateError) {
-                                console.error(`❌ Failed to update balance for user ${userId}:`, updateError);
-                            } else {
-                                console.log(`✅ Successfully credited ${amount} SOL to user ${userId}. New balance: ${newBalance.toFixed(3)} SOL`);
-                                
-                                // Record the deposit transaction
-                                const { error: depositError } = await supabaseService
-                                    .from('custodial_deposits')
-                                    .insert({
-                                        user_id: userId,
-                                        wallet_address: fromAddress,
-                                        amount: amount,
-                                        transaction_signature: sigInfo.signature,
-                                        processed_at: new Date().toISOString(),
-                                        status: 'completed'
-                                    });
-
-                                if (depositError) {
-                                    console.warn('Failed to record deposit transaction:', depositError);
-                                }
-
-                                // Update in-memory state if user is loaded
-                                const memoryWallet = hybridUserWallets.get(userId);
-                                if (memoryWallet) {
-                                    memoryWallet.custodialBalance = newBalance;
-                                    memoryWallet.custodialTotalDeposited = newTotalDeposited;
-                                    memoryWallet.lastCustodialDeposit = Date.now();
-                                }
-
-                                // Emit real-time update to frontend (if socket.io is available)
-                                if (typeof io !== 'undefined') {
-                                    io.emit('custodialBalanceUpdate', {
-                                        userId,
-                                        custodialBalance: newBalance,
-                                        totalDeposited: newTotalDeposited,
-                                        depositAmount: amount,
-                                        transactionSignature: sigInfo.signature,
-                                        timestamp: Date.now()
-                                    });
-                                }
-                            }
-                        } else {
-                            // User not found - store as pending deposit
-                            console.log(`⚠️ No user found for wallet ${fromAddress}, storing as pending deposit`);
-                            
-                            const { error: pendingError } = await supabaseService
-                                .from('pending_deposits')
-                                .insert({
-                                    wallet_address: fromAddress,
-                                    amount: amount,
-                                    transaction_signature: sigInfo.signature,
-                                    detected_at: new Date().toISOString(),
-                                    status: 'pending'
-                                });
-
-                            if (pendingError) {
-                                console.error('Failed to store pending deposit:', pendingError);
-                            } else {
-                                console.log(`📝 Stored pending deposit: ${amount} SOL from ${fromAddress}`);
-                            }
-                        }
+                    // Look for account that lost approximately the same amount (accounting for fees)
+                    if (accountChange < 0 && Math.abs(Math.abs(accountChange) - balanceChange) < 10000) { // 0.00001 SOL tolerance
+                        decoded = {
+                            fromPubkey: accountKeys[i],
+                            toPubkey: housePublicKey,
+                            lamports: balanceChange
+                        };
+                        console.log('✅ Successfully decoded using balance analysis:', {
+                            from: decoded.fromPubkey.toString(),
+                            amount: balanceChange / LAMPORTS_PER_SOL
+                        });
+                        break;
                     }
                 }
+            }
+        }
+    }
+} catch (balanceError) {
+    console.log('⚠️ Balance analysis failed:', balanceError);
+}
+
+// Method 2: Fallback to instruction decoding (for standard transfers)
+if (!decoded && transferInstruction) {
+    try {
+        console.log('🔍 Falling back to instruction decoding...');
+        decoded = decodeTransferInstruction(transferInstruction);
+        console.log('✅ Successfully decoded using instruction method');
+    } catch (instructionError) {
+        console.log('❌ Instruction decoding also failed:', instructionError);
+    }
+}
+
+// Process the deposit if we successfully decoded it
+if (decoded) {
+    // Check if this is a transfer TO the house wallet (incoming deposit)
+    if (decoded.toPubkey.equals(housePublicKey)) {
+        const fromAddress = decoded.fromPubkey.toString();
+        const amount = decoded.lamports / LAMPORTS_PER_SOL;
+        
+        console.log(`💰 Detected incoming deposit: ${amount} SOL from ${fromAddress}`);
+        
+        // Try to find user by wallet address in database
+        const { data: existingWallet, error: walletError } = await supabaseService
+            .from('user_hybrid_wallets')
+            .select('*')
+            .eq('external_wallet_address', fromAddress)
+            .single();
+
+        if (!walletError && existingWallet) {
+            // User found - update their balance
+            const userId = existingWallet.user_id;
+            const currentBalance = parseFloat(existingWallet.custodial_balance) || 0;
+            const currentDeposited = parseFloat(existingWallet.custodial_total_deposited) || 0;
+            
+            const newBalance = currentBalance + amount;
+            const newTotalDeposited = currentDeposited + amount;
+            
+            console.log(`👤 Found user ${userId} - updating balance: ${currentBalance.toFixed(3)} → ${newBalance.toFixed(3)} SOL`);
+            
+            // Update user's custodial balance in database
+            const { error: updateError } = await supabaseService
+                .from('user_hybrid_wallets')
+                .update({
+                    custodial_balance: newBalance,
+                    custodial_total_deposited: newTotalDeposited,
+                    last_custodial_deposit: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                })
+                .eq('user_id', userId);
+
+            if (updateError) {
+                console.error(`❌ Failed to update balance for user ${userId}:`, updateError);
+            } else {
+                console.log(`✅ Successfully credited ${amount} SOL to user ${userId}. New balance: ${newBalance.toFixed(3)} SOL`);
+                
+                // Record the deposit transaction
+                const { error: depositError } = await supabaseService
+                    .from('custodial_deposits')
+                    .insert({
+                        user_id: userId,
+                        wallet_address: fromAddress,
+                        amount: amount,
+                        transaction_signature: sigInfo.signature,
+                        processed_at: new Date().toISOString(),
+                        status: 'completed'
+                    });
+
+                if (depositError) {
+                    console.warn('Failed to record deposit transaction:', depositError);
+                }
+
+                // Update in-memory state if user is loaded
+                const memoryWallet = hybridUserWallets.get(userId);
+                if (memoryWallet) {
+                    memoryWallet.custodialBalance = newBalance;
+                    memoryWallet.custodialTotalDeposited = newTotalDeposited;
+                    memoryWallet.lastCustodialDeposit = Date.now();
+                }
+
+                // Emit real-time update to frontend (if socket.io is available)
+                if (typeof io !== 'undefined') {
+                    io.emit('custodialBalanceUpdate', {
+                        userId,
+                        custodialBalance: newBalance,
+                        totalDeposited: newTotalDeposited,
+                        depositAmount: amount,
+                        transactionSignature: sigInfo.signature,
+                        timestamp: Date.now()
+                    });
+                }
+            }
+        } else {
+            // User not found - store as pending deposit
+            console.log(`⚠️ No user found for wallet ${fromAddress}, storing as pending deposit`);
+            
+            const { error: pendingError } = await supabaseService
+                .from('pending_deposits')
+                .insert({
+                    wallet_address: fromAddress,
+                    amount: amount,
+                    transaction_signature: sigInfo.signature,
+                    detected_at: new Date().toISOString(),
+                    status: 'pending'
+                });
+
+            if (pendingError) {
+                console.error('Failed to store pending deposit:', pendingError);
+            } else {
+                console.log(`📝 Stored pending deposit: ${amount} SOL from ${fromAddress}`);
+            }
+        }
+    }
+}
 
                 // Mark transaction as processed
                 processedSignatures.add(sigInfo.signature);

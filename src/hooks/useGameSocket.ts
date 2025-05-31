@@ -580,25 +580,128 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     });
   }, [socket, isConnected, currentGame]);
 
-  return {
-    currentGame,
-    gameHistory,
-    isConnected,
-    placeBet,
-    cashOut,
-    serverTimeOffset,
-    getServerTime,
-    // Countdown and waiting period state
-    countdown,
-    isWaitingPeriod,
-    canBet,
-    // Debug information
-    connectionError,
-    connectionAttempts,
-    // Socket instance for advanced usage
-    socket
-  };
+  // Add these three methods to your useGameSocket hook:
+
+const placeCustodialBet = useCallback(async (
+  userId: string, 
+  betAmount: number
+): Promise<boolean> => {
+  return new Promise((resolve) => {
+    if (!socket || !isConnected) {
+      console.log('❌ Cannot place custodial bet: not connected');
+      resolve(false);
+      return;
+    }
+
+    console.log('🎯 Placing custodial bet:', { userId, betAmount });
+
+    const timeout = setTimeout(() => {
+      console.error('❌ Custodial bet timeout');
+      resolve(false);
+    }, 30000);
+
+    socket.once('custodialBetResult', (data: any) => {
+      clearTimeout(timeout);
+      console.log('🎯 Custodial bet result:', data);
+      
+      if (data.success && data.gameState && gameStateRef.current) {
+        const updatedGame: GameState = {
+          ...gameStateRef.current,
+          totalBets: data.gameState.totalBets || gameStateRef.current.totalBets,
+          totalPlayers: data.gameState.totalPlayers || gameStateRef.current.totalPlayers,
+        };
+        setCurrentGame(updatedGame);
+        gameStateRef.current = updatedGame;
+      }
+      
+      resolve(data.success);
+    });
+
+    socket.emit('custodialBet', { userId, betAmount });
+  });
+}, [socket, isConnected]);
+
+const custodialCashOut = useCallback(async (
+  userId: string, 
+  walletAddress: string
+): Promise<{ success: boolean; payout?: number; custodialBalance?: number; reason?: string }> => {
+  return new Promise((resolve) => {
+    if (!socket || !isConnected) {
+      resolve({ success: false, reason: 'Not connected' });
+      return;
+    }
+
+    console.log('💸 Custodial cashout:', { userId, walletAddress });
+
+    const timeout = setTimeout(() => {
+      console.error('❌ Custodial cashout timeout');
+      resolve({ success: false, reason: 'Timeout' });
+    }, 30000);
+
+    socket.once('custodialCashOutResult', (data: any) => {
+      clearTimeout(timeout);
+      console.log('💸 Custodial cashout result:', data);
+      
+      resolve({
+        success: data.success,
+        payout: data.payout,
+        custodialBalance: data.custodialBalance,
+        reason: data.reason || data.error
+      });
+    });
+
+    socket.emit('custodialCashOut', { userId, walletAddress });
+  });
+}, [socket, isConnected]);
+
+const getCustodialBalance = useCallback(async (userId: string): Promise<number | null> => {
+  return new Promise((resolve) => {
+    if (!socket || !isConnected) {
+      resolve(null);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      console.error('❌ Get custodial balance timeout');
+      resolve(null);
+    }, 10000);
+
+    socket.once('custodialBalanceResponse', (data: any) => {
+      clearTimeout(timeout);
+      console.log('📊 Custodial balance received:', data);
+      
+      if (data.success) {
+        resolve(data.custodialBalance);
+      } else {
+        console.error('❌ Failed to get custodial balance:', data.error);
+        resolve(null);
+      }
+    });
+
+    socket.emit('getCustodialBalance', { userId });
+  });
+}, [socket, isConnected]);
+
+return {
+  currentGame,
+  gameHistory,
+  isConnected,
+  placeBet,           // Regular betting
+  cashOut,            // Regular cashout
+  placeCustodialBet,  // NEW: Custodial betting
+  custodialCashOut,   // NEW: Custodial cashout
+  getCustodialBalance, // NEW: Get custodial balance
+  serverTimeOffset,
+  getServerTime,
+  countdown,
+  isWaitingPeriod,
+  canBet,
+  connectionError,
+  connectionAttempts,
+  socket
+};
 }
+
 
 // Enhanced user initialization function for TradingControls
 export const initializeUser = async (

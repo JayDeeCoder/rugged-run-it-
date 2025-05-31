@@ -1,4 +1,4 @@
-// src/components/modals/WithdrawModal.tsx - Updated with Feature Flags
+// src/components/modals/WithdrawModal.tsx - Updated with Enhanced Balance Management
 import { FC, useState, useRef, useEffect, useCallback } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
@@ -126,44 +126,168 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
   return { balance, loading, lastUpdated, updateBalance };
 };
 
-// 🔧 UPDATED: Enhanced custodial balance hook
-// In your WithdrawModal.tsx, replace the existing hook with:
+// 🔧 ENHANCED: Updated custodial balance hook with socket events and force refresh
 const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<number>(0);
+  const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastUserIdRef = useRef<string>('');
+  const socketListenersRef = useRef<boolean>(false);
 
+  // Create stable update function with useCallback
   const updateCustodialBalance = useCallback(async () => {
     if (!userId) return;
     
+    // Prevent multiple simultaneous requests
+    if (loading) return;
+    
     setLoading(true);
     try {
-      // 🚩 CORRECTED: Use your actual API endpoint
+      console.log(`🔄 WithdrawModal: Fetching custodial balance for user ${userId}...`);
+      
       const response = await fetch(`/api/custodial/balance/${userId}`);
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`👤 WithdrawModal: User ${userId} not found - balance remains 0`);
+          setCustodialBalance(0);
+          return;
+        }
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
       const data = await response.json();
       
-      // 🚩 CORRECTED: Use custodialBalance from your API
-      setCustodialBalance(data.custodialBalance || 0);
-      setLastUpdated(Date.now());
-      console.log(`💎 Custodial balance: ${(data.custodialBalance || 0).toFixed(3)} SOL`);
-      
+      if (data.custodialBalance !== undefined) {
+        const newBalance = parseFloat(data.custodialBalance) || 0;
+        console.log(`💰 WithdrawModal: Custodial balance updated: ${newBalance.toFixed(6)} SOL`);
+        setCustodialBalance(newBalance);
+        setLastUpdated(Date.now());
+      } else {
+        console.warn('WithdrawModal: Invalid response format:', data);
+      }
     } catch (error) {
-      console.error('Failed to fetch custodial balance:', error);
-      setCustodialBalance(0);
+      console.error('❌ WithdrawModal: Failed to fetch custodial balance:', error);
+      // Don't reset balance on error, keep previous value
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, loading]); // Stable dependencies
+
+  // 🔧 NEW: Force refresh function for immediate updates
+  const forceRefresh = useCallback(async () => {
+    if (!userId) return;
+    
+    console.log(`🔄 WithdrawModal: Force refreshing balance for ${userId}...`);
+    setLoading(true);
+    
+    try {
+      const response = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}`); // Cache bust
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.custodialBalance !== undefined) {
+          const newBalance = parseFloat(data.custodialBalance) || 0;
+          console.log(`💰 WithdrawModal: Force refresh - Balance: ${newBalance.toFixed(6)} SOL`);
+          setCustodialBalance(newBalance);
+          setLastUpdated(Date.now());
+        }
+      }
+    } catch (error) {
+      console.error('❌ WithdrawModal: Force refresh failed:', error);
     } finally {
       setLoading(false);
     }
   }, [userId]);
 
   useEffect(() => {
-    if (userId) {
+    // Only set up polling if userId changes
+    if (userId && userId !== lastUserIdRef.current) {
+      console.log(`🎯 WithdrawModal: Setting up custodial balance polling for user: ${userId}`);
+      lastUserIdRef.current = userId;
+      
+      // Clear existing interval
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+      }
+      
+      // Initial fetch
       updateCustodialBalance();
-      const interval = setInterval(updateCustodialBalance, 10000);
-      return () => clearInterval(interval);
+      
+      // Set interval for periodic updates
+      updateIntervalRef.current = setInterval(() => {
+        if (!loading) { // Only update if not currently loading
+          updateCustodialBalance();
+        }
+      }, 15000); // 15 seconds for faster updates
+      
+      return () => {
+        if (updateIntervalRef.current) {
+          clearInterval(updateIntervalRef.current);
+        }
+      };
     }
   }, [userId, updateCustodialBalance]);
 
-  return { custodialBalance, loading, lastUpdated, updateCustodialBalance };
+  // 🔧 NEW: Socket event listeners for real-time updates
+  useEffect(() => {
+    if (!userId || socketListenersRef.current) return;
+
+    const socket = (window as any).gameSocket;
+    if (socket) {
+      console.log(`🔌 WithdrawModal: Setting up real-time balance listeners for user: ${userId}`);
+      socketListenersRef.current = true;
+      
+      const handleCustodialBalanceUpdate = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💰 WithdrawModal: Real-time custodial balance update: ${data.custodialBalance?.toFixed(6)} SOL`);
+          setCustodialBalance(parseFloat(data.custodialBalance) || 0);
+          setLastUpdated(Date.now());
+        }
+      };
+
+      const handleBalanceUpdate = (data: any) => {
+        if (data.userId === userId && data.type === 'custodial') {
+          console.log(`💰 WithdrawModal: Real-time balance update: ${data.balance?.toFixed(6)} SOL`);
+          setCustodialBalance(parseFloat(data.balance) || 0);
+          setLastUpdated(Date.now());
+        }
+      };
+
+      const handleDepositConfirmation = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💰 WithdrawModal: Deposit confirmed, refreshing balance...`);
+          // Force refresh after deposit
+          setTimeout(forceRefresh, 1000);
+        }
+      };
+
+      const handleWithdrawConfirmation = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💰 WithdrawModal: Withdraw confirmed, refreshing balance...`);
+          // Force refresh after withdrawal
+          setTimeout(forceRefresh, 1000);
+        }
+      };
+  
+      socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+      socket.on('balanceUpdate', handleBalanceUpdate);
+      socket.on('depositConfirmed', handleDepositConfirmation);
+      socket.on('withdrawConfirmed', handleWithdrawConfirmation);
+      
+      return () => {
+        console.log(`🔌 WithdrawModal: Cleaning up balance listeners for user: ${userId}`);
+        socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+        socket.off('balanceUpdate', handleBalanceUpdate);
+        socket.off('depositConfirmed', handleDepositConfirmation);
+        socket.off('withdrawConfirmed', handleWithdrawConfirmation);
+        socketListenersRef.current = false;
+      };
+    }
+  }, [userId, forceRefresh]);
+
+  return { custodialBalance, loading, lastUpdated, updateCustodialBalance, forceRefresh };
 };
 
 
@@ -273,7 +397,8 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   const { 
     custodialBalance, 
     loading: custodialLoading, 
-    updateCustodialBalance 
+    updateCustodialBalance,
+    forceRefresh: forceRefreshCustodial 
   } = useCustodialBalance(effectiveUserId || '');
   
   // 🚩 UPDATE: Tab state - default to withdraw, hide transfer in custodial-only mode
@@ -303,14 +428,17 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     loading: custodialLoading || (showEmbeddedUI && embeddedLoading)
   };
   
-  // 🔧 UPDATED: Conditional refresh function
+  // 🔧 UPDATED: Enhanced refresh function using force refresh
   const refreshBalances = useCallback(() => {
     console.log('🔄 WithdrawModal: Manual balance refresh triggered');
-    updateCustodialBalance();
+    
+    // Use force refresh for immediate updates
+    forceRefreshCustodial();
+    
     if (showEmbeddedUI) {
       updateEmbeddedBalance();
     }
-  }, [updateCustodialBalance, updateEmbeddedBalance, showEmbeddedUI]);
+  }, [forceRefreshCustodial, updateEmbeddedBalance, showEmbeddedUI]);
 
   // Your existing validation and handler functions (mostly unchanged)
   const validateAddress = (address: string): boolean => {
@@ -425,7 +553,12 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         if (result.success) {
           setSuccess(true);
           setSuccessMessage(`Successfully withdrew ${withdrawAmount} SOL from ${custodialOnlyMode ? 'game balance' : 'custodial balance'}`);
-          refreshBalances();
+          
+          // 🔧 ENHANCED: Immediate balance refresh after successful withdrawal
+          setTimeout(() => {
+            refreshBalances();
+          }, 500);
+          
           if (onSuccess) onSuccess();
         } else {
           throw new Error(result.error || 'Withdrawal failed');
@@ -459,7 +592,12 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         if (result.success) {
           setSuccess(true);
           setSuccessMessage(`Successfully withdrew ${withdrawAmount} SOL from embedded wallet`);
-          refreshBalances();
+          
+          // 🔧 ENHANCED: Immediate balance refresh after successful withdrawal
+          setTimeout(() => {
+            refreshBalances();
+          }, 500);
+          
           if (onSuccess) onSuccess();
         } else {
           throw new Error(result.error || 'Withdrawal failed');
@@ -530,7 +668,12 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         if (result.success) {
           setSuccess(true);
           setSuccessMessage(`Successfully transferred ${transferAmount} SOL to embedded wallet`);
-          refreshBalances();
+          
+          // 🔧 ENHANCED: Immediate balance refresh after successful transfer
+          setTimeout(() => {
+            refreshBalances();
+          }, 500);
+          
           if (onSuccess) onSuccess();
         } else {
           throw new Error(result.error || 'Transfer failed');
@@ -557,7 +700,12 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         if (result.success) {
           setSuccess(true);
           setSuccessMessage(`Successfully transferred ${transferAmount} SOL to game balance`);
-          refreshBalances();
+          
+          // 🔧 ENHANCED: Immediate balance refresh after successful transfer
+          setTimeout(() => {
+            refreshBalances();
+          }, 500);
+          
           if (onSuccess) onSuccess();
         } else {
           throw new Error(result.error || 'Transfer failed');
@@ -596,6 +744,46 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     }
   }, [isOpen, refreshBalances, custodialOnlyMode]);
   
+  // 🔧 NEW: Socket listeners for withdrawal and transfer confirmations
+  useEffect(() => {
+    const socket = (window as any).gameSocket;
+    if (socket && effectiveUserId) {
+      console.log(`🔌 WithdrawModal: Setting up transaction listeners for user: ${effectiveUserId}`);
+      
+      const handleWithdrawConfirmed = (data: any) => {
+        if (data.userId === effectiveUserId) {
+          console.log(`💸 WithdrawModal: Withdraw confirmed for ${effectiveUserId}, refreshing balances...`);
+          setTimeout(refreshBalances, 1000);
+        }
+      };
+
+      const handleTransferConfirmed = (data: any) => {
+        if (data.userId === effectiveUserId) {
+          console.log(`🔄 WithdrawModal: Transfer confirmed for ${effectiveUserId}, refreshing balances...`);
+          setTimeout(refreshBalances, 1000);
+        }
+      };
+
+      const handleTransactionConfirmed = (data: any) => {
+        if (data.walletAddress === walletAddress || data.userId === effectiveUserId) {
+          console.log(`🔗 WithdrawModal: Transaction confirmed, refreshing balances...`);
+          setTimeout(refreshBalances, 2000);
+        }
+      };
+
+      socket.on('withdrawConfirmed', handleWithdrawConfirmed);
+      socket.on('transferConfirmed', handleTransferConfirmed);
+      socket.on('transactionConfirmed', handleTransactionConfirmed);
+      
+      return () => {
+        console.log(`🔌 WithdrawModal: Cleaning up transaction listeners for user: ${effectiveUserId}`);
+        socket.off('withdrawConfirmed', handleWithdrawConfirmed);
+        socket.off('transferConfirmed', handleTransferConfirmed);
+        socket.off('transactionConfirmed', handleTransactionConfirmed);
+      };
+    }
+  }, [effectiveUserId, walletAddress, refreshBalances]);
+
   // 🚩 ADD: Log feature flags and balances
   useEffect(() => {
     logFeatureFlags();

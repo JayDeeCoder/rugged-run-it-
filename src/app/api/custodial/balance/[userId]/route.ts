@@ -1,4 +1,4 @@
-// app/api/custodial/balance/[userId]/route.ts - DEBUG VERSION
+// app/api/custodial/balance/[userId]/route.ts - COLUMN FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -8,26 +8,13 @@ export async function GET(
 ) {
   const { userId } = params;
   
-  // 🔧 IMMEDIATE DEBUG: Log that we're hitting the right route
-  console.log('🚨 DEBUG: [userId]/route.ts called with userId:', userId);
-  console.log('🚨 DEBUG: Timestamp:', new Date().toISOString());
-  
   try {
     const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
     const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
     
-    console.log('🚨 DEBUG: Environment variables:', {
-      hasUrl: !!SUPABASE_URL,
-      hasServiceKey: !!SUPABASE_SERVICE_KEY,
-      urlPreview: SUPABASE_URL ? SUPABASE_URL.substring(0, 30) + '...' : 'missing'
-    });
-    
     if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
       console.error('❌ Missing Supabase environment variables');
-      return NextResponse.json({ 
-        error: 'Missing Supabase configuration',
-        debug: 'Environment variables missing'
-      }, { status: 500 });
+      return NextResponse.json({ error: 'Missing Supabase configuration' }, { status: 500 });
     }
     
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -36,44 +23,26 @@ export async function GET(
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
     
-    console.log('🚨 DEBUG: About to query user_profiles for userId:', userId);
+    console.log('🔍 Getting balance from user_profiles for user:', userId);
     
-    // 🔧 ENHANCED DEBUG: Try the query with detailed logging
+    // 🔧 FIXED: Only select columns that actually exist in user_profiles
     const { data: userProfile, error: profileError } = await supabase
       .from('user_profiles')
       .select(`
-        user_id, username, custodial_balance, privy_balance, total_balance,
-        external_wallet_address, custodial_total_deposited, last_custodial_deposit,
-        embedded_wallet_id, total_transfers_to_embedded, total_transfers_to_custodial,
-        updated_at, created_at
+        user_id,
+        username,
+        custodial_balance,
+        privy_balance,
+        total_balance,
+        external_wallet_address,
+        updated_at,
+        created_at
       `)
       .eq('user_id', userId)
       .single();
     
-    console.log('🚨 DEBUG: Query result:', {
-      hasData: !!userProfile,
-      hasError: !!profileError,
-      errorMessage: profileError?.message,
-      errorDetails: profileError?.details,
-      errorHint: profileError?.hint,
-      userProfileKeys: userProfile ? Object.keys(userProfile) : 'no data'
-    });
-    
-    if (profileError) {
-      console.log('🚨 DEBUG: Profile error details:', profileError);
-    }
-    
-    if (userProfile) {
-      console.log('🚨 DEBUG: Found user profile:', {
-        userId: userProfile.user_id,
-        custodialBalance: userProfile.custodial_balance,
-        rawBalance: typeof userProfile.custodial_balance,
-        updatedAt: userProfile.updated_at
-      });
-    }
-    
     if (profileError || !userProfile) {
-      console.log(`🚨 DEBUG: User ${userId} not found in user_profiles, returning not found`);
+      console.log(`❌ User ${userId} not found in user_profiles:`, profileError?.message);
       
       return NextResponse.json({
         userId,
@@ -86,65 +55,75 @@ export async function GET(
         hasWallet: false,
         message: 'User not found in user_profiles table',
         source: 'user_profiles_not_found',
-        debug: {
-          error: profileError?.message,
-          searchedTable: 'user_profiles',
-          searchedUserId: userId
-        },
+        error: profileError?.message,
         timestamp: Date.now()
       });
     }
     
+    // 🔧 PARSE: Extract the balances from the found user
     const custodialBalance = parseFloat(userProfile.custodial_balance) || 0;
     const privyBalance = parseFloat(userProfile.privy_balance) || 0;
     const totalBalance = parseFloat(userProfile.total_balance) || 0;
-    const totalDeposited = parseFloat(userProfile.custodial_total_deposited) || 0;
-    const lastDeposit = userProfile.last_custodial_deposit ? 
-      new Date(userProfile.last_custodial_deposit).getTime() : 0;
     
-    console.log(`🚨 DEBUG: Parsed balances:`, {
-      raw: userProfile.custodial_balance,
-      parsed: custodialBalance,
-      privyRaw: userProfile.privy_balance,
-      privyParsed: privyBalance
-    });
+    console.log(`💰 Found user ${userId} with balance: ${custodialBalance.toFixed(9)} SOL`);
     
-    const response = {
+    return NextResponse.json({
       userId,
-      custodialBalance,
+      custodialBalance,           // Should be 0.086269835
       totalBalance,
       privyBalance,
       embeddedBalance: privyBalance,
-      totalDeposited,
-      lastDeposit,
+      totalDeposited: 0,          // 🔧 DEFAULT: Not available in user_profiles
+      lastDeposit: 0,             // 🔧 DEFAULT: Not available in user_profiles
       hasWallet: true,
       walletAddress: userProfile.external_wallet_address,
       canBet: custodialBalance >= 0.001,
       canWithdraw: custodialBalance > 0,
-      embeddedWalletId: userProfile.embedded_wallet_id,
-      totalTransfersToEmbedded: parseFloat(userProfile.total_transfers_to_embedded) || 0,
-      totalTransfersToCustodial: parseFloat(userProfile.total_transfers_to_custodial) || 0,
+      embeddedWalletId: undefined, // 🔧 DEFAULT: Not available in user_profiles
+      totalTransfersToEmbedded: 0, // 🔧 DEFAULT: Not available in user_profiles
+      totalTransfersToCustodial: 0, // 🔧 DEFAULT: Not available in user_profiles
       lastActivity: userProfile.updated_at,
-      source: 'user_profiles_debug_success',
-      debug: {
-        foundInTable: 'user_profiles',
-        rawCustodialBalance: userProfile.custodial_balance,
-        parsedCustodialBalance: custodialBalance
-      },
+      source: 'user_profiles_fixed',
       timestamp: Date.now()
-    };
-    
-    console.log('🚨 DEBUG: Returning response:', response);
-    
-    return NextResponse.json(response);
+    });
     
   } catch (error) {
-    console.error('🚨 DEBUG: Catch block error:', error);
+    console.error('❌ Error getting custodial balance:', error);
     return NextResponse.json(
       { 
         error: 'Failed to get custodial balance',
-        details: error instanceof Error ? error.message : 'Unknown error',
-        debug: 'Caught in try-catch block'
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    );
+  }
+}
+
+// Keep the POST method for consistency
+export async function POST(
+  request: NextRequest,
+  { params }: { params: { userId: string } }
+) {
+  try {
+    const { userId } = params;
+    const body = await request.json();
+    
+    if (body.action === 'refresh') {
+      console.log(`🔄 Force refresh requested for user: ${userId}`);
+      return GET(request, { params });
+    }
+    
+    return NextResponse.json(
+      { error: 'Unsupported POST action. Use action: "refresh" to force refresh.' },
+      { status: 400 }
+    );
+    
+  } catch (error) {
+    console.error('❌ Error in POST handler:', error);
+    return NextResponse.json(
+      { 
+        error: 'Failed to process POST request',
+        details: error instanceof Error ? error.message : 'Unknown error'
       },
       { status: 500 }
     );

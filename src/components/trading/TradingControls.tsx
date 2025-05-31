@@ -7,7 +7,8 @@ import Button from '../common/Button';
 import { useGameSocket, initializeUser } from '../../hooks/useGameSocket';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
-import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
+
 
 // Import from barrel file instead of direct imports
 import { AirdropModal, DepositModal, WithdrawModal } from './index';
@@ -1085,6 +1086,8 @@ const TradingControls: FC<TradingControlsProps> = ({
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   const walletAddress = embeddedWallet?.address || '';
   
+  // House wallet for auto-transfers
+  const HOUSE_WALLET = '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
   // State for user ID
   const [userId, setUserId] = useState<string | null>(null);
   
@@ -1337,6 +1340,106 @@ const handleCashout = useCallback(async () => {
     setIsCashingOut(false);
   }
 }, [authenticated, walletAddress, isConnected, activeBet, cashOut, onSell, userId, updateCustodialBalance, updateRuggedBalance, isCashingOut]);
+
+// Frontend auto-transfer function - bypasses broken transfer API
+const autoTransferToGameBalance = useCallback(async (amount: number) => {
+  if (!embeddedWallet || !walletAddress || !userId) {
+    toast.error('Wallet not ready for transfer');
+    return false;
+  }
+
+  if (amount <= 0 || amount > embeddedWalletBalance) {
+    toast.error(`Invalid amount. Available: ${embeddedWalletBalance.toFixed(3)} SOL`);
+    return false;
+  }
+
+  console.log('🚀 Starting auto-transfer:', { amount, from: walletAddress, to: HOUSE_WALLET });
+  
+  try {
+    // Show loading state
+    toast.loading('Transferring SOL to game balance...', { id: 'transfer' });
+    
+    // Create the transaction
+    const connection = new Connection(
+      process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVzzNb_M2I0WQ0b85sYoNEYx'
+    );
+    
+    const fromPubkey = new PublicKey(walletAddress);
+    const toPubkey = new PublicKey(HOUSE_WALLET);
+    const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
+    
+    // Get recent blockhash
+    const { blockhash } = await connection.getLatestBlockhash();
+    
+    // Create transaction
+    const transaction = new Transaction({
+      recentBlockhash: blockhash,
+      feePayer: fromPubkey
+    }).add(
+      SystemProgram.transfer({
+        fromPubkey,
+        toPubkey,
+        lamports
+      })
+    );
+    
+    console.log('📝 Transaction created, requesting signature...');
+    
+    // Use Privy's embedded wallet to sign and send
+   // Use Privy's embedded wallet to send transaction
+    // Use Privy's embedded wallet to send transaction
+    const signature = await embeddedWallet.sendTransaction(transaction, connection); 
+    
+    console.log('📡 Transaction sent:', signature);
+    
+    // Wait for confirmation
+    const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+    
+    if (confirmation.value.err) {
+      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+    }
+    
+    console.log('✅ Transfer confirmed:', signature);
+    
+    // Success! The deposit monitoring should pick this up automatically
+    toast.success(`Transferred ${amount} SOL to game balance!`, { id: 'transfer' });
+    
+    // Refresh balances after a short delay to allow server processing
+    setTimeout(() => {
+      updateCustodialBalance();
+      // The embedded wallet balance will auto-refresh via useWalletBalance hook
+    }, 2000);
+    
+    return true;
+    
+  } catch (error) {
+    console.error('❌ Auto-transfer failed:', error);
+    
+    let errorMessage = 'Transfer failed';
+    if (error instanceof Error) {
+      if (error.message.includes('User rejected')) {
+        errorMessage = 'Transfer cancelled by user';
+      } else if (error.message.includes('insufficient funds')) {
+        errorMessage = 'Insufficient SOL for transfer + fees';
+      } else {
+        errorMessage = `Transfer failed: ${error.message}`;
+      }
+    }
+    
+    toast.error(errorMessage, { id: 'transfer' });
+    return false;
+  }
+}, [embeddedWallet, walletAddress, userId, embeddedWalletBalance, updateCustodialBalance]);
+
+// Quick transfer amounts
+const quickTransferAmounts = [0.001, 0.01, 0.05, 0.1];
+
+const handleQuickTransfer = async (amount: number) => {
+  const success = await autoTransferToGameBalance(amount);
+  if (success) {
+    console.log(`✅ Quick transfer of ${amount} SOL completed`);
+  }
+};
 
 // 🔧 FIXED: Add connection recovery effect (no UI changes)
 useEffect(() => {
@@ -1913,7 +2016,65 @@ const BettingSection: FC<{
           onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
           isLoading={custodialBalanceLoading || embeddedWalletLoading || ruggedBalanceLoading} // 🔧 FIXED: All loading states
         />
-
+{/* Auto-Transfer Section - Only show if user has embedded wallet balance and SOL is selected */}
+{currentToken === TokenType.SOL && embeddedWalletBalance > 0.001 && (
+  <div className="bg-purple-900 bg-opacity-30 border border-purple-800 rounded-lg p-3 mb-3">
+    <div className="flex items-center justify-between mb-2">
+      <div>
+        <div className="text-purple-400 text-sm font-medium">💰 Quick Transfer</div>
+        <div className="text-xs text-gray-400">
+          Move SOL from wallet to game balance instantly
+        </div>
+      </div>
+      <div className="text-xs text-purple-300">
+        Available: {embeddedWalletBalance.toFixed(3)} SOL
+      </div>
+    </div>
+    
+    {isMobile ? (
+      // Mobile layout
+      <div className="grid grid-cols-4 gap-1">
+        {quickTransferAmounts.map((amount) => (
+          <button
+            key={amount}
+            onClick={() => handleQuickTransfer(amount)}
+            disabled={amount > embeddedWalletBalance}
+            className={`px-2 py-1 text-xs rounded transition-colors ${
+              amount > embeddedWalletBalance
+                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-purple-600 hover:bg-purple-700 text-white'
+            }`}
+          >
+            {amount} SOL
+          </button>
+        ))}
+      </div>
+    ) : (
+      // Desktop layout
+      <div className="grid grid-cols-2 gap-2">
+        {quickTransferAmounts.map((amount) => (
+          <button
+            key={amount}
+            onClick={() => handleQuickTransfer(amount)}
+            disabled={amount > embeddedWalletBalance}
+            className={`px-3 py-2 text-sm rounded transition-colors flex items-center justify-center ${
+              amount > embeddedWalletBalance
+                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-purple-600 hover:bg-purple-700 text-white'
+            }`}
+          >
+            <ArrowDownLeft className="w-4 h-4 mr-1" />
+            Transfer {amount} SOL
+          </button>
+        ))}
+      </div>
+    )}
+    
+    <div className="mt-2 text-xs text-purple-300 text-center">
+      ⚡ Transfers are instant and auto-credited to your game balance
+    </div>
+  </div>
+)}
         <AutoCashoutSection
           autoCashoutEnabled={autoCashoutEnabled}
           autoCashoutValue={autoCashoutValue}
@@ -1989,7 +2150,65 @@ const BettingSection: FC<{
         onToggleExpanded={() => setShowBalanceExpanded(!showBalanceExpanded)}
         isLoading={custodialBalanceLoading || embeddedWalletLoading || ruggedBalanceLoading} // 🔧 FIXED: All loading states
       />
-
+{/* Auto-Transfer Section - Only show if user has embedded wallet balance and SOL is selected */}
+{currentToken === TokenType.SOL && embeddedWalletBalance > 0.001 && (
+  <div className="bg-purple-900 bg-opacity-30 border border-purple-800 rounded-lg p-3 mb-3">
+    <div className="flex items-center justify-between mb-2">
+      <div>
+        <div className="text-purple-400 text-sm font-medium">💰 Quick Transfer</div>
+        <div className="text-xs text-gray-400">
+          Move SOL from wallet to game balance instantly
+        </div>
+      </div>
+      <div className="text-xs text-purple-300">
+        Available: {embeddedWalletBalance.toFixed(3)} SOL
+      </div>
+    </div>
+    
+    {isMobile ? (
+      // Mobile layout
+      <div className="grid grid-cols-4 gap-1">
+        {quickTransferAmounts.map((amount) => (
+          <button
+            key={amount}
+            onClick={() => handleQuickTransfer(amount)}
+            disabled={amount > embeddedWalletBalance}
+            className={`px-2 py-1 text-xs rounded transition-colors ${
+              amount > embeddedWalletBalance
+                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-purple-600 hover:bg-purple-700 text-white'
+            }`}
+          >
+            {amount} SOL
+          </button>
+        ))}
+      </div>
+    ) : (
+      // Desktop layout
+      <div className="grid grid-cols-2 gap-2">
+        {quickTransferAmounts.map((amount) => (
+          <button
+            key={amount}
+            onClick={() => handleQuickTransfer(amount)}
+            disabled={amount > embeddedWalletBalance}
+            className={`px-3 py-2 text-sm rounded transition-colors flex items-center justify-center ${
+              amount > embeddedWalletBalance
+                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-purple-600 hover:bg-purple-700 text-white'
+            }`}
+          >
+            <ArrowDownLeft className="w-4 h-4 mr-1" />
+            Transfer {amount} SOL
+          </button>
+        ))}
+      </div>
+    )}
+    
+    <div className="mt-2 text-xs text-purple-300 text-center">
+      ⚡ Transfers are instant and auto-credited to your game balance
+    </div>
+  </div>
+)}
       <AutoCashoutSection
         autoCashoutEnabled={autoCashoutEnabled}
         autoCashoutValue={autoCashoutValue}

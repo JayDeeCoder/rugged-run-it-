@@ -1,16 +1,36 @@
-// src/components/modals/DepositModal.tsx - Enhanced with Proper Embedded Wallet Address Validation
+// src/components/modals/DepositModal.tsx - ENHANCED VERSION WITH MODERN UI/UX
 import { FC, useState, useRef, useEffect, useCallback } from 'react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
-import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, QrCode, RefreshCw, ArrowDownLeft, Zap, ArrowRightLeft, Shield, AlertTriangle } from 'lucide-react';
+import { 
+  ArrowUpToLine, 
+  Wallet, 
+  Check, 
+  Loader, 
+  X, 
+  Copy, 
+  QrCode, 
+  RefreshCw, 
+  ArrowDownLeft, 
+  Zap, 
+  ArrowRightLeft, 
+  Shield, 
+  AlertTriangle,
+  TrendingUp,
+  Coins,
+  ExternalLink
+} from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
-import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
-// 🚩 ADD: Import feature flags (matching your other modals)
+// Import the updated transfer hook from TradingControls
+import { usePrivyAutoTransfer } from '../../hooks/usePrivyAutoTransfer';
+
+// Import feature flags
 import { 
   isCustodialOnlyMode, 
   shouldShowEmbeddedWalletUI, 
@@ -31,11 +51,12 @@ interface DepositModalProps {
   currentToken: TokenType;
   walletAddress: string;
   userId?: string | null;
+  isMobile?: boolean;
 }
 
 type DepositTab = 'instant' | 'external';
 
-// 🔧 ENHANCED: Embedded wallet balance hook with socket events (from TradingControls)
+// Enhanced embedded wallet balance hook (matching TradingControls)
 const useEmbeddedWalletBalance = (walletAddress: string) => {
   const [balance, setBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -44,17 +65,10 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
   const lastWalletRef = useRef<string>('');
   const socketListenersRef = useRef<boolean>(false);
 
-  // 🚩 ADD: Only fetch if embedded wallets are enabled
   const embeddedEnabled = shouldShowEmbeddedWalletUI();
 
   const updateBalance = useCallback(async () => {
-    if (!embeddedEnabled) {
-      console.log('🚩 DepositModal: Embedded wallets disabled, skipping balance fetch');
-      setBalance(0);
-      return;
-    }
-
-    if (!walletAddress || loading) return;
+    if (!embeddedEnabled || !walletAddress || loading) return;
     
     setLoading(true);
     
@@ -90,14 +104,11 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
 
   const forceRefresh = useCallback(async () => {
     if (!walletAddress || !embeddedEnabled) return;
-    
-    console.log(`🔄 DepositModal: Force refreshing embedded wallet balance for: ${walletAddress}`);
     await updateBalance();
   }, [walletAddress, updateBalance, embeddedEnabled]);
 
   useEffect(() => {
     if (walletAddress && embeddedEnabled && walletAddress !== lastWalletRef.current) {
-      console.log(`🎯 DepositModal: Setting up embedded wallet balance polling for: ${walletAddress}`);
       lastWalletRef.current = walletAddress;
       
       if (updateIntervalRef.current) {
@@ -123,18 +134,16 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
     }
   }, [walletAddress, updateBalance, embeddedEnabled]);
 
-  // 🔧 NEW: Socket listeners for wallet balance updates
+  // Socket listeners for real-time updates
   useEffect(() => {
     if (!walletAddress || socketListenersRef.current || !embeddedEnabled) return;
 
     const socket = (window as any).gameSocket;
     if (socket) {
-      console.log(`🔌 DepositModal: Setting up wallet balance listeners for: ${walletAddress}`);
       socketListenersRef.current = true;
       
       const handleWalletBalanceUpdate = (data: any) => {
         if (data.walletAddress === walletAddress) {
-          console.log(`💰 DepositModal: Real-time wallet balance update: ${data.balance?.toFixed(6)} SOL`);
           setBalance(parseFloat(data.balance) || 0);
           setLastUpdated(Date.now());
         }
@@ -142,7 +151,6 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
 
       const handleTransactionConfirmed = (data: any) => {
         if (data.walletAddress === walletAddress) {
-          console.log(`🔗 DepositModal: Transaction confirmed for ${walletAddress}, refreshing balance...`);
           setTimeout(forceRefresh, 2000);
         }
       };
@@ -151,7 +159,6 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
       socket.on('transactionConfirmed', handleTransactionConfirmed);
       
       return () => {
-        console.log(`🔌 DepositModal: Cleaning up wallet balance listeners for: ${walletAddress}`);
         socket.off('walletBalanceUpdate', handleWalletBalanceUpdate);
         socket.off('transactionConfirmed', handleTransactionConfirmed);
         socketListenersRef.current = false;
@@ -162,7 +169,7 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
   return { balance, loading, lastUpdated, updateBalance, forceRefresh };
 };
 
-// 🔧 ENHANCED: Custodial balance hook with socket events (from TradingControls)
+// Enhanced custodial balance hook (matching TradingControls)
 const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -176,13 +183,10 @@ const useCustodialBalance = (userId: string) => {
     
     setLoading(true);
     try {
-      console.log(`🔄 DepositModal: Fetching custodial balance for user ${userId}...`);
-      
-      const response = await fetch(`/api/custodial/balance/${userId}`);
+      const response = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}`);
       
       if (!response.ok) {
         if (response.status === 404) {
-          console.log(`👤 DepositModal: User ${userId} not found - balance remains 0`);
           setCustodialBalance(0);
           return;
         }
@@ -193,11 +197,8 @@ const useCustodialBalance = (userId: string) => {
       
       if (data.custodialBalance !== undefined) {
         const newBalance = parseFloat(data.custodialBalance) || 0;
-        console.log(`💰 DepositModal: Custodial balance updated: ${newBalance.toFixed(6)} SOL`);
         setCustodialBalance(newBalance);
         setLastUpdated(Date.now());
-      } else {
-        console.warn('DepositModal: Invalid response format:', data);
       }
     } catch (error) {
       console.error('❌ DepositModal: Failed to fetch custodial balance:', error);
@@ -206,57 +207,47 @@ const useCustodialBalance = (userId: string) => {
     }
   }, [userId, loading]);
 
-  // 🔧 NEW: Enhanced force refresh with cache busting and POST method
-const forceRefresh = useCallback(async () => {
-  if (!userId) return;
-  
-  console.log(`🔄 Force refreshing balance for ${userId}...`);
-  setLoading(true);
-  
-  try {
-    // Method 1: Try POST with refresh action first
-    const postResponse = await fetch(`/api/custodial/balance/${userId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'refresh' })
-    });
+  const forceRefresh = useCallback(async () => {
+    if (!userId) return;
     
-    if (postResponse.ok) {
-      const data = await postResponse.json();
-      if (data.custodialBalance !== undefined) {
-        const newBalance = parseFloat(data.custodialBalance) || 0;
-        console.log(`💰 Force refresh (POST): ${newBalance.toFixed(6)} SOL`);
-        setCustodialBalance(newBalance);
-        setLastUpdated(Date.now());
-        return;
+    setLoading(true);
+    
+    try {
+      const postResponse = await fetch(`/api/custodial/balance/${userId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'refresh', timestamp: Date.now() })
+      });
+      
+      if (postResponse.ok) {
+        const data = await postResponse.json();
+        if (data.custodialBalance !== undefined) {
+          const newBalance = parseFloat(data.custodialBalance) || 0;
+          setCustodialBalance(newBalance);
+          setLastUpdated(Date.now());
+          return;
+        }
       }
-    }
-    
-    // Method 2: Fallback to GET with cache busting
-    const getResponse = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}&refresh=true`);
-    
-    if (getResponse.ok) {
-      const data = await getResponse.json();
-      if (data.custodialBalance !== undefined) {
-        const newBalance = parseFloat(data.custodialBalance) || 0;
-        console.log(`💰 Force refresh (GET): ${newBalance.toFixed(6)} SOL`);
-        setCustodialBalance(newBalance);
-        setLastUpdated(Date.now());
+      
+      const getResponse = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}&refresh=true`);
+      
+      if (getResponse.ok) {
+        const data = await getResponse.json();
+        if (data.custodialBalance !== undefined) {
+          const newBalance = parseFloat(data.custodialBalance) || 0;
+          setCustodialBalance(newBalance);
+          setLastUpdated(Date.now());
+        }
       }
-    } else {
-      console.error('❌ Force refresh failed:', getResponse.status);
+    } catch (error) {
+      console.error('❌ DepositModal: Force refresh error:', error);
+    } finally {
+      setLoading(false);
     }
-    
-  } catch (error) {
-    console.error('❌ Force refresh error:', error);
-  } finally {
-    setLoading(false);
-  }
-}, [userId]);
+  }, [userId]);
 
   useEffect(() => {
     if (userId && userId !== lastUserIdRef.current) {
-      console.log(`🎯 DepositModal: Setting up custodial balance polling for user: ${userId}`);
       lastUserIdRef.current = userId;
       
       if (updateIntervalRef.current) {
@@ -285,40 +276,29 @@ const forceRefresh = useCallback(async () => {
 
     const socket = (window as any).gameSocket;
     if (socket) {
-      console.log(`🔌 DepositModal: Setting up real-time balance listeners for user: ${userId}`);
       socketListenersRef.current = true;
       
       const handleCustodialBalanceUpdate = (data: any) => {
         if (data.userId === userId) {
-          console.log(`💰 DepositModal: Real-time custodial balance update: ${data.custodialBalance?.toFixed(6)} SOL`);
           setCustodialBalance(parseFloat(data.custodialBalance) || 0);
-          setLastUpdated(Date.now());
-        }
-      };
-
-      const handleBalanceUpdate = (data: any) => {
-        if (data.userId === userId && data.type === 'custodial') {
-          console.log(`💰 DepositModal: Real-time balance update: ${data.balance?.toFixed(6)} SOL`);
-          setCustodialBalance(parseFloat(data.balance) || 0);
           setLastUpdated(Date.now());
         }
       };
 
       const handleDepositConfirmation = (data: any) => {
         if (data.userId === userId) {
-          console.log(`💰 DepositModal: Deposit confirmed, refreshing balance...`);
           setTimeout(forceRefresh, 1000);
+          if (data.depositAmount) {
+            toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL!`);
+          }
         }
       };
   
       socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-      socket.on('balanceUpdate', handleBalanceUpdate);
       socket.on('depositConfirmed', handleDepositConfirmation);
       
       return () => {
-        console.log(`🔌 DepositModal: Cleaning up balance listeners for user: ${userId}`);
         socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-        socket.off('balanceUpdate', handleBalanceUpdate);
         socket.off('depositConfirmed', handleDepositConfirmation);
         socketListenersRef.current = false;
       };
@@ -334,9 +314,10 @@ const DepositModal: FC<DepositModalProps> = ({
   onSuccess, 
   currentToken,
   walletAddress: propWalletAddress,
-  userId: propUserId
+  userId: propUserId,
+  isMobile = false
 }) => {
-  // 🚩 Feature flag checks
+  // Feature flag checks
   const custodialOnlyMode = isCustodialOnlyMode();
   const showEmbeddedUI = shouldShowEmbeddedWalletUI();
   const walletMode = getWalletMode();
@@ -346,15 +327,8 @@ const DepositModal: FC<DepositModalProps> = ({
   const { wallets } = useSolanaWallets();
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   
-  // 🔧 ENHANCED: Get the actual embedded wallet address from Privy
+  // Get the actual embedded wallet address from Privy
   const actualEmbeddedWalletAddress = embeddedWallet?.address || propWalletAddress;
-  
-  // 🔧 NEW: Validate that we have a proper wallet address
-  const [addressValidated, setAddressValidated] = useState<boolean>(false);
-  const [addressError, setAddressError] = useState<string>('');
-  
-  // House wallet for instant transfers (from TradingControls)
-  const HOUSE_WALLET = '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
   
   // User management
   const [internalUserId, setInternalUserId] = useState<string | null>(propUserId || null);
@@ -362,7 +336,7 @@ const DepositModal: FC<DepositModalProps> = ({
   
   const effectiveUserId = internalUserId || propUserId;
   
-  // Balance hooks - use the actual embedded wallet address
+  // Balance hooks
   const { 
     balance: embeddedBalance, 
     loading: embeddedLoading, 
@@ -375,12 +349,14 @@ const DepositModal: FC<DepositModalProps> = ({
     forceRefresh: refreshCustodialBalance 
   } = useCustodialBalance(effectiveUserId || '');
   
+  // Enhanced transfer hook (same as TradingControls)
+  const { executeAutoTransfer, loading: transferLoading, error: transferError } = usePrivyAutoTransfer();
+  
   // State management
   const [activeTab, setActiveTab] = useState<DepositTab>('instant');
   const [amount, setAmount] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [showQR, setShowQR] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [success, setSuccess] = useState<boolean>(false);
   const [successMessage, setSuccessMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -388,47 +364,41 @@ const DepositModal: FC<DepositModalProps> = ({
   const modalRef = useRef<HTMLDivElement>(null);
   const tokenSymbol = currentToken;
   
-  // 🔧 NEW: Validate wallet address on load
+  // Validation state
+  const [addressValidated, setAddressValidated] = useState<boolean>(false);
+  const [addressError, setAddressError] = useState<string>('');
+  
+  // Validate wallet address on load
   useEffect(() => {
     if (actualEmbeddedWalletAddress) {
       try {
-        // Validate it's a valid Solana public key
         new PublicKey(actualEmbeddedWalletAddress);
         setAddressValidated(true);
         setAddressError('');
-        console.log('✅ DepositModal: Valid embedded wallet address:', actualEmbeddedWalletAddress);
       } catch (error) {
         setAddressValidated(false);
         setAddressError('Invalid wallet address format');
-        console.error('❌ DepositModal: Invalid wallet address:', actualEmbeddedWalletAddress, error);
       }
     } else {
       setAddressValidated(false);
       setAddressError('No embedded wallet address available');
-      console.warn('⚠️ DepositModal: No embedded wallet address found');
     }
   }, [actualEmbeddedWalletAddress]);
   
-  // 🔧 NEW: Real-time transfer status tracking
-  const [transferStatus, setTransferStatus] = useState<string>('');
-  const [showTransferProgress, setShowTransferProgress] = useState<boolean>(false);
-  
-  // 🔧 Enhanced refresh function
+  // Enhanced refresh function
   const refreshAllBalances = useCallback(() => {
-    console.log('🔄 DepositModal: Manual balance refresh triggered');
     refreshCustodialBalance();
     if (showEmbeddedUI) {
       refreshEmbeddedBalance();
     }
   }, [refreshCustodialBalance, refreshEmbeddedBalance, showEmbeddedUI]);
 
-  // 🔧 User initialization (simplified)
+  // User initialization
   useEffect(() => {
     if (authenticated && actualEmbeddedWalletAddress && !propUserId && !internalUserId && !fetchingUserId) {
       const fetchUserId = async () => {
         try {
           setFetchingUserId(true);
-          console.log('🔍 DepositModal: Fetching userId via API for walletAddress:', actualEmbeddedWalletAddress);
           
           const response = await fetch('/api/users/get-or-create', {
             method: 'POST',
@@ -443,7 +413,6 @@ const DepositModal: FC<DepositModalProps> = ({
           const data = await response.json();
           if (data.user && data.user.id) {
             setInternalUserId(data.user.id);
-            console.log('✅ DepositModal: Got userId from API:', data.user.id);
           }
         } catch (error) {
           console.error('❌ DepositModal: Failed to fetch userId:', error);
@@ -457,7 +426,7 @@ const DepositModal: FC<DepositModalProps> = ({
     }
   }, [authenticated, actualEmbeddedWalletAddress, propUserId, internalUserId, fetchingUserId]);
 
-  // 🔧 ENHANCED: Instant transfer function with advanced progress tracking
+  // Enhanced instant transfer using the same method as TradingControls
   const handleInstantTransfer = useCallback(async () => {
     if (!embeddedWallet || !actualEmbeddedWalletAddress || !effectiveUserId) {
       toast.error('Wallet not ready for transfer');
@@ -475,189 +444,52 @@ const DepositModal: FC<DepositModalProps> = ({
       return;
     }
 
-    // Additional validation
     if (transferAmount < 0.001) {
       setError('Minimum transfer amount is 0.001 SOL');
       return;
     }
 
-    console.log('🚀 DepositModal: Starting enhanced instant transfer:', { 
-      amount: transferAmount, 
-      from: actualEmbeddedWalletAddress, 
-      to: HOUSE_WALLET,
-      userId: effectiveUserId
-    });
+    console.log('🚀 DepositModal: Starting enhanced instant transfer using TradingControls method');
     
-    setIsLoading(true);
     setError(null);
     
-    const transferToastId = `transfer-${Date.now()}`;
-    
     try {
-      // Step 1: Prepare transaction
-      setTransferStatus('Preparing transfer...');
-      setShowTransferProgress(true);
-      toast.loading('Preparing transfer...', { id: transferToastId });
-      
-      const connection = new Connection(
-        process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVzzNb_M2I0WQ0b85sYoNEYx'
-      );
-      
-      const fromPubkey = new PublicKey(actualEmbeddedWalletAddress);
-      const toPubkey = new PublicKey(HOUSE_WALLET);
-      const lamports = Math.floor(transferAmount * LAMPORTS_PER_SOL);
-      
-      // Check balance on blockchain
-      const actualBalance = await connection.getBalance(fromPubkey);
-      const actualSOL = actualBalance / LAMPORTS_PER_SOL;
-      
-      if (actualSOL < transferAmount) {
-        throw new Error(`Insufficient balance on blockchain. Available: ${actualSOL.toFixed(6)} SOL`);
-      }
-      
-      // Step 2: Get latest blockhash
-      setTransferStatus('Getting network information...');
-      toast.loading('Getting network info...', { id: transferToastId });
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-      
-      const transaction = new Transaction({
-        recentBlockhash: blockhash,
-        feePayer: fromPubkey
-      }).add(
-        SystemProgram.transfer({
-          fromPubkey,
-          toPubkey,
-          lamports
-        })
-      );
-      
-      // Step 3: Send transaction
-      setTransferStatus('Sending to blockchain...');
-      toast.loading('Sending transaction to blockchain...', { id: transferToastId });
-      const signature = await embeddedWallet.sendTransaction(transaction, connection);
-      console.log('✅ DepositModal: Transaction sent with signature:', signature);
-      
-      // Step 4: Wait for confirmation
-      setTransferStatus('Waiting for confirmation...');
-      toast.loading('Waiting for blockchain confirmation...', { id: transferToastId });
-      const confirmation = await connection.confirmTransaction({
-        signature,
-        blockhash,
-        lastValidBlockHeight
-      }, 'confirmed');
-      
-      if (confirmation.value.err) {
-        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-      }
-      
-      console.log('✅ DepositModal: Transaction confirmed on blockchain');
-      
-      // Step 5: Credit custodial balance with enhanced retry logic
-      setTransferStatus('Crediting your game balance...');
-      toast.loading('Crediting your game balance...', { id: transferToastId });
-      
-      let creditSuccess = false;
-      let attempts = 0;
-      const maxAttempts = 5; // Increased attempts
-      
-      while (!creditSuccess && attempts < maxAttempts) {
-        attempts++;
-        console.log(`💳 DepositModal: Credit attempt ${attempts}/${maxAttempts}`);
-        
-        try {
-          const creditResponse = await fetch(`/api/custodial/balance/${effectiveUserId}`, {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'Cache-Control': 'no-cache, no-store, must-revalidate',
-              'Pragma': 'no-cache'
-            },
-            body: JSON.stringify({ 
-              action: 'credit',
-              amount: transferAmount,
-              source: 'embedded_wallet_transfer',
-              transactionId: signature,
-              walletAddress: actualEmbeddedWalletAddress,
-              timestamp: Date.now(),
-              attempt: attempts
-            })
-          });
-
-          if (creditResponse.ok) {
-            const result = await creditResponse.json();
-            creditSuccess = true;
-            console.log('✅ DepositModal: Manual credit successful:', result);
-            
-            // Show new balance if provided
-            if (result.newBalance !== undefined) {
-              console.log(`💰 DepositModal: New custodial balance: ${result.newBalance} SOL`);
-            }
-          } else {
-            const errorText = await creditResponse.text();
-            console.warn(`⚠️ DepositModal: Credit attempt ${attempts} failed (${creditResponse.status}):`, errorText);
-            
-            if (attempts < maxAttempts) {
-              await new Promise(resolve => setTimeout(resolve, attempts * 1000)); // Progressive delay
-            }
-          }
-        } catch (creditError) {
-          console.warn(`⚠️ DepositModal: Credit attempt ${attempts} error:`, creditError);
+      // Use the same transfer method as TradingControls
+      const result = await executeAutoTransfer(
+        effectiveUserId, 
+        transferAmount,
+        // Callback to refresh balances after successful transfer
+        async () => {
+          console.log('🔄 DepositModal: Transfer completed, refreshing balances...');
+          await refreshCustodialBalance();
           
-          if (attempts < maxAttempts) {
-            await new Promise(resolve => setTimeout(resolve, attempts * 1000)); // Progressive delay
-          }
+          // Delayed refresh for safety
+          setTimeout(() => {
+            refreshCustodialBalance();
+          }, 1500);
         }
-      }
+      );
 
-      if (!creditSuccess) {
-        console.error('❌ DepositModal: All credit attempts failed');
-        const shortSig = signature.slice(0, 8) + '...' + signature.slice(-8);
-        toast.error(`Transfer completed but crediting failed. Transaction: ${shortSig}. Contact support!`, { 
-          id: transferToastId, 
-          duration: 10000 
-        });
+      if (result.success) {
+        console.log('✅ DepositModal: Transfer completed successfully:', result);
         
-        // Still show some success since blockchain transaction worked
-        setError(`Transfer sent (${shortSig}) but crediting failed. Contact support.`);
-        return;
+        setSuccess(true);
+        setSuccessMessage(`Successfully transferred ${transferAmount} SOL to your game balance! Transaction: ${result.transactionId?.slice(0, 8)}...`);
+        
+        // Refresh embedded wallet balance too
+        setTimeout(() => {
+          refreshEmbeddedBalance();
+        }, 2000);
+        
+        if (onSuccess) onSuccess();
+        
+      } else {
+        console.error('❌ DepositModal: Transfer failed:', result.error);
+        setError(result.error || 'Transfer failed');
       }
-      
-      // Step 6: Success!
-      setTransferStatus('Transfer completed!');
-      toast.success(`Successfully transferred ${transferAmount} SOL to game balance!`, { id: transferToastId });
-      
-      setSuccess(true);
-      setSuccessMessage(`Successfully transferred ${transferAmount} SOL to your game balance! Transaction: ${signature.slice(0, 8)}...`);
-      
-      // Step 7: Refresh balances with multiple methods
-      console.log('🔄 DepositModal: Triggering comprehensive balance refresh...');
-      
-      // Immediate refresh
-      setTimeout(() => {
-        refreshAllBalances();
-      }, 500);
-      
-      // Secondary refresh
-      setTimeout(() => {
-        refreshAllBalances();
-      }, 3000);
-      
-      // Socket notification
-      const socket = (window as any).gameSocket;
-      if (socket && effectiveUserId) {
-        socket.emit('refreshBalance', { 
-          userId: effectiveUserId, 
-          walletAddress: actualEmbeddedWalletAddress, 
-          reason: 'instant_transfer_completed',
-          transactionId: signature,
-          amount: transferAmount
-        });
-      }
-      
-      if (onSuccess) onSuccess();
       
     } catch (error) {
-      console.error('❌ Enhanced instant transfer failed:', error);
+      console.error('❌ DepositModal: Transfer error:', error);
       
       let errorMessage = 'Transfer failed';
       if (error instanceof Error) {
@@ -665,25 +497,27 @@ const DepositModal: FC<DepositModalProps> = ({
           errorMessage = 'Transfer cancelled by user';
         } else if (error.message.includes('insufficient funds') || error.message.includes('Insufficient balance')) {
           errorMessage = 'Insufficient SOL for transfer + network fees';
-        } else if (error.message.includes('Transaction failed')) {
-          errorMessage = 'Blockchain transaction failed';
-        } else if (error.message.includes('timeout')) {
-          errorMessage = 'Transfer timed out - please try again';
         } else {
           errorMessage = `Transfer failed: ${error.message}`;
         }
       }
       
       setError(errorMessage);
-      toast.error(errorMessage, { id: transferToastId });
-    } finally {
-      setIsLoading(false);
-      setShowTransferProgress(false);
-      setTransferStatus('');
     }
-  }, [embeddedWallet, actualEmbeddedWalletAddress, effectiveUserId, amount, embeddedBalance, onSuccess, refreshAllBalances, addressValidated]);
+  }, [
+    embeddedWallet, 
+    actualEmbeddedWalletAddress, 
+    effectiveUserId, 
+    amount, 
+    embeddedBalance, 
+    onSuccess, 
+    addressValidated,
+    executeAutoTransfer,
+    refreshCustodialBalance,
+    refreshEmbeddedBalance
+  ]);
 
-  // 🔧 NEW: Quick transfer with pre-filled amounts
+  // Quick transfer with pre-filled amounts
   const handleQuickTransfer = useCallback(async (quickAmount: number) => {
     setAmount(quickAmount.toString());
     setError(null);
@@ -694,7 +528,7 @@ const DepositModal: FC<DepositModalProps> = ({
     }, 300);
   }, [handleInstantTransfer]);
 
-  // 🔧 NEW: Transfer all available balance (minus fees)
+  // Transfer all available balance (minus fees)
   const handleTransferAll = useCallback(async () => {
     if (embeddedBalance > 0.001) {
       const transferableAmount = Math.max(0, embeddedBalance - 0.001); // Reserve for fees
@@ -732,7 +566,7 @@ const DepositModal: FC<DepositModalProps> = ({
     }
   };
 
-  // 🔧 ENHANCED: External deposit address - ensure it's the user's embedded wallet
+  // External deposit address
   const externalDepositAddress = actualEmbeddedWalletAddress;
 
   const copyAddress = async () => {
@@ -740,7 +574,7 @@ const DepositModal: FC<DepositModalProps> = ({
       await navigator.clipboard.writeText(externalDepositAddress);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-      toast.success('Your embedded wallet address copied!');
+      toast.success('Wallet address copied!');
     } catch (error) {
       console.error('Failed to copy address:', error);
       toast.error('Failed to copy address');
@@ -750,97 +584,434 @@ const DepositModal: FC<DepositModalProps> = ({
   // Reset state when modal opens/closes
   useEffect(() => {
     if (isOpen) {
-      console.log('🚀 DepositModal: Modal opened, resetting state');
       setAmount('');
       setCopied(false);
       setShowQR(false);
-      setIsLoading(false);
       setError(null);
       setSuccess(false);
       setSuccessMessage('');
-      setTransferStatus('');
-      setShowTransferProgress(false);
-      setActiveTab(showEmbeddedUI ? 'instant' : 'external');
+      setActiveTab('instant'); // Always default to instant transfer
       
       setTimeout(() => {
         refreshAllBalances();
       }, 500);
     }
-  }, [isOpen, refreshAllBalances, showEmbeddedUI]);
-
-  // Socket listeners for real-time updates
-  useEffect(() => {
-    const socket = (window as any).gameSocket;
-    if (socket && effectiveUserId) {
-      console.log(`🔌 DepositModal: Setting up transaction listeners for user: ${effectiveUserId}`);
-      
-      const handleDepositConfirmed = (data: any) => {
-        if (data.userId === effectiveUserId) {
-          console.log(`💰 DepositModal: Deposit confirmed for ${effectiveUserId}, refreshing balances...`);
-          setTimeout(refreshAllBalances, 1000);
-        }
-      };
-
-      const handleTransactionConfirmed = (data: any) => {
-        if (data.walletAddress === actualEmbeddedWalletAddress || data.userId === effectiveUserId) {
-          console.log(`🔗 DepositModal: Transaction confirmed, refreshing balances...`);
-          setTimeout(refreshAllBalances, 2000);
-        }
-      };
-
-      socket.on('depositConfirmed', handleDepositConfirmed);
-      socket.on('transactionConfirmed', handleTransactionConfirmed);
-      
-      return () => {
-        console.log(`🔌 DepositModal: Cleaning up transaction listeners for user: ${effectiveUserId}`);
-        socket.off('depositConfirmed', handleDepositConfirmed);
-        socket.off('transactionConfirmed', handleTransactionConfirmed);
-      };
-    }
-  }, [effectiveUserId, actualEmbeddedWalletAddress, refreshAllBalances]);
+  }, [isOpen, refreshAllBalances]);
 
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
-    if (isOpen && !isLoading) onClose();
+    if (isOpen && !transferLoading) onClose();
   });
   
   if (!isOpen) return null;
-  
+
+  // Mobile Layout
+  if (isMobile) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-70 flex items-end justify-center z-50">
+        <div 
+          ref={modalRef} 
+          className="bg-[#0d0d0f] border border-gray-800 rounded-t-2xl w-full max-h-[90vh] overflow-y-auto"
+        >
+          {/* Mobile Header */}
+          <div className="flex justify-between items-center p-4 border-b border-gray-800 sticky top-0 bg-[#0d0d0f]">
+            <h2 className="text-lg font-bold text-white flex items-center">
+              <ArrowDownLeft size={18} className="mr-2" />
+              Deposit {tokenSymbol}
+            </h2>
+            <button
+              onClick={onClose}
+              disabled={transferLoading}
+              className="text-gray-400 hover:text-white transition-colors p-1"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          
+          <div className="p-4">
+            {success ? (
+              <div className="text-center py-8">
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
+                    <Check size={32} className="text-green-500" />
+                  </div>
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Success!</h3>
+                <p className="text-gray-400 mb-6 text-sm">{successMessage}</p>
+                <button
+                  onClick={onClose}
+                  className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition-colors w-full"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Address validation warning */}
+                {!addressValidated && (
+                  <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-400 p-3 rounded-lg mb-4 text-sm">
+                    <div className="flex items-center">
+                      <AlertTriangle size={16} className="mr-2 flex-shrink-0" />
+                      <div>
+                        <div className="font-medium">Wallet Issue</div>
+                        <div className="text-xs mt-1">{addressError}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Enhanced Balance Display */}
+                <div className="bg-gradient-to-r from-blue-900 to-purple-900 bg-opacity-50 rounded-xl p-4 mb-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="text-gray-300 text-sm">Your Balances</span>
+                    <button 
+                      onClick={refreshAllBalances}
+                      disabled={custodialLoading || embeddedLoading}
+                      className="text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-1 text-sm"
+                    >
+                      <RefreshCw size={14} className={(custodialLoading || embeddedLoading) ? 'animate-spin' : ''} />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div className="bg-green-900 bg-opacity-30 rounded-lg p-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-green-400 text-sm flex items-center">
+                          🎮 Game Balance
+                        </span>
+                        <span className="text-white font-bold">
+                          {custodialLoading ? (
+                            <span className="flex items-center">
+                              <Loader size={12} className="animate-spin mr-1" />
+                              Loading...
+                            </span>
+                          ) : (
+                            `${custodialBalance.toFixed(6)} SOL`
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    {showEmbeddedUI && (
+                      <div className="bg-blue-900 bg-opacity-30 rounded-lg p-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-blue-400 text-sm flex items-center">
+                            💼 Wallet Balance
+                          </span>
+                          <span className="text-white font-bold">
+                            {embeddedLoading ? (
+                              <span className="flex items-center">
+                                <Loader size={12} className="animate-spin mr-1" />
+                                Loading...
+                              </span>
+                            ) : (
+                              `${embeddedBalance.toFixed(6)} SOL`
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Tab Navigation - Always show instant as primary */}
+                <div className="flex mb-4 bg-gray-800 rounded-xl p-1">
+                  <button
+                    onClick={() => setActiveTab('instant')}
+                    className={`flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      activeTab === 'instant'
+                        ? 'bg-gradient-to-r from-green-600 to-blue-600 text-white shadow-lg'
+                        : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                    }`}
+                  >
+                    <Zap size={16} className="inline mr-2" />
+                    Instant Transfer
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('external')}
+                    className={`flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                      activeTab === 'external'
+                        ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg'
+                        : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                    }`}
+                  >
+                    <ExternalLink size={16} className="inline mr-2" />
+                    External
+                  </button>
+                </div>
+
+                {/* Enhanced Tab Content */}
+                {activeTab === 'instant' ? (
+                  <div className="space-y-4">
+                    {/* Instant Transfer Hero */}
+                    <div className="bg-gradient-to-r from-green-900 to-blue-900 bg-opacity-30 border border-green-700 text-green-300 p-4 rounded-xl">
+                      <div className="flex items-center mb-2">
+                        <Zap size={20} className="mr-2 text-yellow-400" />
+                        <div className="font-medium">⚡ Instant Transfer</div>
+                      </div>
+                      <div className="text-sm opacity-90">
+                        Move SOL from your wallet directly to your game balance. Instant and secure!
+                      </div>
+                    </div>
+
+                    {/* Amount Input */}
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2 font-medium">Transfer Amount (SOL)</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={amount}
+                          onChange={handleAmountChange}
+                          placeholder="0.000"
+                          className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 pr-16 text-white placeholder-gray-500 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-20 transition-all"
+                        />
+                        <button
+                          onClick={setMaxAmount}
+                          className="absolute right-3 top-1/2 transform -translate-y-1/2 text-green-400 text-sm hover:text-green-300 font-medium"
+                        >
+                          MAX
+                        </button>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-2 flex justify-between">
+                        <span>Available: {embeddedBalance.toFixed(6)} SOL</span>
+                        {parseFloat(amount) > 0 && parseFloat(amount) < 0.001 && (
+                          <span className="text-red-400">Minimum: 0.001 SOL</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Quick Transfer Amounts */}
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2 font-medium">Quick Transfer:</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {quickAmounts.map((amt) => (
+                          <button
+                            key={amt}
+                            onClick={() => handleQuickTransfer(amt)}
+                            disabled={amt > embeddedBalance || transferLoading}
+                            className={`py-3 px-3 text-sm rounded-xl transition-all font-medium ${
+                              parseFloat(amount) === amt
+                                ? 'bg-gradient-to-r from-green-600 to-blue-600 text-white shadow-lg'
+                                : amt > embeddedBalance || transferLoading
+                                ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600 hover:scale-105'
+                            }`}
+                          >
+                            <div className="flex flex-col items-center">
+                              <span className="font-bold">{amt}</span>
+                              <span className="text-xs opacity-75">SOL</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Transfer All button */}
+                    {embeddedBalance > 0.001 && (
+                      <button
+                        onClick={handleTransferAll}
+                        disabled={transferLoading}
+                        className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-600 text-white py-3 px-4 rounded-xl transition-all flex items-center justify-center text-sm font-medium shadow-lg"
+                      >
+                        <ArrowRightLeft size={16} className="mr-2" />
+                        Transfer All Available ({(embeddedBalance - 0.001).toFixed(6)} SOL)
+                      </button>
+                    )}
+
+                    {/* Main Transfer Button */}
+                    <button
+                      onClick={handleInstantTransfer}
+                      disabled={transferLoading || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > embeddedBalance || !addressValidated || parseFloat(amount) < 0.001}
+                      className="w-full bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white py-4 px-4 rounded-xl transition-all flex items-center justify-center font-bold shadow-lg"
+                    >
+                      {transferLoading ? (
+                        <>
+                          <Loader size={20} className="animate-spin mr-2" />
+                          <span>Processing Transfer...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowRightLeft size={20} className="mr-2" />
+                          <span>Transfer {amount || '0'} SOL to Game Balance</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* How it works */}
+                    <div className="bg-blue-900 bg-opacity-20 border border-blue-700 rounded-xl p-4 text-sm">
+                      <div className="font-medium mb-2 text-blue-300 flex items-center">
+                        <TrendingUp size={16} className="mr-2" />
+                        How Instant Transfer Works:
+                      </div>
+                      <ol className="text-gray-300 space-y-1 list-decimal list-inside text-xs">
+                        <li>Sends SOL from your embedded wallet to house wallet</li>
+                        <li>Automatically credits your game balance</li>
+                        <li>Updates your balances in real-time</li>
+                        <li>Ready to bet immediately!</li>
+                      </ol>
+                      <div className="text-xs mt-2 text-blue-300 font-medium">
+                        ⚡ Transfer typically takes 5-10 seconds
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* External Deposit Hero */}
+                    <div className="bg-gradient-to-r from-blue-900 to-purple-900 bg-opacity-30 border border-blue-700 text-blue-300 p-4 rounded-xl">
+                      <div className="flex items-center mb-2">
+                        <ExternalLink size={20} className="mr-2" />
+                        <div className="font-medium">🌐 External Deposit</div>
+                      </div>
+                      <div className="text-sm opacity-90">
+                        Send SOL from any external wallet to your embedded wallet address.
+                      </div>
+                    </div>
+
+                    {/* Address display */}
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2 font-medium">
+                        <div className="flex items-center">
+                          <Shield size={14} className="mr-1 text-green-400" />
+                          Your Personal Wallet Address
+                        </div>
+                      </label>
+                      <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1 mr-3">
+                            <div className="text-white font-mono text-sm break-all">
+                              {externalDepositAddress}
+                            </div>
+                            {addressValidated && (
+                              <div className="text-green-400 text-xs mt-2 flex items-center">
+                                <Check size={10} className="mr-1" />
+                                Verified - This is your personal wallet
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            onClick={copyAddress}
+                            className="text-blue-400 text-sm hover:text-blue-300 flex items-center bg-blue-900 bg-opacity-30 px-3 py-2 rounded-lg transition-all"
+                          >
+                            {copied ? (
+                              <>
+                                <Check size={14} className="mr-1" />
+                                Copied
+                              </>
+                            ) : (
+                              <>
+                                <Copy size={14} className="mr-1" />
+                                Copy
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* QR Code */}
+                    <div className="flex justify-center">
+                      <button
+                        onClick={() => setShowQR(!showQR)}
+                        className="flex items-center bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-4 py-3 rounded-xl transition-all text-sm font-medium shadow-lg"
+                      >
+                        <QrCode size={16} className="mr-2" />
+                        {showQR ? 'Hide QR Code' : 'Show QR Code'}
+                      </button>
+                    </div>
+
+                    {showQR && (
+                      <div className="flex justify-center bg-white p-6 rounded-xl">
+                        <QRCodeSVG 
+                          value={externalDepositAddress} 
+                          size={200}
+                          level="M"
+                          includeMargin={true}
+                        />
+                      </div>
+                    )}
+
+                    {/* Security and Instructions */}
+                    <div className="space-y-3">
+                      <div className="bg-green-900 bg-opacity-20 border border-green-700 text-green-300 p-4 rounded-xl text-sm">
+                        <div className="font-medium mb-2 flex items-center">
+                          <Shield size={16} className="mr-2" />
+                          Security Verified
+                        </div>
+                        <div className="text-xs space-y-1">
+                          <div>✅ This address is uniquely generated for your account</div>
+                          <div>✅ Only you can access funds sent to this address</div>
+                          <div>✅ Address is validated and secure</div>
+                        </div>
+                      </div>
+
+                      <div className="bg-yellow-900 bg-opacity-20 border border-yellow-700 text-yellow-300 p-4 rounded-xl text-sm">
+                        <div className="font-medium mb-2">⚠️ Important Notes:</div>
+                        <ul className="list-disc list-inside space-y-1 text-xs">
+                          <li>Only send SOL to this address</li>
+                          <li>Minimum deposit: 0.001 SOL</li>
+                          <li>Funds will appear in your wallet balance</li>
+                          <li>Use "Instant Transfer" tab to move funds to game balance</li>
+                          <li>Double-check the address before sending</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Error Message */}
+                {error && (
+                  <div className="bg-red-900 bg-opacity-30 border border-red-700 text-red-400 p-4 rounded-xl mt-4">
+                    <div className="flex items-center">
+                      <AlertTriangle size={16} className="mr-2 flex-shrink-0" />
+                      {error}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Desktop Layout (Enhanced)
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
       <div 
         ref={modalRef} 
-        className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
+        className="bg-[#0d0d0f] border border-gray-800 rounded-2xl p-6 max-w-lg w-full mx-4 shadow-2xl"
       >
-        {/* Header */}
+        {/* Desktop Header */}
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold text-white flex items-center">
-            <ArrowUpToLine size={20} className="mr-2" />
+          <h2 className="text-2xl font-bold text-white flex items-center">
+            <ArrowDownLeft size={24} className="mr-3" />
             Deposit {tokenSymbol}
-            <span className="ml-2 text-xs bg-green-600 text-white px-2 py-1 rounded">
+            <span className="ml-3 text-xs bg-blue-600 text-white px-3 py-1 rounded-full">
               {walletMode.toUpperCase()}
             </span>
           </h2>
           <button
             onClick={onClose}
-            disabled={isLoading}
-            className="text-gray-400 hover:text-white transition-colors"
+            disabled={transferLoading}
+            className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-gray-800 rounded-lg"
           >
-            <X size={20} />
+            <X size={24} />
           </button>
         </div>
         
         {success ? (
-          <div className="text-center py-8">
-            <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
-                <Check size={32} className="text-green-500" />
+          <div className="text-center py-12">
+            <div className="flex justify-center mb-6">
+              <div className="w-20 h-20 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
+                <Check size={40} className="text-green-500" />
               </div>
             </div>
-            <h3 className="text-xl font-bold text-white mb-2">Success!</h3>
-            <p className="text-gray-400 mb-6">{successMessage}</p>
+            <h3 className="text-2xl font-bold text-white mb-3">Transfer Successful!</h3>
+            <p className="text-gray-400 mb-8">{successMessage}</p>
             <button
               onClick={onClose}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md transition-colors w-full"
+              className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 text-white px-8 py-3 rounded-xl transition-all font-medium shadow-lg"
             >
               Done
             </button>
@@ -849,282 +1020,251 @@ const DepositModal: FC<DepositModalProps> = ({
           <>
             {/* Address validation warning */}
             {!addressValidated && (
-              <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-400 p-3 rounded-md mb-4 text-sm">
+              <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-400 p-4 rounded-xl mb-6">
                 <div className="flex items-center">
-                  <AlertTriangle size={16} className="mr-2 flex-shrink-0" />
+                  <AlertTriangle size={20} className="mr-3 flex-shrink-0" />
                   <div>
                     <div className="font-medium">Wallet Address Issue</div>
-                    <div className="text-xs mt-1">{addressError}</div>
+                    <div className="text-sm mt-1">{addressError}</div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Debug info */}
-            {process.env.NODE_ENV === 'development' && (
-              <div className="bg-gray-900 p-3 rounded mb-4 text-xs space-y-1">
-                <div className="text-gray-400 font-bold">🔍 Debug Info:</div>
-                <div className="text-purple-400">Wallet Mode: {walletMode}</div>
-                <div className="text-orange-400">Custodial Only: {custodialOnlyMode ? 'Yes' : 'No'}</div>
-                <div className="text-cyan-400">Show Embedded UI: {showEmbeddedUI ? 'Yes' : 'No'}</div>
-                <div className="text-green-400">UserId: {effectiveUserId || 'None'}</div>
-                <div className="text-blue-400">Prop WalletAddress: {propWalletAddress || 'None'}</div>
-                <div className="text-yellow-400">Actual WalletAddress: {actualEmbeddedWalletAddress || 'None'}</div>
-                <div className="text-purple-400">Address Validated: {addressValidated ? 'Yes' : 'No'}</div>
-                <div className="text-pink-400">Embedded Balance: {embeddedBalance.toFixed(6)} SOL</div>
-                <div className="text-indigo-400">Game Balance: {custodialBalance.toFixed(6)} SOL</div>
-              </div>
-            )}
-            
-            {/* Mode description */}
-            <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md mb-4 text-sm">
-              <div className="font-medium mb-1">💰 {getModeDescription()}</div>
-              <div className="text-xs">
-                {showEmbeddedUI 
-                  ? 'Use instant transfer for immediate deposits from your embedded wallet, or external address for deposits from other wallets to your embedded wallet first.'
-                  : 'All deposits are processed directly to your game balance.'
-                }
-              </div>
-            </div>
-
-            {/* Balance display */}
-            <div className="bg-gray-800 p-4 rounded-md mb-6">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-gray-400 text-sm">Your Balances</span>
+            {/* Enhanced Balance Display - Desktop */}
+            <div className="bg-gradient-to-r from-blue-900 to-purple-900 bg-opacity-50 rounded-xl p-5 mb-6">
+              <div className="flex justify-between items-center mb-4">
+                <span className="text-gray-300">Your Balances</span>
                 <button 
                   onClick={refreshAllBalances}
                   disabled={custodialLoading || embeddedLoading}
-                  className="text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-1"
-                  title="Refresh balances"
+                  className="text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-2"
                 >
-                  <RefreshCw size={14} className={(custodialLoading || embeddedLoading) ? 'animate-spin' : ''} />
-                  <span className="text-xs">Refresh</span>
+                  <RefreshCw size={16} className={(custodialLoading || embeddedLoading) ? 'animate-spin' : ''} />
+                  <span>Refresh</span>
                 </button>
               </div>
               
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-green-400 text-sm">🎮 Game Balance</span>
-                  <span className="text-white font-bold">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-green-900 bg-opacity-30 rounded-xl p-4">
+                  <div className="text-green-400 text-sm mb-2 flex items-center">
+                    🎮 Game Balance
+                  </div>
+                  <div className="text-white font-bold text-lg">
                     {custodialLoading ? (
                       <span className="flex items-center">
-                        <Loader size={12} className="animate-spin mr-1" />
+                        <Loader size={16} className="animate-spin mr-2" />
                         Loading...
                       </span>
                     ) : (
                       `${custodialBalance.toFixed(6)} SOL`
                     )}
-                  </span>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-1">Ready for gaming</div>
                 </div>
                 
                 {showEmbeddedUI && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-blue-400 text-sm">💼 Embedded Wallet</span>
-                    <span className="text-white font-bold">
+                  <div className="bg-blue-900 bg-opacity-30 rounded-xl p-4">
+                    <div className="text-blue-400 text-sm mb-2 flex items-center">
+                      💼 Wallet Balance
+                    </div>
+                    <div className="text-white font-bold text-lg">
                       {embeddedLoading ? (
                         <span className="flex items-center">
-                          <Loader size={12} className="animate-spin mr-1" />
+                          <Loader size={16} className="animate-spin mr-2" />
                           Loading...
                         </span>
                       ) : (
                         `${embeddedBalance.toFixed(6)} SOL`
                       )}
-                    </span>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-1">Available for transfer</div>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Tab navigation */}
-            {showEmbeddedUI && (
-              <div className="flex mb-6 bg-gray-800 rounded-md p-1">
-                <button
-                  onClick={() => setActiveTab('instant')}
-                  className={`flex-1 py-2 px-4 rounded text-sm font-medium transition-colors ${
-                    activeTab === 'instant'
-                      ? 'bg-green-600 text-white'
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <Zap size={16} className="inline mr-2" />
-                  Instant Transfer
-                </button>
-                <button
-                  onClick={() => setActiveTab('external')}
-                  className={`flex-1 py-2 px-4 rounded text-sm font-medium transition-colors ${
-                    activeTab === 'external'
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <ArrowUpToLine size={16} className="inline mr-2" />
-                  External
-                </button>
-              </div>
-            )}
+            {/* Tab Navigation - Desktop */}
+            <div className="flex mb-6 bg-gray-800 rounded-xl p-1">
+              <button
+                onClick={() => setActiveTab('instant')}
+                className={`flex-1 py-4 px-6 rounded-lg font-medium transition-all duration-200 ${
+                  activeTab === 'instant'
+                    ? 'bg-gradient-to-r from-green-600 to-blue-600 text-white shadow-lg'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                }`}
+              >
+                <Zap size={18} className="inline mr-2" />
+                Instant Transfer
+              </button>
+              <button
+                onClick={() => setActiveTab('external')}
+                className={`flex-1 py-4 px-6 rounded-lg font-medium transition-all duration-200 ${
+                  activeTab === 'external'
+                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                }`}
+              >
+                <ExternalLink size={18} className="inline mr-2" />
+                External Deposit
+              </button>
+            </div>
 
-            {/* Tab content */}
-            {(activeTab === 'instant' && showEmbeddedUI) ? (
-              <div className="space-y-4">
-                <div className="bg-green-900 bg-opacity-20 border border-green-800 text-green-400 p-3 rounded-md text-sm">
-                  <div className="font-medium mb-1">⚡ Instant Transfer</div>
-                  <div className="text-xs">
-                    Transfer SOL from your embedded wallet directly to your game balance. Instant and gasless!
+            {/* Desktop Tab Content */}
+            {activeTab === 'instant' ? (
+              <div className="space-y-6">
+                {/* Desktop Instant Transfer Content - Similar to mobile but with desktop styling */}
+                <div className="bg-gradient-to-r from-green-900 to-blue-900 bg-opacity-30 border border-green-700 text-green-300 p-5 rounded-xl">
+                  <div className="flex items-center mb-3">
+                    <Zap size={24} className="mr-3 text-yellow-400" />
+                    <div className="font-medium text-lg">⚡ Instant Transfer</div>
+                  </div>
+                  <div className="text-sm opacity-90">
+                    Move SOL from your embedded wallet directly to your game balance. Instant, secure, and ready to play!
                   </div>
                 </div>
 
-                {/* Amount Input */}
                 <div>
-                  <label className="block text-sm text-gray-400 mb-2">Amount (SOL)</label>
+                  <label className="block text-sm text-gray-400 mb-3 font-medium">Transfer Amount (SOL)</label>
                   <div className="relative">
                     <input
                       type="text"
                       value={amount}
                       onChange={handleAmountChange}
-                      placeholder="0.000"
-                      className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 pr-16 text-white placeholder-gray-500 focus:border-green-500 focus:outline-none"
+                      placeholder="0.000000"
+                      className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-4 pr-20 text-white placeholder-gray-500 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-20 transition-all text-lg"
                     />
                     <button
                       onClick={setMaxAmount}
-                      className="absolute right-2 top-1/2 transform -translate-y-1/2 text-green-400 text-xs hover:text-green-300"
+                      className="absolute right-4 top-1/2 transform -translate-y-1/2 text-green-400 hover:text-green-300 font-medium"
                     >
                       MAX
                     </button>
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Available: {embeddedBalance.toFixed(6)} SOL
+                  <div className="text-sm text-gray-500 mt-2 flex justify-between">
+                    <span>Available: {embeddedBalance.toFixed(6)} SOL</span>
                     {parseFloat(amount) > 0 && parseFloat(amount) < 0.001 && (
-                      <span className="text-red-400 block">Minimum: 0.001 SOL</span>
+                      <span className="text-red-400">Minimum: 0.001 SOL</span>
                     )}
                   </div>
                 </div>
 
-                {/* Quick amounts with enhanced transfer */}
                 <div>
-                  <label className="block text-sm text-gray-400 mb-2">Quick Transfer Amounts:</label>
-                  <div className="grid grid-cols-4 gap-2">
+                  <label className="block text-sm text-gray-400 mb-3 font-medium">Quick Transfer Amounts:</label>
+                  <div className="grid grid-cols-4 gap-3">
                     {quickAmounts.map((amt) => (
                       <button
                         key={amt}
                         onClick={() => handleQuickTransfer(amt)}
-                        disabled={amt > embeddedBalance || isLoading}
-                        className={`px-2 py-2 text-xs rounded transition-colors flex flex-col items-center ${
+                        disabled={amt > embeddedBalance || transferLoading}
+                        className={`py-4 px-3 text-sm rounded-xl transition-all font-medium ${
                           parseFloat(amount) === amt
-                            ? 'bg-green-600 text-white'
-                            : amt > embeddedBalance || isLoading
-                            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            ? 'bg-gradient-to-r from-green-600 to-blue-600 text-white shadow-lg transform scale-105'
+                            : amt > embeddedBalance || transferLoading
+                            ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600 hover:transform hover:scale-105'
                         }`}
                       >
-                        <span className="font-bold">{amt}</span>
-                        <span className="text-xs opacity-75">SOL</span>
+                        <div className="flex flex-col items-center">
+                          <span className="font-bold text-lg">{amt}</span>
+                          <span className="text-xs opacity-75">SOL</span>
+                        </div>
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* Transfer All button */}
                 {embeddedBalance > 0.001 && (
                   <button
                     onClick={handleTransferAll}
-                    disabled={isLoading}
-                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white py-2 px-4 rounded-md transition-colors flex items-center justify-center text-sm"
+                    disabled={transferLoading}
+                    className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-600 text-white py-3 px-4 rounded-xl transition-all flex items-center justify-center font-medium shadow-lg"
                   >
-                    <ArrowRightLeft size={14} className="mr-2" />
+                    <ArrowRightLeft size={18} className="mr-2" />
                     Transfer All Available ({(embeddedBalance - 0.001).toFixed(6)} SOL)
                   </button>
                 )}
 
-                {/* Progress indicator */}
-                {showTransferProgress && (
-                  <div className="bg-blue-900 bg-opacity-30 border border-blue-800 text-blue-400 p-3 rounded-md">
-                    <div className="flex items-center">
-                      <Loader size={16} className="animate-spin mr-2" />
-                      <span className="text-sm">{transferStatus}</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Transfer button with enhanced states */}
                 <button
                   onClick={handleInstantTransfer}
-                  disabled={isLoading || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > embeddedBalance || !addressValidated || parseFloat(amount) < 0.001}
-                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-md transition-colors flex items-center justify-center"
+                  disabled={transferLoading || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > embeddedBalance || !addressValidated || parseFloat(amount) < 0.001}
+                  className="w-full bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white py-5 px-4 rounded-xl transition-all flex items-center justify-center font-bold text-lg shadow-lg"
                 >
-                  {isLoading ? (
+                  {transferLoading ? (
                     <>
-                      <Loader size={16} className="animate-spin mr-2" />
-                      <span className="text-sm">
-                        Processing Transfer...
-                      </span>
+                      <Loader size={24} className="animate-spin mr-3" />
+                      <span>Processing Transfer...</span>
                     </>
                   ) : (
                     <>
-                      <ArrowRightLeft size={16} className="mr-2" />
-                      <span>
-                        Transfer {amount || '0'} SOL to Game Balance
-                      </span>
+                      <ArrowRightLeft size={24} className="mr-3" />
+                      <span>Transfer {amount || '0'} SOL to Game Balance</span>
                     </>
                   )}
                 </button>
 
-                {/* Transfer info */}
-                <div className="bg-green-900 bg-opacity-20 border border-green-800 text-green-400 p-3 rounded-md text-sm">
-                  <div className="font-medium mb-1">⚡ How Instant Transfer Works:</div>
-                  <ol className="text-xs space-y-1 list-decimal list-inside">
+                <div className="bg-blue-900 bg-opacity-20 border border-blue-700 rounded-xl p-5">
+                  <div className="font-medium mb-3 text-blue-300 flex items-center">
+                    <TrendingUp size={20} className="mr-2" />
+                    How Instant Transfer Works:
+                  </div>
+                  <ol className="text-gray-300 space-y-2 list-decimal list-inside">
                     <li>Sends SOL from your embedded wallet to house wallet</li>
                     <li>Automatically credits your game balance</li>
                     <li>Updates your balances in real-time</li>
                     <li>Ready to bet immediately!</li>
                   </ol>
-                  <div className="text-xs mt-2 text-green-300">
+                  <div className="text-sm mt-3 text-blue-300 font-medium">
                     ⚡ Transfer typically takes 5-10 seconds
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="space-y-4">
-                <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md text-sm">
-                  <div className="font-medium mb-1">🌐 External Deposit</div>
-                  <div className="text-xs">
-                    Send SOL from any external wallet to your embedded wallet address. Then use "Instant Transfer" to move funds to your game balance.
+              <div className="space-y-6">
+                {/* Desktop External Deposit Content */}
+                <div className="bg-gradient-to-r from-blue-900 to-purple-900 bg-opacity-30 border border-blue-700 text-blue-300 p-5 rounded-xl">
+                  <div className="flex items-center mb-3">
+                    <ExternalLink size={24} className="mr-3" />
+                    <div className="font-medium text-lg">🌐 External Deposit</div>
+                  </div>
+                  <div className="text-sm opacity-90">
+                    Send SOL from any external wallet to your embedded wallet address. Then use Instant Transfer to move to game balance.
                   </div>
                 </div>
 
-                {/* Address display with ownership indicator */}
                 <div>
-                  <label className="block text-sm text-gray-400 mb-2">
+                  <label className="block text-sm text-gray-400 mb-3 font-medium">
                     <div className="flex items-center">
-                      <Shield size={14} className="mr-1 text-green-400" />
+                      <Shield size={16} className="mr-2 text-green-400" />
                       Your Personal Embedded Wallet Address
                     </div>
                   </label>
-                  <div className="bg-gray-800 border border-gray-700 rounded-md p-3">
+                  <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
                     <div className="flex items-center justify-between">
-                      <div className="flex-1 mr-2">
-                        <div className="text-white font-mono text-sm break-all">
+                      <div className="flex-1 mr-4">
+                        <div className="text-white font-mono text-base break-all">
                           {externalDepositAddress}
                         </div>
                         {addressValidated && (
-                          <div className="text-green-400 text-xs mt-1 flex items-center">
-                            <Check size={10} className="mr-1" />
+                          <div className="text-green-400 text-sm mt-2 flex items-center">
+                            <Check size={12} className="mr-1" />
                             Verified - This is your personal wallet
                           </div>
                         )}
                       </div>
                       <button
                         onClick={copyAddress}
-                        className="text-blue-400 text-xs hover:text-blue-300 flex items-center"
+                        className="text-blue-400 hover:text-blue-300 flex items-center bg-blue-900 bg-opacity-30 px-4 py-3 rounded-lg transition-all font-medium"
                       >
                         {copied ? (
                           <>
-                            <Check size={12} className="mr-1" />
+                            <Check size={16} className="mr-2" />
                             Copied
                           </>
                         ) : (
                           <>
-                            <Copy size={12} className="mr-1" />
-                            Copy
+                            <Copy size={16} className="mr-2" />
+                            Copy Address
                           </>
                         )}
                       </button>
@@ -1132,58 +1272,49 @@ const DepositModal: FC<DepositModalProps> = ({
                   </div>
                 </div>
 
-                {/* QR Code */}
                 <div className="flex justify-center">
                   <button
                     onClick={() => setShowQR(!showQR)}
-                    className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md transition-colors text-sm"
+                    className="flex items-center bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white px-6 py-3 rounded-xl transition-all font-medium shadow-lg"
                   >
-                    <QrCode size={14} className="mr-2" />
-                    {showQR ? 'Hide QR' : 'Show QR'}
+                    <QrCode size={18} className="mr-2" />
+                    {showQR ? 'Hide QR Code' : 'Show QR Code'}
                   </button>
                 </div>
 
                 {showQR && (
-                  <div className="flex justify-center bg-white p-4 rounded-lg">
+                  <div className="flex justify-center bg-white p-8 rounded-xl">
                     <QRCodeSVG 
                       value={externalDepositAddress} 
-                      size={200}
+                      size={250}
                       level="M"
                       includeMargin={true}
                     />
                   </div>
                 )}
 
-                {/* Security note */}
-                <div className="bg-green-900 bg-opacity-20 border border-green-800 text-green-400 p-3 rounded-md text-sm">
-                  <div className="font-medium mb-2 flex items-center">
-                    <Shield size={14} className="mr-1" />
-                    Security Verified
+                <div className="grid grid-cols-1 gap-4">
+                  <div className="bg-green-900 bg-opacity-20 border border-green-700 text-green-300 p-4 rounded-xl">
+                    <div className="font-medium mb-2 flex items-center">
+                      <Shield size={18} className="mr-2" />
+                      Security Verified
+                    </div>
+                    <div className="text-sm space-y-1">
+                      <div>✅ This address is uniquely generated for your account</div>
+                      <div>✅ Only you can access funds sent to this address</div>
+                      <div>✅ Address is validated and secure</div>
+                    </div>
                   </div>
-                  <div className="text-xs">
-                    ✅ This address is uniquely generated for your account<br/>
-                    ✅ Only you can access funds sent to this address<br/>
-                    ✅ Address is validated and secure
-                  </div>
-                </div>
 
-                {/* Important notes */}
-                <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md text-sm">
-                  <div className="font-medium mb-2">⚠️ Important Notes:</div>
-                  <ul className="list-disc list-inside space-y-1 text-xs">
-                    <li>Only send SOL to this address</li>
-                    <li>Minimum deposit: 0.001 SOL</li>
-                    <li>Funds will appear in your embedded wallet balance</li>
-                    <li>Use "Instant Transfer" tab to move funds to game balance</li>
-                    <li>Double-check the address before sending</li>
-                  </ul>
-                </div>
-
-                {/* Additional helper */}
-                <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md text-sm">
-                  <div className="font-medium mb-1">💡 Next Steps</div>
-                  <div className="text-xs">
-                    After your external deposit arrives, switch to the "Instant Transfer" tab to instantly move your SOL to your game balance for trading.
+                  <div className="bg-yellow-900 bg-opacity-20 border border-yellow-700 text-yellow-300 p-4 rounded-xl">
+                    <div className="font-medium mb-2">⚠️ Important Notes:</div>
+                    <ul className="list-disc list-inside space-y-1 text-sm">
+                      <li>Only send SOL to this address</li>
+                      <li>Minimum deposit: 0.001 SOL</li>
+                      <li>Funds will appear in your embedded wallet balance</li>
+                      <li>Use "Instant Transfer" tab to move funds to game balance</li>
+                      <li>Double-check the address before sending</li>
+                    </ul>
                   </div>
                 </div>
               </div>
@@ -1191,8 +1322,11 @@ const DepositModal: FC<DepositModalProps> = ({
             
             {/* Error Message */}
             {error && (
-              <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-500 p-3 rounded-md mt-4">
-                {error}
+              <div className="bg-red-900 bg-opacity-30 border border-red-700 text-red-400 p-4 rounded-xl mt-6">
+                <div className="flex items-center">
+                  <AlertTriangle size={20} className="mr-3 flex-shrink-0" />
+                  {error}
+                </div>
               </div>
             )}
           </>

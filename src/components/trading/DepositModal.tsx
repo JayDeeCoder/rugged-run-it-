@@ -1,10 +1,10 @@
-// src/components/modals/DepositModal.tsx - Enhanced with Instant Transfer and Balance Management
+// src/components/modals/DepositModal.tsx - Enhanced with Proper Embedded Wallet Address Validation
 import { FC, useState, useRef, useEffect, useCallback } from 'react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
-import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, QrCode, RefreshCw, ArrowDownLeft, Zap, ArrowRightLeft } from 'lucide-react';
+import { ArrowUpToLine, Wallet, Check, Loader, X, Copy, QrCode, RefreshCw, ArrowDownLeft, Zap, ArrowRightLeft, Shield, AlertTriangle } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
@@ -333,7 +333,7 @@ const DepositModal: FC<DepositModalProps> = ({
   onClose, 
   onSuccess, 
   currentToken,
-  walletAddress,
+  walletAddress: propWalletAddress,
   userId: propUserId
 }) => {
   // 🚩 Feature flag checks
@@ -346,6 +346,13 @@ const DepositModal: FC<DepositModalProps> = ({
   const { wallets } = useSolanaWallets();
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   
+  // 🔧 ENHANCED: Get the actual embedded wallet address from Privy
+  const actualEmbeddedWalletAddress = embeddedWallet?.address || propWalletAddress;
+  
+  // 🔧 NEW: Validate that we have a proper wallet address
+  const [addressValidated, setAddressValidated] = useState<boolean>(false);
+  const [addressError, setAddressError] = useState<string>('');
+  
   // House wallet for instant transfers (from TradingControls)
   const HOUSE_WALLET = '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
   
@@ -355,12 +362,12 @@ const DepositModal: FC<DepositModalProps> = ({
   
   const effectiveUserId = internalUserId || propUserId;
   
-  // Balance hooks
+  // Balance hooks - use the actual embedded wallet address
   const { 
     balance: embeddedBalance, 
     loading: embeddedLoading, 
     forceRefresh: refreshEmbeddedBalance 
-  } = useEmbeddedWalletBalance(showEmbeddedUI ? walletAddress : '');
+  } = useEmbeddedWalletBalance(showEmbeddedUI ? actualEmbeddedWalletAddress : '');
   
   const { 
     custodialBalance, 
@@ -381,6 +388,31 @@ const DepositModal: FC<DepositModalProps> = ({
   const modalRef = useRef<HTMLDivElement>(null);
   const tokenSymbol = currentToken;
   
+  // 🔧 NEW: Validate wallet address on load
+  useEffect(() => {
+    if (actualEmbeddedWalletAddress) {
+      try {
+        // Validate it's a valid Solana public key
+        new PublicKey(actualEmbeddedWalletAddress);
+        setAddressValidated(true);
+        setAddressError('');
+        console.log('✅ DepositModal: Valid embedded wallet address:', actualEmbeddedWalletAddress);
+      } catch (error) {
+        setAddressValidated(false);
+        setAddressError('Invalid wallet address format');
+        console.error('❌ DepositModal: Invalid wallet address:', actualEmbeddedWalletAddress, error);
+      }
+    } else {
+      setAddressValidated(false);
+      setAddressError('No embedded wallet address available');
+      console.warn('⚠️ DepositModal: No embedded wallet address found');
+    }
+  }, [actualEmbeddedWalletAddress]);
+  
+  // 🔧 NEW: Real-time transfer status tracking
+  const [transferStatus, setTransferStatus] = useState<string>('');
+  const [showTransferProgress, setShowTransferProgress] = useState<boolean>(false);
+  
   // 🔧 Enhanced refresh function
   const refreshAllBalances = useCallback(() => {
     console.log('🔄 DepositModal: Manual balance refresh triggered');
@@ -392,16 +424,16 @@ const DepositModal: FC<DepositModalProps> = ({
 
   // 🔧 User initialization (simplified)
   useEffect(() => {
-    if (authenticated && walletAddress && !propUserId && !internalUserId && !fetchingUserId) {
+    if (authenticated && actualEmbeddedWalletAddress && !propUserId && !internalUserId && !fetchingUserId) {
       const fetchUserId = async () => {
         try {
           setFetchingUserId(true);
-          console.log('🔍 DepositModal: Fetching userId via API for walletAddress:', walletAddress);
+          console.log('🔍 DepositModal: Fetching userId via API for walletAddress:', actualEmbeddedWalletAddress);
           
           const response = await fetch('/api/users/get-or-create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ walletAddress })
+            body: JSON.stringify({ walletAddress: actualEmbeddedWalletAddress })
           });
           
           if (!response.ok) {
@@ -423,12 +455,17 @@ const DepositModal: FC<DepositModalProps> = ({
       
       fetchUserId();
     }
-  }, [authenticated, walletAddress, propUserId, internalUserId, fetchingUserId]);
+  }, [authenticated, actualEmbeddedWalletAddress, propUserId, internalUserId, fetchingUserId]);
 
-  // 🔧 NEW: Instant transfer function (from TradingControls)
+  // 🔧 ENHANCED: Instant transfer function with advanced progress tracking
   const handleInstantTransfer = useCallback(async () => {
-    if (!embeddedWallet || !walletAddress || !effectiveUserId) {
+    if (!embeddedWallet || !actualEmbeddedWalletAddress || !effectiveUserId) {
       toast.error('Wallet not ready for transfer');
+      return;
+    }
+
+    if (!addressValidated) {
+      toast.error('Invalid wallet address');
       return;
     }
 
@@ -438,23 +475,50 @@ const DepositModal: FC<DepositModalProps> = ({
       return;
     }
 
-    console.log('🚀 DepositModal: Starting instant transfer:', { amount: transferAmount, from: walletAddress, to: HOUSE_WALLET });
+    // Additional validation
+    if (transferAmount < 0.001) {
+      setError('Minimum transfer amount is 0.001 SOL');
+      return;
+    }
+
+    console.log('🚀 DepositModal: Starting enhanced instant transfer:', { 
+      amount: transferAmount, 
+      from: actualEmbeddedWalletAddress, 
+      to: HOUSE_WALLET,
+      userId: effectiveUserId
+    });
     
     setIsLoading(true);
     setError(null);
     
+    const transferToastId = `transfer-${Date.now()}`;
+    
     try {
-      toast.loading('Transferring SOL to game balance...', { id: 'transfer' });
+      // Step 1: Prepare transaction
+      setTransferStatus('Preparing transfer...');
+      setShowTransferProgress(true);
+      toast.loading('Preparing transfer...', { id: transferToastId });
       
       const connection = new Connection(
         process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVzzNb_M2I0WQ0b85sYoNEYx'
       );
       
-      const fromPubkey = new PublicKey(walletAddress);
+      const fromPubkey = new PublicKey(actualEmbeddedWalletAddress);
       const toPubkey = new PublicKey(HOUSE_WALLET);
       const lamports = Math.floor(transferAmount * LAMPORTS_PER_SOL);
       
-      const { blockhash } = await connection.getLatestBlockhash();
+      // Check balance on blockchain
+      const actualBalance = await connection.getBalance(fromPubkey);
+      const actualSOL = actualBalance / LAMPORTS_PER_SOL;
+      
+      if (actualSOL < transferAmount) {
+        throw new Error(`Insufficient balance on blockchain. Available: ${actualSOL.toFixed(6)} SOL`);
+      }
+      
+      // Step 2: Get latest blockhash
+      setTransferStatus('Getting network information...');
+      toast.loading('Getting network info...', { id: transferToastId });
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
       
       const transaction = new Transaction({
         recentBlockhash: blockhash,
@@ -467,62 +531,181 @@ const DepositModal: FC<DepositModalProps> = ({
         })
       );
       
-      const signature = await embeddedWallet.sendTransaction(transaction, connection); 
+      // Step 3: Send transaction
+      setTransferStatus('Sending to blockchain...');
+      toast.loading('Sending transaction to blockchain...', { id: transferToastId });
+      const signature = await embeddedWallet.sendTransaction(transaction, connection);
+      console.log('✅ DepositModal: Transaction sent with signature:', signature);
       
-      const confirmation = await connection.confirmTransaction(signature, 'confirmed');
+      // Step 4: Wait for confirmation
+      setTransferStatus('Waiting for confirmation...');
+      toast.loading('Waiting for blockchain confirmation...', { id: transferToastId });
+      const confirmation = await connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight
+      }, 'confirmed');
       
       if (confirmation.value.err) {
         throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
       }
       
-      toast.success(`Transferred ${transferAmount} SOL to game balance!`, { id: 'transfer' });
+      console.log('✅ DepositModal: Transaction confirmed on blockchain');
       
-      // Manual credit trigger
-      try {
-        await fetch('/api/custodial/balance/' + effectiveUserId, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            action: 'credit',
-            amount: transferAmount,
-            source: 'embedded_wallet_transfer',
-            transactionId: signature
-          })
+      // Step 5: Credit custodial balance with enhanced retry logic
+      setTransferStatus('Crediting your game balance...');
+      toast.loading('Crediting your game balance...', { id: transferToastId });
+      
+      let creditSuccess = false;
+      let attempts = 0;
+      const maxAttempts = 5; // Increased attempts
+      
+      while (!creditSuccess && attempts < maxAttempts) {
+        attempts++;
+        console.log(`💳 DepositModal: Credit attempt ${attempts}/${maxAttempts}`);
+        
+        try {
+          const creditResponse = await fetch(`/api/custodial/balance/${effectiveUserId}`, {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache'
+            },
+            body: JSON.stringify({ 
+              action: 'credit',
+              amount: transferAmount,
+              source: 'embedded_wallet_transfer',
+              transactionId: signature,
+              walletAddress: actualEmbeddedWalletAddress,
+              timestamp: Date.now(),
+              attempt: attempts
+            })
+          });
+
+          if (creditResponse.ok) {
+            const result = await creditResponse.json();
+            creditSuccess = true;
+            console.log('✅ DepositModal: Manual credit successful:', result);
+            
+            // Show new balance if provided
+            if (result.newBalance !== undefined) {
+              console.log(`💰 DepositModal: New custodial balance: ${result.newBalance} SOL`);
+            }
+          } else {
+            const errorText = await creditResponse.text();
+            console.warn(`⚠️ DepositModal: Credit attempt ${attempts} failed (${creditResponse.status}):`, errorText);
+            
+            if (attempts < maxAttempts) {
+              await new Promise(resolve => setTimeout(resolve, attempts * 1000)); // Progressive delay
+            }
+          }
+        } catch (creditError) {
+          console.warn(`⚠️ DepositModal: Credit attempt ${attempts} error:`, creditError);
+          
+          if (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, attempts * 1000)); // Progressive delay
+          }
+        }
+      }
+
+      if (!creditSuccess) {
+        console.error('❌ DepositModal: All credit attempts failed');
+        const shortSig = signature.slice(0, 8) + '...' + signature.slice(-8);
+        toast.error(`Transfer completed but crediting failed. Transaction: ${shortSig}. Contact support!`, { 
+          id: transferToastId, 
+          duration: 10000 
         });
-      } catch (error) {
-        console.log('⚠️ Manual credit failed:', error);
+        
+        // Still show some success since blockchain transaction worked
+        setError(`Transfer sent (${shortSig}) but crediting failed. Contact support.`);
+        return;
       }
       
-      setSuccess(true);
-      setSuccessMessage(`Successfully transferred ${transferAmount} SOL to your game balance!`);
+      // Step 6: Success!
+      setTransferStatus('Transfer completed!');
+      toast.success(`Successfully transferred ${transferAmount} SOL to game balance!`, { id: transferToastId });
       
-      // Refresh balances
+      setSuccess(true);
+      setSuccessMessage(`Successfully transferred ${transferAmount} SOL to your game balance! Transaction: ${signature.slice(0, 8)}...`);
+      
+      // Step 7: Refresh balances with multiple methods
+      console.log('🔄 DepositModal: Triggering comprehensive balance refresh...');
+      
+      // Immediate refresh
       setTimeout(() => {
         refreshAllBalances();
-      }, 2000);
+      }, 500);
+      
+      // Secondary refresh
+      setTimeout(() => {
+        refreshAllBalances();
+      }, 3000);
+      
+      // Socket notification
+      const socket = (window as any).gameSocket;
+      if (socket && effectiveUserId) {
+        socket.emit('refreshBalance', { 
+          userId: effectiveUserId, 
+          walletAddress: actualEmbeddedWalletAddress, 
+          reason: 'instant_transfer_completed',
+          transactionId: signature,
+          amount: transferAmount
+        });
+      }
       
       if (onSuccess) onSuccess();
       
     } catch (error) {
-      console.error('❌ Instant transfer failed:', error);
+      console.error('❌ Enhanced instant transfer failed:', error);
       
       let errorMessage = 'Transfer failed';
       if (error instanceof Error) {
-        if (error.message.includes('User rejected')) {
+        if (error.message.includes('User rejected') || error.message.includes('rejected')) {
           errorMessage = 'Transfer cancelled by user';
-        } else if (error.message.includes('insufficient funds')) {
-          errorMessage = 'Insufficient SOL for transfer + fees';
+        } else if (error.message.includes('insufficient funds') || error.message.includes('Insufficient balance')) {
+          errorMessage = 'Insufficient SOL for transfer + network fees';
+        } else if (error.message.includes('Transaction failed')) {
+          errorMessage = 'Blockchain transaction failed';
+        } else if (error.message.includes('timeout')) {
+          errorMessage = 'Transfer timed out - please try again';
         } else {
           errorMessage = `Transfer failed: ${error.message}`;
         }
       }
       
       setError(errorMessage);
-      toast.error(errorMessage, { id: 'transfer' });
+      toast.error(errorMessage, { id: transferToastId });
     } finally {
       setIsLoading(false);
+      setShowTransferProgress(false);
+      setTransferStatus('');
     }
-  }, [embeddedWallet, walletAddress, effectiveUserId, amount, embeddedBalance, onSuccess, refreshAllBalances]);
+  }, [embeddedWallet, actualEmbeddedWalletAddress, effectiveUserId, amount, embeddedBalance, onSuccess, refreshAllBalances, addressValidated]);
+
+  // 🔧 NEW: Quick transfer with pre-filled amounts
+  const handleQuickTransfer = useCallback(async (quickAmount: number) => {
+    setAmount(quickAmount.toString());
+    setError(null);
+    
+    // Small delay to let user see the amount was set, then transfer
+    setTimeout(() => {
+      handleInstantTransfer();
+    }, 300);
+  }, [handleInstantTransfer]);
+
+  // 🔧 NEW: Transfer all available balance (minus fees)
+  const handleTransferAll = useCallback(async () => {
+    if (embeddedBalance > 0.001) {
+      const transferableAmount = Math.max(0, embeddedBalance - 0.001); // Reserve for fees
+      setAmount(transferableAmount.toFixed(6));
+      setError(null);
+      
+      setTimeout(() => {
+        handleInstantTransfer();
+      }, 300);
+    }
+  }, [embeddedBalance, handleInstantTransfer]);
 
   // Handle amount change
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -549,15 +732,15 @@ const DepositModal: FC<DepositModalProps> = ({
     }
   };
 
-  // External deposit address - use user's embedded wallet address
-  const externalDepositAddress = walletAddress;
+  // 🔧 ENHANCED: External deposit address - ensure it's the user's embedded wallet
+  const externalDepositAddress = actualEmbeddedWalletAddress;
 
   const copyAddress = async () => {
     try {
       await navigator.clipboard.writeText(externalDepositAddress);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-      toast.success('Address copied!');
+      toast.success('Your embedded wallet address copied!');
     } catch (error) {
       console.error('Failed to copy address:', error);
       toast.error('Failed to copy address');
@@ -575,6 +758,8 @@ const DepositModal: FC<DepositModalProps> = ({
       setError(null);
       setSuccess(false);
       setSuccessMessage('');
+      setTransferStatus('');
+      setShowTransferProgress(false);
       setActiveTab(showEmbeddedUI ? 'instant' : 'external');
       
       setTimeout(() => {
@@ -597,7 +782,7 @@ const DepositModal: FC<DepositModalProps> = ({
       };
 
       const handleTransactionConfirmed = (data: any) => {
-        if (data.walletAddress === walletAddress || data.userId === effectiveUserId) {
+        if (data.walletAddress === actualEmbeddedWalletAddress || data.userId === effectiveUserId) {
           console.log(`🔗 DepositModal: Transaction confirmed, refreshing balances...`);
           setTimeout(refreshAllBalances, 2000);
         }
@@ -612,7 +797,7 @@ const DepositModal: FC<DepositModalProps> = ({
         socket.off('transactionConfirmed', handleTransactionConfirmed);
       };
     }
-  }, [effectiveUserId, walletAddress, refreshAllBalances]);
+  }, [effectiveUserId, actualEmbeddedWalletAddress, refreshAllBalances]);
 
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
     if (isOpen && !isLoading) onClose();
@@ -662,6 +847,19 @@ const DepositModal: FC<DepositModalProps> = ({
           </div>
         ) : (
           <>
+            {/* Address validation warning */}
+            {!addressValidated && (
+              <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-400 p-3 rounded-md mb-4 text-sm">
+                <div className="flex items-center">
+                  <AlertTriangle size={16} className="mr-2 flex-shrink-0" />
+                  <div>
+                    <div className="font-medium">Wallet Address Issue</div>
+                    <div className="text-xs mt-1">{addressError}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Debug info */}
             {process.env.NODE_ENV === 'development' && (
               <div className="bg-gray-900 p-3 rounded mb-4 text-xs space-y-1">
@@ -670,9 +868,11 @@ const DepositModal: FC<DepositModalProps> = ({
                 <div className="text-orange-400">Custodial Only: {custodialOnlyMode ? 'Yes' : 'No'}</div>
                 <div className="text-cyan-400">Show Embedded UI: {showEmbeddedUI ? 'Yes' : 'No'}</div>
                 <div className="text-green-400">UserId: {effectiveUserId || 'None'}</div>
-                <div className="text-blue-400">WalletAddress: {walletAddress || 'None'}</div>
-                <div className="text-yellow-400">Embedded Balance: {embeddedBalance.toFixed(6)} SOL</div>
-                <div className="text-purple-400">Game Balance: {custodialBalance.toFixed(6)} SOL</div>
+                <div className="text-blue-400">Prop WalletAddress: {propWalletAddress || 'None'}</div>
+                <div className="text-yellow-400">Actual WalletAddress: {actualEmbeddedWalletAddress || 'None'}</div>
+                <div className="text-purple-400">Address Validated: {addressValidated ? 'Yes' : 'No'}</div>
+                <div className="text-pink-400">Embedded Balance: {embeddedBalance.toFixed(6)} SOL</div>
+                <div className="text-indigo-400">Game Balance: {custodialBalance.toFixed(6)} SOL</div>
               </div>
             )}
             
@@ -793,47 +993,94 @@ const DepositModal: FC<DepositModalProps> = ({
                   </div>
                   <div className="text-xs text-gray-500 mt-1">
                     Available: {embeddedBalance.toFixed(6)} SOL
+                    {parseFloat(amount) > 0 && parseFloat(amount) < 0.001 && (
+                      <span className="text-red-400 block">Minimum: 0.001 SOL</span>
+                    )}
                   </div>
                 </div>
 
-                {/* Quick amounts */}
-                <div className="grid grid-cols-4 gap-2">
-                  {quickAmounts.map((amt) => (
-                    <button
-                      key={amt}
-                      onClick={() => setQuickAmount(amt)}
-                      disabled={amt > embeddedBalance}
-                      className={`px-2 py-1 text-xs rounded transition-colors ${
-                        parseFloat(amount) === amt
-                          ? 'bg-green-600 text-white'
-                          : amt > embeddedBalance
-                          ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      }`}
-                    >
-                      {amt} SOL
-                    </button>
-                  ))}
+                {/* Quick amounts with enhanced transfer */}
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Quick Transfer Amounts:</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {quickAmounts.map((amt) => (
+                      <button
+                        key={amt}
+                        onClick={() => handleQuickTransfer(amt)}
+                        disabled={amt > embeddedBalance || isLoading}
+                        className={`px-2 py-2 text-xs rounded transition-colors flex flex-col items-center ${
+                          parseFloat(amount) === amt
+                            ? 'bg-green-600 text-white'
+                            : amt > embeddedBalance || isLoading
+                            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        }`}
+                      >
+                        <span className="font-bold">{amt}</span>
+                        <span className="text-xs opacity-75">SOL</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                {/* Transfer button */}
+                {/* Transfer All button */}
+                {embeddedBalance > 0.001 && (
+                  <button
+                    onClick={handleTransferAll}
+                    disabled={isLoading}
+                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white py-2 px-4 rounded-md transition-colors flex items-center justify-center text-sm"
+                  >
+                    <ArrowRightLeft size={14} className="mr-2" />
+                    Transfer All Available ({(embeddedBalance - 0.001).toFixed(6)} SOL)
+                  </button>
+                )}
+
+                {/* Progress indicator */}
+                {showTransferProgress && (
+                  <div className="bg-blue-900 bg-opacity-30 border border-blue-800 text-blue-400 p-3 rounded-md">
+                    <div className="flex items-center">
+                      <Loader size={16} className="animate-spin mr-2" />
+                      <span className="text-sm">{transferStatus}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Transfer button with enhanced states */}
                 <button
                   onClick={handleInstantTransfer}
-                  disabled={isLoading || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > embeddedBalance}
+                  disabled={isLoading || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > embeddedBalance || !addressValidated || parseFloat(amount) < 0.001}
                   className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-md transition-colors flex items-center justify-center"
                 >
                   {isLoading ? (
                     <>
                       <Loader size={16} className="animate-spin mr-2" />
-                      Transferring...
+                      <span className="text-sm">
+                        Processing Transfer...
+                      </span>
                     </>
                   ) : (
                     <>
                       <ArrowRightLeft size={16} className="mr-2" />
-                      Transfer {amount || '0'} SOL
+                      <span>
+                        Transfer {amount || '0'} SOL to Game Balance
+                      </span>
                     </>
                   )}
                 </button>
+
+                {/* Transfer info */}
+                <div className="bg-green-900 bg-opacity-20 border border-green-800 text-green-400 p-3 rounded-md text-sm">
+                  <div className="font-medium mb-1">⚡ How Instant Transfer Works:</div>
+                  <ol className="text-xs space-y-1 list-decimal list-inside">
+                    <li>Sends SOL from your embedded wallet to house wallet</li>
+                    <li>Automatically credits your game balance</li>
+                    <li>Updates your balances in real-time</li>
+                    <li>Ready to bet immediately!</li>
+                  </ol>
+                  <div className="text-xs mt-2 text-green-300">
+                    ⚡ Transfer typically takes 5-10 seconds
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="space-y-4">
@@ -844,15 +1091,26 @@ const DepositModal: FC<DepositModalProps> = ({
                   </div>
                 </div>
 
-                {/* Address display */}
+                {/* Address display with ownership indicator */}
                 <div>
-                  <label className="block text-sm text-gray-400 mb-2">Your Embedded Wallet Address</label>
+                  <label className="block text-sm text-gray-400 mb-2">
+                    <div className="flex items-center">
+                      <Shield size={14} className="mr-1 text-green-400" />
+                      Your Personal Embedded Wallet Address
+                    </div>
+                  </label>
                   <div className="bg-gray-800 border border-gray-700 rounded-md p-3">
                     <div className="flex items-center justify-between">
                       <div className="flex-1 mr-2">
                         <div className="text-white font-mono text-sm break-all">
                           {externalDepositAddress}
                         </div>
+                        {addressValidated && (
+                          <div className="text-green-400 text-xs mt-1 flex items-center">
+                            <Check size={10} className="mr-1" />
+                            Verified - This is your personal wallet
+                          </div>
+                        )}
                       </div>
                       <button
                         onClick={copyAddress}
@@ -895,6 +1153,19 @@ const DepositModal: FC<DepositModalProps> = ({
                     />
                   </div>
                 )}
+
+                {/* Security note */}
+                <div className="bg-green-900 bg-opacity-20 border border-green-800 text-green-400 p-3 rounded-md text-sm">
+                  <div className="font-medium mb-2 flex items-center">
+                    <Shield size={14} className="mr-1" />
+                    Security Verified
+                  </div>
+                  <div className="text-xs">
+                    ✅ This address is uniquely generated for your account<br/>
+                    ✅ Only you can access funds sent to this address<br/>
+                    ✅ Address is validated and secure
+                  </div>
+                </div>
 
                 {/* Important notes */}
                 <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md text-sm">

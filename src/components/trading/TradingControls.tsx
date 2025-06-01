@@ -140,7 +140,6 @@ const forceRefresh = useCallback(async () => {
     setLoading(false);
   }
 }, [userId]);
-
   useEffect(() => {
     // Only set up polling if userId changes
     if (userId && userId !== lastUserIdRef.current) {

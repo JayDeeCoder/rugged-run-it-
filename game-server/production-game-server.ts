@@ -806,7 +806,7 @@ async function registerPrivyWallet(
     userId: string, 
     privyWalletAddress: string, 
     privyWalletId?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; isNewUser?: boolean }> {
     try {
         console.log(`🔗 Registering embedded wallet for ${userId}: ${privyWalletAddress}`);
         
@@ -817,10 +817,30 @@ async function registerPrivyWallet(
             return { success: false, error: 'Invalid Solana wallet address' };
         }
         
-        // Check if wallet is already registered
+        // ENHANCED: Ensure user exists in user_profiles
+        let userProfile;
+        let isNewUser = false;
+        
+        try {
+            const userResult = await getOrCreateUser(privyWalletAddress);
+            userProfile = userResult.userProfile;
+            isNewUser = userResult.isNewUser;
+            
+            // If the userId provided doesn't match the found/created user, update it
+            if (userResult.userId !== userId) {
+                console.log(`🔄 User ID mismatch: provided ${userId}, found/created ${userResult.userId}`);
+                userId = userResult.userId;
+            }
+            
+        } catch (userError) {
+            console.error(`❌ Failed to get/create user for Privy wallet registration:`, userError);
+            return { success: false, error: 'Failed to create user profile' };
+        }
+        
+        // Check if Privy wallet is already registered
         const existingWallet = privyIntegrationManager.privyWallets.get(userId);
         if (existingWallet) {
-            // Update existing wallet - this handles address changes
+            // Update existing wallet
             const oldAddress = existingWallet.privyWalletAddress;
             existingWallet.privyWalletAddress = privyWalletAddress;
             existingWallet.privyWalletId = privyWalletId;
@@ -829,7 +849,6 @@ async function registerPrivyWallet(
             
             if (oldAddress !== privyWalletAddress) {
                 console.log(`🔄 Updated embedded wallet address for ${userId}: ${oldAddress} → ${privyWalletAddress}`);
-                // Reset balance to trigger fresh fetch
                 existingWallet.balance = 0;
                 existingWallet.lastBalanceUpdate = 0;
             } else {
@@ -862,7 +881,9 @@ async function registerPrivyWallet(
         // Update stats
         updatePrivyIntegrationStats();
         
-        return { success: true };
+        console.log(`✅ Privy wallet registration complete for ${userId} (${isNewUser ? 'NEW' : 'EXISTING'} user)`);
+        
+        return { success: true, isNewUser };
         
     } catch (error) {
         console.error('❌ Embedded wallet registration failed:', error);
@@ -1708,27 +1729,23 @@ let multiplierControl: MultiplierControl = {
 // ===== ENHANCED TRANSACTION MONITORING SYSTEM =====
 
 // FIXED: Enhanced transaction monitoring with proper house balance updates
+// 🔧 ENHANCED: Updated transaction monitoring for user_profiles
 async function monitorAndUpdateDatabase(): Promise<void> {
     try {
         console.log('🔍 Monitoring house wallet transactions and updating database...');
         
-        // Get recent confirmed transactions for house wallet
         const signatures = await solanaConnection.getSignaturesForAddress(
             housePublicKey,
-            {
-                limit: 20,
-            }
+            { limit: 20 }
         );
 
-        let balanceChanged = false; // Track if we need to update house balance
+        let balanceChanged = false;
 
         for (const sigInfo of signatures) {
-            // Skip if already processed
             if (processedSignatures.has(sigInfo.signature)) {
                 continue;
             }
 
-            // Skip failed transactions
             if (sigInfo.err) {
                 console.log(`⚠️ Skipping failed transaction: ${sigInfo.signature}`);
                 processedSignatures.add(sigInfo.signature);
@@ -1736,7 +1753,6 @@ async function monitorAndUpdateDatabase(): Promise<void> {
             }
 
             try {
-                // Get full transaction details
                 const transaction = await solanaConnection.getTransaction(sigInfo.signature, {
                     commitment: 'confirmed'
                 });
@@ -1746,15 +1762,11 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                     continue;
                 }
 
-                // Find transfer instruction to house wallet
                 const transferInstruction = findTransferInstruction(transaction);
-
-                // Method 1: Try balance change analysis first (works with Privy)
                 let decoded: { fromPubkey: PublicKey; toPubkey: PublicKey; lamports: number } | null = null;
 
+                // Try balance change analysis first
                 try {
-                    console.log('🔍 Attempting balance change analysis...');
-                    
                     const preBalances = transaction.meta?.preBalances || [];
                     const postBalances = transaction.meta?.postBalances || [];
                     const accountKeys = transaction.transaction.message.accountKeys;
@@ -1766,12 +1778,7 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                         const postBalance = postBalances[houseWalletIndex] || 0;
                         const balanceChange = postBalance - preBalance;
                         
-                        console.log('🏠 House wallet balance change:', {
-                            preBalance, postBalance, change: balanceChange
-                        });
-                        
                         if (balanceChange > 0) {
-                            // Find the sender (account that lost balance)
                             for (let i = 0; i < accountKeys.length; i++) {
                                 if (i !== houseWalletIndex) {
                                     const accountPreBalance = preBalances[i] || 0;
@@ -1784,10 +1791,6 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                                             toPubkey: housePublicKey,
                                             lamports: balanceChange
                                         };
-                                        console.log('✅ Successfully decoded using balance analysis:', {
-                                            from: decoded.fromPubkey.toString(),
-                                            amount: balanceChange / LAMPORTS_PER_SOL
-                                        });
                                         break;
                                     }
                                 }
@@ -1798,30 +1801,84 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                     console.log('⚠️ Balance analysis failed:', balanceError);
                 }
 
-                // Method 2: Fallback to instruction decoding
+                // Fallback to instruction decoding
                 if (!decoded && transferInstruction) {
                     try {
-                        console.log('🔍 Falling back to instruction decoding...');
                         decoded = decodeTransferInstruction(transferInstruction);
-                        console.log('✅ Successfully decoded using instruction method');
                     } catch (instructionError) {
                         console.log('❌ Instruction decoding also failed:', instructionError);
                     }
                 }
 
-                // Process the deposit if we successfully decoded it
-                if (decoded) {
-                    // Check if this is a transfer TO the house wallet (incoming deposit)
-                    if (decoded.toPubkey.equals(housePublicKey)) {
-                        const fromAddress = decoded.fromPubkey.toString();
-                        const amount = decoded.lamports / LAMPORTS_PER_SOL;
-                        
-                        console.log(`💰 Detected incoming deposit: ${amount} SOL from ${fromAddress}`);
-                        
-                        // 🔧 CRITICAL FIX: Set flag to update house balance
-                        balanceChanged = true;
-                        
-                        // Try to find user by wallet address in database
+                if (decoded && decoded.toPubkey.equals(housePublicKey)) {
+                    const fromAddress = decoded.fromPubkey.toString();
+                    const amount = decoded.lamports / LAMPORTS_PER_SOL;
+                    
+                    console.log(`💰 Detected incoming deposit: ${amount} SOL from ${fromAddress}`);
+                    balanceChanged = true;
+                    
+                    // 🔧 CRITICAL FIX: Check user_profiles first, then user_hybrid_wallets
+                    let userFound = false;
+let userId = null;
+
+try {
+    const userResult = await getOrCreateUser(fromAddress);
+    userId = userResult.userId;
+    userFound = true;
+    
+    console.log(`👤 ${userResult.isNewUser ? 'Created new' : 'Found existing'} user: ${userId}`);
+    
+    // Use the enhanced balance update system
+    const { data: balanceResult, error: balanceError } = await supabaseService
+        .rpc('update_user_balance', {
+            p_user_id: userId,
+            p_custodial_change: amount,
+            p_privy_change: 0,
+            p_transaction_type: 'external_deposit',
+            p_is_deposit: true,
+            p_deposit_amount: amount
+        });
+
+    if (balanceError) {
+        console.error(`❌ Failed to update balance for user ${userId}:`, balanceError);
+        throw balanceError;
+    }
+
+    const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
+    const newTotalBalance = parseFloat(balanceResult[0].new_total_balance);
+    const newTotalDeposited = parseFloat(balanceResult[0].new_total_deposited);
+    
+    console.log(`✅ Balance updated: ${userId} - Custodial: ${newCustodialBalance.toFixed(3)} SOL`);
+
+    // Broadcast balance update
+    io.emit('custodialBalanceUpdate', {
+        userId,
+        custodialBalance: newCustodialBalance,
+        totalBalance: newTotalBalance,
+        totalDeposited: newTotalDeposited,
+        depositAmount: amount,
+        transactionSignature: sigInfo.signature,
+        timestamp: Date.now(),
+        source: 'external_deposit_auto_created',
+        isNewUser: userResult.isNewUser
+    });
+
+    io.emit('balanceUpdate', {
+        userId,
+        type: 'custodial',
+        balance: newCustodialBalance,
+        change: amount,
+        source: 'deposit',
+        timestamp: Date.now(),
+        isNewUser: userResult.isNewUser
+    });
+
+} catch (userCreationError) {
+    console.error(`❌ Failed to create/find user for deposit from ${fromAddress}:`, userCreationError);
+    userFound = false;
+}
+                    // Step 2: Fallback to user_hybrid_wallets if not found in user_profiles
+                    if (!userFound) {
                         const { data: existingWallet, error: walletError } = await supabaseService
                             .from('user_hybrid_wallets')
                             .select('*')
@@ -1829,13 +1886,46 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                             .single();
 
                         if (!walletError && existingWallet) {
-                            // User found - update their balance
-                            const userId = existingWallet.user_id;
+                            userId = existingWallet.user_id;
+                            userFound = true;
+                            console.log(`👤 Found user in user_hybrid_wallets: ${userId} (needs migration)`);
                             
-                            console.log(`👤 Found user ${userId} - processing deposit: ${amount} SOL`);
+                            // This user exists in old table - they need migration
+                            console.log(`🔄 User ${userId} needs migration to user_profiles`);
                             
                             try {
-                                // ✅ Use enhanced balance update system
+                                // Create user in user_profiles if they don't exist there
+                                const { data: profileCheck } = await supabaseService
+                                    .from('user_profiles')
+                                    .select('user_id')
+                                    .eq('user_id', userId)
+                                    .single();
+
+                                if (!profileCheck) {
+                                    // Migrate user to user_profiles
+                                    await supabaseService
+                                        .from('user_profiles')
+                                        .insert({
+                                            user_id: userId,
+                                            username: `user_${userId.slice(-8)}`,
+                                            external_wallet_address: existingWallet.external_wallet_address,
+                                            custodial_balance: parseFloat(existingWallet.custodial_balance) || 0,
+                                            privy_balance: parseFloat(existingWallet.embedded_balance) || 0,
+                                            total_balance: (parseFloat(existingWallet.custodial_balance) || 0) + (parseFloat(existingWallet.embedded_balance) || 0),
+                                            custodial_total_deposited: parseFloat(existingWallet.custodial_total_deposited) || 0,
+                                            last_custodial_deposit: existingWallet.last_custodial_deposit,
+                                            embedded_wallet_id: existingWallet.embedded_wallet_id,
+                                            total_transfers_to_embedded: parseFloat(existingWallet.total_transfers_to_embedded) || 0,
+                                            total_transfers_to_custodial: parseFloat(existingWallet.total_transfers_to_custodial) || 0,
+                                            level: 1,
+                                            created_at: new Date().toISOString(),
+                                            updated_at: new Date().toISOString()
+                                        });
+                                    
+                                    console.log(`✅ Migrated user ${userId} to user_profiles during deposit processing`);
+                                }
+
+                                // Now use the RPC function to update balance
                                 const { data: balanceResult, error: balanceError } = await supabaseService
                                     .rpc('update_user_balance', {
                                         p_user_id: userId,
@@ -1846,108 +1936,58 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                                         p_deposit_amount: amount
                                     });
 
-                                if (balanceError) {
-                                    console.error(`❌ Failed to update balance for user ${userId}:`, balanceError);
-                                    throw balanceError;
-                                }
-
-                                const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
-                                const newTotalBalance = parseFloat(balanceResult[0].new_total_balance);
-                                const newTotalDeposited = parseFloat(balanceResult[0].new_total_deposited);
-                                
-                                console.log(`✅ Balance updated: ${userId} - Custodial: ${newCustodialBalance.toFixed(3)} SOL, Total: ${newTotalBalance.toFixed(3)} SOL`);
-
-                                // Update in-memory state if user is loaded
-                                const memoryWallet = hybridUserWallets.get(userId);
-                                if (memoryWallet) {
-                                    memoryWallet.custodialBalance = newCustodialBalance;
-                                    memoryWallet.custodialTotalDeposited = newTotalDeposited;
-                                    memoryWallet.lastCustodialDeposit = Date.now();
-                                }
-
-                                // 🔧 CRITICAL FIX: Emit real-time update to frontend
-                                if (typeof io !== 'undefined') {
-                                    console.log(`📡 Broadcasting balance update for ${userId}: ${newCustodialBalance.toFixed(3)} SOL`);
+                                if (!balanceError && balanceResult) {
+                                    const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
+                                    console.log(`✅ Migrated user deposit processed: ${newCustodialBalance.toFixed(3)} SOL`);
                                     
-                                    // Emit to specific user and all clients
                                     io.emit('custodialBalanceUpdate', {
                                         userId,
                                         custodialBalance: newCustodialBalance,
-                                        totalBalance: newTotalBalance,
-                                        totalDeposited: newTotalDeposited,
                                         depositAmount: amount,
                                         transactionSignature: sigInfo.signature,
                                         timestamp: Date.now(),
-                                        source: 'external_deposit'
-                                    });
-
-                                    // Also emit generic balance update
-                                    io.emit('balanceUpdate', {
-                                        userId,
-                                        type: 'custodial',
-                                        balance: newCustodialBalance,
-                                        change: amount,
-                                        source: 'deposit',
-                                        timestamp: Date.now()
+                                        source: 'external_deposit_migrated'
                                     });
                                 }
 
-                                console.log(`✅ Successfully processed ${amount} SOL deposit for ${userId}. New balance: ${newCustodialBalance.toFixed(3)} SOL`);
-
-                            } catch (processingError) {
-                                console.error(`❌ Critical error processing deposit for ${userId}:`, processingError);
-                                
-                                // Store as pending deposit for manual review
-                                try {
-                                    await supabaseService
-                                        .from('pending_deposits')
-                                        .insert({
-                                            wallet_address: fromAddress,
-                                            amount: amount,
-                                            transaction_signature: sigInfo.signature,
-                                            detected_at: new Date().toISOString(),
-                                            status: 'failed_processing',
-                                            error_message: processingError instanceof Error ? processingError.message : 'Unknown error'
-                                        });
-                                    
-                                    console.log(`📝 Stored failed deposit as pending for manual review: ${amount} SOL from ${fromAddress}`);
-                                } catch (pendingError) {
-                                    console.error('Failed to store pending deposit:', pendingError);
-                                }
+                            } catch (migrationError) {
+                                console.error(`❌ Migration failed for user ${userId}:`, migrationError);
+                                userFound = false;
                             }
+                        }
+                    }
+                    
+                    // Step 3: Store as pending deposit if user not found anywhere
+                    if (!userFound) {
+                        console.log(`⚠️ No user found for wallet ${fromAddress}, storing as pending deposit`);
+                        
+                        const { error: pendingError } = await supabaseService
+                            .from('pending_deposits')
+                            .insert({
+                                wallet_address: fromAddress,
+                                amount: amount,
+                                transaction_signature: sigInfo.signature,
+                                detected_at: new Date().toISOString(),
+                                status: 'pending'
+                            });
+
+                        if (pendingError) {
+                            console.error('Failed to store pending deposit:', pendingError);
                         } else {
-                            // User not found - store as pending deposit
-                            console.log(`⚠️ No user found for wallet ${fromAddress}, storing as pending deposit`);
-                            
-                            const { error: pendingError } = await supabaseService
-                                .from('pending_deposits')
-                                .insert({
-                                    wallet_address: fromAddress,
-                                    amount: amount,
-                                    transaction_signature: sigInfo.signature,
-                                    detected_at: new Date().toISOString(),
-                                    status: 'pending'
-                                });
-
-                            if (pendingError) {
-                                console.error('Failed to store pending deposit:', pendingError);
-                            } else {
-                                console.log(`📝 Stored pending deposit: ${amount} SOL from ${fromAddress}`);
-                            }
+                            console.log(`📝 Stored pending deposit: ${amount} SOL from ${fromAddress}`);
                         }
                     }
                 }
 
-                // Mark transaction as processed
                 processedSignatures.add(sigInfo.signature);
                 
             } catch (error) {
                 console.error(`❌ Error processing transaction ${sigInfo.signature}:`, error);
-                processedSignatures.add(sigInfo.signature); // Mark as processed to avoid retrying
+                processedSignatures.add(sigInfo.signature);
             }
         }
 
-        // 🔧 CRITICAL FIX: Update house balance if any changes were detected
+        // Update house balance if any changes detected
         if (balanceChanged) {
             console.log('💰 Deposits detected, updating house balance...');
             const oldBalance = houseBalance;
@@ -1956,7 +1996,6 @@ async function monitorAndUpdateDatabase(): Promise<void> {
             
             console.log(`🏛️ House balance updated: ${oldBalance.toFixed(3)} → ${houseBalance.toFixed(3)} SOL (${change >= 0 ? '+' : ''}${change.toFixed(3)})`);
             
-            // 🔒 ADMIN ONLY: Send sensitive house balance data only to admin room
             io.to('admin_monitoring').emit('adminHouseBalanceUpdate', {
                 oldBalance,
                 newBalance: houseBalance,
@@ -1966,21 +2005,19 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                 source: 'deposit_processing'
             });
             
-            // Update current game state if active (but don't expose house balance to users)
             if (currentGame) {
                 currentGame.houseBalance = houseBalance;
                 currentGame.maxPayoutCapacity = calculateMaxPayoutCapacity();
                 
-                // Only emit non-sensitive game capacity info to users
                 io.emit('gameCapacityUpdate', {
                     maxPayoutCapacity: calculateMaxPayoutCapacity(),
-                    canAcceptLargeBets: houseBalance > 50, // Boolean indicator only
+                    canAcceptLargeBets: houseBalance > 50,
                     timestamp: Date.now()
                 });
             }
         }
 
-        // Clean up old processed signatures (keep memory usage down)
+        // Clean up old processed signatures
         if (processedSignatures.size > 1000) {
             const oldSignatures = Array.from(processedSignatures).slice(0, 500);
             oldSignatures.forEach(sig => processedSignatures.delete(sig));
@@ -1990,7 +2027,6 @@ async function monitorAndUpdateDatabase(): Promise<void> {
         console.error('❌ Error in transaction monitoring:', error);
     }
 }
-
 // Function to resolve pending deposits when users register
 async function resolvePendingDeposits(): Promise<void> {
     try {
@@ -2149,6 +2185,180 @@ async function getUserWalletBalance(walletAddress: string): Promise<number> {
 }
 
 // ===== HYBRID SYSTEM FUNCTIONS =====
+
+async function registerNewUser(walletAddress: string): Promise<string> {
+    try {
+        // First check if user already exists in user_profiles
+        const { data: existingProfile, error: profileCheckError } = await supabaseService
+            .from('user_profiles')
+            .select('user_id')
+            .eq('external_wallet_address', walletAddress)
+            .single();
+            
+        if (!profileCheckError && existingProfile) {
+            console.log(`✅ User already exists in user_profiles: ${existingProfile.user_id}`);
+            return existingProfile.user_id;
+        }
+        
+        // Generate new user ID
+        const userId = crypto.randomUUID();
+        
+        console.log(`🆕 Creating new user ${userId} for wallet ${walletAddress}`);
+        
+        // Create user in user_profiles table
+        const { error: insertError } = await supabaseService
+            .from('user_profiles')
+            .insert({
+                user_id: userId,
+                username: `user_${userId.slice(-8)}`,
+                external_wallet_address: walletAddress,
+                custodial_balance: 0,
+                privy_balance: 0,
+                total_balance: 0,
+                custodial_total_deposited: 0,
+                total_transfers_to_embedded: 0,
+                total_transfers_to_custodial: 0,
+                level: 1,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            });
+            
+        if (insertError) {
+            console.error(`❌ Failed to create user in user_profiles:`, insertError);
+            throw insertError;
+        }
+        
+        console.log(`✅ Created new user ${userId} in user_profiles`);
+        return userId;
+        
+    } catch (error) {
+        console.error('❌ User registration failed:', error);
+        throw error;
+    }
+}
+
+// Enhanced function to get or create user by wallet address
+async function getOrCreateUser(walletAddress: string): Promise<{ 
+    userId: string; 
+    isNewUser: boolean; 
+    userProfile: any 
+}> {
+    try {
+        // Try to find existing user first
+        const { data: existingProfile, error: profileError } = await supabaseService
+            .from('user_profiles')
+            .select('*')
+            .eq('external_wallet_address', walletAddress)
+            .single();
+            
+        if (!profileError && existingProfile) {
+            return {
+                userId: existingProfile.user_id,
+                isNewUser: false,
+                userProfile: existingProfile
+            };
+        }
+        
+        // User doesn't exist, create new one
+        const userId = await registerNewUser(walletAddress);
+        
+        // Fetch the newly created profile
+        const { data: newProfile, error: fetchError } = await supabaseService
+            .from('user_profiles')
+            .select('*')
+            .eq('user_id', userId)
+            .single();
+            
+        if (fetchError || !newProfile) {
+            throw new Error('Failed to fetch newly created user profile');
+        }
+        
+        return {
+            userId,
+            isNewUser: true,
+            userProfile: newProfile
+        };
+        
+    } catch (error) {
+        console.error('❌ Get or create user failed:', error);
+        throw error;
+    }
+}
+
+// ENHANCED: Function to resolve pending deposits for a specific user
+async function resolvePendingDepositsForUser(walletAddress: string): Promise<void> {
+    try {
+        console.log(`🔄 Checking for pending deposits for wallet: ${walletAddress}`);
+        
+        // Get pending deposits for this wallet
+        const { data: pendingDeposits, error: pendingError } = await supabaseService
+            .from('pending_deposits')
+            .select('*')
+            .eq('wallet_address', walletAddress)
+            .eq('status', 'pending');
+
+        if (pendingError || !pendingDeposits || pendingDeposits.length === 0) {
+            return;
+        }
+
+        console.log(`📋 Found ${pendingDeposits.length} pending deposits for ${walletAddress}`);
+
+        for (const deposit of pendingDeposits) {
+            try {
+                // Get the user (should exist now)
+                const userResult = await getOrCreateUser(walletAddress);
+                const userId = userResult.userId;
+                const depositAmount = parseFloat(deposit.amount);
+                
+                console.log(`✅ Resolving pending deposit: ${depositAmount} SOL for user ${userId}`);
+                
+                // Use the RPC function to update balance
+                const { data: balanceResult, error: balanceError } = await supabaseService
+                    .rpc('update_user_balance', {
+                        p_user_id: userId,
+                        p_custodial_change: depositAmount,
+                        p_privy_change: 0,
+                        p_transaction_type: 'pending_deposit_resolved',
+                        p_is_deposit: true,
+                        p_deposit_amount: depositAmount
+                    });
+
+                if (!balanceError && balanceResult) {
+                    const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
+                    
+                    // Mark pending deposit as resolved
+                    await supabaseService
+                        .from('pending_deposits')
+                        .update({ 
+                            status: 'resolved',
+                            resolved_at: new Date().toISOString(),
+                            resolved_user_id: userId
+                        })
+                        .eq('id', deposit.id);
+
+                    // Emit real-time update
+                    io.emit('custodialBalanceUpdate', {
+                        userId,
+                        custodialBalance: newCustodialBalance,
+                        depositAmount: depositAmount,
+                        transactionSignature: deposit.transaction_signature,
+                        timestamp: Date.now(),
+                        source: 'pending_deposit_resolved'
+                    });
+
+                    console.log(`✅ Resolved pending deposit: ${depositAmount} SOL for user ${userId}`);
+                }
+                
+            } catch (depositError) {
+                console.error(`❌ Failed to resolve pending deposit ${deposit.id}:`, depositError);
+            }
+        }
+        
+    } catch (error) {
+        console.error(`❌ Error resolving pending deposits for ${walletAddress}:`, error);
+    }
+}
+
 async function initializeHybridSystem(): Promise<void> {
     try {
         console.log('🔄 Initializing hybrid wallet system...');
@@ -4291,6 +4501,7 @@ io.on('connection', (socket: Socket) => {
             socket.emit('privyWalletRegisterResult', {
                 success: result.success,
                 error: result.error,
+                isNewUser: result.isNewUser, // ADD THIS LINE
                 userId,
                 privyWalletAddress,
                 wallet: result.success ? privyIntegrationManager.privyWallets.get(userId) : null,
@@ -4299,6 +4510,17 @@ io.on('connection', (socket: Socket) => {
                     `Registration failed: ${result.error}`,
                 timestamp: Date.now()
             });
+            
+            // Broadcast wallet registration to admin/monitoring clients
+            if (result.success) {
+                io.emit('privyWalletRegistered', {
+                    userId,
+                    privyWalletAddress,
+                    isNewUser: result.isNewUser, // ADD THIS LINE
+                    totalPrivyWallets: privyIntegrationManager.totalPrivyWallets,
+                    timestamp: Date.now()
+                });
+            };
             
             // Broadcast wallet registration to admin/monitoring clients
             if (result.success) {
@@ -4437,7 +4659,59 @@ io.on('connection', (socket: Socket) => {
     socket.on('disconnect', (reason) => {
         console.log(`👋 Client disconnected: ${socket.id} (${reason})`);
     });
+
+    socket.on('authenticateUser', async (data) => {
+        const { walletAddress, privyUserId, privyWalletAddress } = data;
+        
+        try {
+            console.log(`🔐 Processing user authentication for wallet ${walletAddress}`);
+            
+            // Get or create user by their main wallet address
+            const userResult = await getOrCreateUser(walletAddress);
+            
+            // If they also have a Privy wallet, register it
+            if (privyWalletAddress) {
+                console.log(`🔗 Also registering Privy wallet: ${privyWalletAddress}`);
+                
+                const privyResult = await registerPrivyWallet(
+                    userResult.userId, 
+                    privyWalletAddress, 
+                    privyUserId
+                );
+                
+                if (!privyResult.success) {
+                    console.warn(`⚠️ Privy wallet registration failed: ${privyResult.error}`);
+                }
+            }
+            
+            // Check for any pending deposits for this wallet
+            await resolvePendingDepositsForUser(walletAddress);
+            
+            socket.emit('authenticationResult', {
+                success: true,
+                userId: userResult.userId,
+                isNewUser: userResult.isNewUser,
+                userProfile: userResult.userProfile,
+                privyWalletRegistered: !!privyWalletAddress,
+                message: userResult.isNewUser ? 
+                    'Welcome! Your account has been created.' : 
+                    'Welcome back!',
+                timestamp: Date.now()
+            });
+            
+            console.log(`✅ User authentication complete: ${userResult.userId} (${userResult.isNewUser ? 'NEW' : 'EXISTING'})`);
+            
+        } catch (error) {
+            console.error('❌ User authentication error:', error);
+            socket.emit('authenticationResult', {
+                success: false,
+                error: 'Authentication failed',
+                details: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+    });
 });
+
 
 // Periodic updates
 setInterval(() => {

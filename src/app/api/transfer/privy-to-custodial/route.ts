@@ -50,7 +50,25 @@ export async function POST(request: NextRequest) {
     
     // Validate environment variables
     const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-    const HOUSE_WALLET_ADDRESS = process.env.HOUSE_WALLET_ADDRESS || process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS;
+    const HOUSE_WALLET_ADDRESS = process.env.HOUSE_WALLET_ADDRESS || 
+                             process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS || 
+                             '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56'; // fallback
+
+     // In app/api/transfer/privy-to-custodial/route.ts
+console.log('🔍 Environment check:', {
+  HOUSE_WALLET_ADDRESS: process.env.HOUSE_WALLET_ADDRESS,
+  NEXT_PUBLIC_HOUSE_WALLET_ADDRESS: process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS,
+  NODE_ENV: process.env.NODE_ENV
+});
+
+if (!HOUSE_WALLET_ADDRESS) {
+  console.error('❌ Missing HOUSE_WALLET_ADDRESS environment variable');
+  console.error('Available env vars:', Object.keys(process.env).filter(key => key.includes('WALLET')));
+  return NextResponse.json(
+    { error: 'Server configuration error: Missing house wallet address' },
+    { status: 500 }
+  );
+}                        
 
     if (!SOLANA_RPC_URL) {
       console.error('❌ Missing SOLANA_RPC_URL environment variable');

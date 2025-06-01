@@ -1,7 +1,7 @@
 // app/api/transfer/privy-to-custodial/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, TransactionInstruction } from '@solana/web3.js';
-import { createClient } from '@supabase/supabase-js'; // 🔥 ADD THIS IMPORT
+import { createClient } from '@supabase/supabase-js';
 import { privyWalletAPI } from '../../../../services/privyWalletAPI';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../../../../utils/walletUtils';
 import logger from '../../../../utils/logger';
@@ -50,7 +50,11 @@ export async function POST(request: NextRequest) {
     
     // Validate environment variables
     const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-    const HOUSE_WALLET_ADDRESS = process.env.HOUSE_WALLET_ADDRESS || process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS;
+    
+    // 🔥 TEMPORARY FIX: Hardcode house wallet address to bypass env issue
+    const HOUSE_WALLET_ADDRESS = '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
+
+    console.log('🔍 Using hardcoded HOUSE_WALLET_ADDRESS:', HOUSE_WALLET_ADDRESS);
 
     if (!SOLANA_RPC_URL) {
       console.error('❌ Missing SOLANA_RPC_URL environment variable');
@@ -60,19 +64,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!HOUSE_WALLET_ADDRESS) {
-      console.error('❌ Missing HOUSE_WALLET_ADDRESS environment variable');
-      return NextResponse.json(
-        { error: 'Server configuration error: Missing house wallet address' },
-        { status: 500 }
-      );
-    }
-
-    // Validate house wallet address
+    // Validate house wallet address format
     if (!isValidSolanaAddress(HOUSE_WALLET_ADDRESS)) {
-      console.error('❌ Invalid HOUSE_WALLET_ADDRESS');
+      console.error('❌ Invalid HOUSE_WALLET_ADDRESS format');
       return NextResponse.json(
-        { error: 'Server configuration error: Invalid house wallet address' },
+        { error: 'Server configuration error: Invalid house wallet address format' },
         { status: 500 }
       );
     }
@@ -82,30 +78,8 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { userId, amount, signedTransaction, autoSign = true, walletAddress } = body;
     
-    // 🔍 Complete request debug
     console.log('🔍 Received request body:', JSON.stringify(body, null, 2));
-    
     console.log('📋 Transfer details:', { userId, amount, hasSignedTx: !!signedTransaction, autoSign, walletAddress });
-    
-    // 🔍 Debug wallet information
-    console.log('🔍 Debug wallet registration:', {
-      userId,
-      walletAddress,
-      walletAddressType: typeof walletAddress,
-      walletAddressLength: walletAddress?.length,
-      hasSignedTransaction: !!signedTransaction,
-      signedTransactionLength: signedTransaction?.length
-    });
-
-    // Also add validation check if wallet address provided
-    if (walletAddress) {
-      console.log('🔍 Wallet address validation:', {
-        address: walletAddress,
-        isValid: isValidSolanaAddress(walletAddress),
-        isString: typeof walletAddress === 'string',
-        length: walletAddress.length
-      });
-    }
     
     // Validate inputs
     if (!userId || typeof userId !== 'string') {
@@ -136,19 +110,38 @@ export async function POST(request: NextRequest) {
     if (!wallet) {
       console.log(`🔄 Privy wallet not found for user ${userId}, auto-registering...`);
       
+      // Debug: Log all the values
+      console.log('🔍 Auto-registration debug:', {
+        walletAddress: walletAddress,
+        walletAddressValid: walletAddress ? isValidSolanaAddress(walletAddress) : false,
+        hasSignedTransaction: !!signedTransaction
+      });
+      
       let walletToRegister = walletAddress;
       
-      // If wallet address not provided, try to extract from signed transaction
+      // Enhanced debugging for signed transaction parsing
       if (!walletToRegister && signedTransaction) {
         try {
+          console.log('🔍 Trying to extract wallet from signed transaction...');
           const transactionBuffer = Buffer.from(signedTransaction, 'base64');
           const transaction = Transaction.from(transactionBuffer);
           walletToRegister = transaction.feePayer?.toString();
+          
+          console.log('🔍 Extracted from transaction:', {
+            feePayer: transaction.feePayer?.toString(),
+            isValid: walletToRegister ? isValidSolanaAddress(walletToRegister) : false
+          });
         } catch (parseError) {
           console.error('❌ Failed to parse transaction for wallet address:', parseError);
         }
       }
       
+      console.log('🔍 Final wallet to register:', {
+        walletToRegister,
+        isValid: walletToRegister ? isValidSolanaAddress(walletToRegister) : false
+      });
+      
+      // Complete the registration logic
       if (walletToRegister && isValidSolanaAddress(walletToRegister)) {
         console.log(`🔄 Auto-registering Privy wallet: ${walletToRegister} for user ${userId}`);
         wallet = await privyWalletAPI.registerPrivyWallet(userId, walletToRegister);
@@ -167,6 +160,14 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+    }
+
+    // Ensure wallet is not null
+    if (!wallet) {
+      return NextResponse.json(
+        { error: 'Wallet initialization failed' },
+        { status: 500 }
+      );
     }
     
     // Update and check current balance

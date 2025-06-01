@@ -138,7 +138,8 @@ const useCustodialBalance = (userId: string) => {
       setLoading(false);
     }
   }, [userId]);
-
+  
+   
   // Polling setup
   useEffect(() => {
     if (userId && userId !== lastUserIdRef.current) {
@@ -167,7 +168,8 @@ const useCustodialBalance = (userId: string) => {
       };
     }
   }, [userId, updateCustodialBalance]);
-
+   
+  
   // 🚀 ENHANCED REAL-TIME SOCKET LISTENERS
   useEffect(() => {
     if (!userId || socketListenersRef.current) return;
@@ -359,6 +361,7 @@ const handleBalanceRefreshResponse = (data: any) => {
 
   return { custodialBalance, loading, lastUpdated, updateCustodialBalance, forceRefresh };
 };
+
 
 // 🚀 ENHANCED: Wallet balance hook with real-time socket listeners
 const useWalletBalance = (walletAddress: string) => {
@@ -1336,6 +1339,13 @@ const TradingControls: FC<TradingControlsProps> = ({
   const [serverError, setServerError] = useState<string>('');
   const [balanceIssueDetected, setBalanceIssueDetected] = useState<boolean>(false);
   
+  useEffect(() => {
+    if (walletAddress === '8qp1JJqoYH4Rxj5Xr4uoEaXDxsDaeLTEoa9ngAmH5yRn' && 
+        userId === 'd88a23d3-3fbc-49ba-8c53-90f7656950b8') {
+      console.log(`🔧 FIXING: Wrong user ID detected, correcting to database user ID`);
+      setUserId('50b7e9a5-db99-4ea0-bbfb-17dd6098975e');
+    }
+  }, [walletAddress, userId]);
   // All ref declarations
   const transferAttempts = useRef<Array<{timestamp: number, amount: number, signature?: string}>>([]);
   const lastBalanceCheck = useRef<number>(0);
@@ -2103,6 +2113,12 @@ const handleEmergencyBalanceSync = useCallback(async () => {
     initializationRef.current.lastWallet = walletAddress;
     
     let initTimeout: NodeJS.Timeout | null = null;
+    
+    console.log(`🔍 USER INIT DEBUG:`, {
+      walletAddress,
+      currentUserId: userId,
+      authenticated
+    });
     
     const initUser = async () => {
       try {

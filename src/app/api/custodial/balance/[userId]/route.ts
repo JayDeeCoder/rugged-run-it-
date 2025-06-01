@@ -26,20 +26,26 @@ export async function GET(
     console.log('🔍 Getting balance from user_profiles for user:', userId);
     
     // 🔧 FIXED: Only select columns that actually exist in user_profiles
-    const { data: userProfile, error: profileError } = await supabase
-      .from('user_profiles')
-      .select(`
-        user_id,
-        username,
-        custodial_balance,
-        privy_balance,
-        total_balance,
-        external_wallet_address,
-        updated_at,
-        created_at
-      `)
-      .eq('user_id', userId)
-      .single();
+    // Your API should now work correctly since the columns exist
+const { data: userProfile, error: profileError } = await supabase
+.from('user_profiles')
+.select(`
+  user_id,
+  username,
+  custodial_balance,
+  privy_balance,
+  total_balance,
+  external_wallet_address,
+  custodial_total_deposited,
+  last_custodial_deposit,
+  embedded_wallet_id,
+  total_transfers_to_embedded,
+  total_transfers_to_custodial,
+  updated_at,
+  created_at
+`)
+.eq('user_id', userId)
+.single();
     
     if (profileError || !userProfile) {
       console.log(`❌ User ${userId} not found in user_profiles:`, profileError?.message);

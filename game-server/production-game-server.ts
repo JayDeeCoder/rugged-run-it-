@@ -3888,12 +3888,20 @@ function clearGameCountdown(): void {
 }
 
 // GAME COUNTER FIX: Enhanced startNewGame with persistent cycling counter
+// Enhanced startNewGame with proper active bet clearing
 async function startNewGame(): Promise<void> {
     resetTradingState();
     
+    // 🔧 CRITICAL: Get existing bets from the PREVIOUS game before clearing
     const existingBets = currentGame?.activeBets || new Map();
     const existingTotalBets = currentGame?.totalBets || 0;
     const existingTotalPlayers = currentGame?.totalPlayers || 0;
+
+    // 🔧 DEBUG: Log existing bets before clearing
+    console.log(`🔍 Starting new game - Previous game had ${existingBets.size} active bets`);
+    if (existingBets.size > 0) {
+        console.log(`🔍 Previous active bet wallets:`, Array.from(existingBets.keys()));
+    }
 
     if (gameStartLock) {
         console.log('Game start already in progress, skipping...');
@@ -3907,10 +3915,9 @@ async function startNewGame(): Promise<void> {
         
         const seed = generateProvablyFairSeed();
         
-        // ✅ FIX: Use persistent cycling counter (1-100) instead of history length
         globalGameCounter++;
         if (globalGameCounter > 100) {
-            globalGameCounter = 1; // Reset to 1 after reaching 100
+            globalGameCounter = 1;
         }
         const gameNumber = globalGameCounter;
         
@@ -3922,7 +3929,7 @@ async function startNewGame(): Promise<void> {
             const { data: gameData, error } = await supabaseService
                 .from('games')
                 .insert({
-                    game_number: gameNumber, // This will cycle 1-100 continuously
+                    game_number: gameNumber,
                     seed: seed,
                     crash_multiplier: crashPoint,
                     status: 'active',
@@ -3942,9 +3949,10 @@ async function startNewGame(): Promise<void> {
             console.warn(`⚠️ Database save failed for game ${gameNumber}, running in memory mode:`, dbError);
         }
 
+        // 🔧 CRITICAL: Create completely fresh game object with empty activeBets
         currentGame = {
             id: gameId,
-            gameNumber, // Now cycles 1-100 continuously
+            gameNumber,
             startTime: Date.now(),
             currentMultiplier: 1.0,
             maxMultiplier: crashPoint,
@@ -3954,14 +3962,36 @@ async function startNewGame(): Promise<void> {
             crashMultiplier: crashPoint,
             seed,
             chartData: [],
-            activeBets: existingBets,
+            activeBets: new Map(), // 🔧 FRESH EMPTY MAP - this is critical!
             houseBalance: houseBalance,
             maxPayoutCapacity: calculateMaxPayoutCapacity()
         };
 
+        // 🔧 TRANSFER: Only transfer valid bets from previous game
+        let transferredBets = 0;
+        for (const [walletAddress, bet] of existingBets) {
+            if (bet.isValid && bet.betCollected && !bet.cashedOut) {
+                console.log(`🔄 Transferring bet from ${walletAddress}: ${bet.betAmount} SOL`);
+                currentGame.activeBets.set(walletAddress, bet);
+                transferredBets++;
+            } else {
+                console.log(`🗑️ NOT transferring invalid/cashed bet from ${walletAddress}:`, {
+                    isValid: bet.isValid,
+                    betCollected: bet.betCollected,
+                    cashedOut: bet.cashedOut
+                });
+            }
+        }
+
+        // 🔧 VERIFICATION: Log the final state
+        console.log(`🎮 Game ${gameNumber} created:`);
+        console.log(`   Active bets transferred: ${transferredBets}`);
+        console.log(`   Total active bets: ${currentGame.activeBets.size}`);
+        console.log(`   Active bet wallets:`, Array.from(currentGame.activeBets.keys()));
+
         const config = getCurrentGameConfig();
         const modeText = config._BOOTSTRAP_MODE ? `${config._BOOTSTRAP_LEVEL} bootstrap` : 'normal';
-        console.log(`🎮 Trader Game ${gameNumber} started (${modeText}) - House: ${houseBalance.toFixed(3)} SOL, Max Payout: ${currentGame.maxPayoutCapacity.toFixed(3)} SOL`);
+        console.log(`🎮 Trader Game ${gameNumber} started (${modeText}) - House: ${houseBalance.toFixed(3)} SOL`);
 
         io.emit('gameStarted', {
             gameId: currentGame.id,
@@ -3976,6 +4006,7 @@ async function startNewGame(): Promise<void> {
             totalPlayers: currentGame.totalPlayers,
             houseBalance: currentGame.houseBalance,
             maxPayoutCapacity: currentGame.maxPayoutCapacity,
+            activeBetsTransferred: transferredBets, // 🔧 NEW: Let frontend know how many bets transferred
             tradingState: {
                 trend: tradingState.trend,
                 momentum: tradingState.momentum
@@ -3986,10 +4017,9 @@ async function startNewGame(): Promise<void> {
 
     } catch (error) {
         console.error('Error starting new game:', error);
-        // ❌ IMPORTANT: Decrement counter if game creation failed
         globalGameCounter--;
         if (globalGameCounter < 1) {
-            globalGameCounter = 100; // Wrap back to 100 if we go below 1
+            globalGameCounter = 100;
         }
         setTimeout(() => {
             gameStartLock = false;

@@ -30,11 +30,26 @@ export async function GET(request: NextRequest) {
     console.log('💰 Getting custodial balance for user:', userId);
     
     // 🔧 CRITICAL FIX: Read from user_profiles table (same as game server)
-    const { data: userProfile, error: profileError } = await supabase
-      .from('user_profiles')
-      .select('custodial_balance, privy_balance, total_balance, updated_at, created_at, external_wallet_address')
-      .eq('user_id', userId)
-      .single();
+    // Your API should now work correctly since the columns exist
+const { data: userProfile, error: profileError } = await supabase
+.from('user_profiles')
+.select(`
+  user_id,
+  username,
+  custodial_balance,
+  privy_balance,
+  total_balance,
+  external_wallet_address,
+  custodial_total_deposited,
+  last_custodial_deposit,
+  embedded_wallet_id,
+  total_transfers_to_embedded,
+  total_transfers_to_custodial,
+  updated_at,
+  created_at
+`)
+.eq('user_id', userId)
+.single();
     
     // 🔧 FALLBACK: If not in user_profiles, try user_hybrid_wallets
     if (profileError || !userProfile) {
@@ -137,12 +152,27 @@ export async function POST(request: NextRequest) {
     console.log('💰 POST: Getting custodial balance for user:', userId);
     
     // 🔧 SAME FIX: Read from user_profiles first
-    const { data: userProfile, error: profileError } = await supabase
-      .from('user_profiles')
-      .select('custodial_balance, privy_balance, total_balance, updated_at')
-      .eq('user_id', userId)
-      .single();
-    
+    // Your API should now work correctly since the columns exist
+const { data: userProfile, error: profileError } = await supabase
+.from('user_profiles')
+.select(`
+  user_id,
+  username,
+  custodial_balance,
+  privy_balance,
+  total_balance,
+  external_wallet_address,
+  custodial_total_deposited,
+  last_custodial_deposit,
+  embedded_wallet_id,
+  total_transfers_to_embedded,
+  total_transfers_to_custodial,
+  updated_at,
+  created_at
+`)
+.eq('user_id', userId)
+.single();
+
     if (profileError || !userProfile) {
       console.log('📭 POST: No user_profiles entry, checking user_hybrid_wallets...');
       

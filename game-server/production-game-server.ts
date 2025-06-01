@@ -2213,6 +2213,87 @@ async function getOrCreateUser(walletAddress: string): Promise<{
     }
 }
 
+async function findUserByWalletAddress(walletAddress: string): Promise<{ userId: string; userProfile: any } | null> {
+    try {
+        console.log(`🔍 ENHANCED: Searching for user with wallet: ${walletAddress}`);
+        
+        // Try multiple search strategies
+        const searchPromises = [
+            // Search in user_profiles
+            supabaseService
+                .from('user_profiles')
+                .select('*')
+                .eq('external_wallet_address', walletAddress)
+                .single(),
+            
+            // Search in user_hybrid_wallets
+            supabaseService
+                .from('user_hybrid_wallets')
+                .select('*')
+                .eq('external_wallet_address', walletAddress)
+                .single(),
+                
+            // Search in privy_wallets
+            supabaseService
+                .from('privy_wallets')
+                .select('*')
+                .eq('privy_wallet_address', walletAddress)
+                .single()
+        ];
+        
+        const results = await Promise.allSettled(searchPromises);
+        
+        // Check user_profiles result
+        if (results[0].status === 'fulfilled' && results[0].value.data) {
+            console.log(`✅ Found user in user_profiles: ${results[0].value.data.user_id}`);
+            return {
+                userId: results[0].value.data.user_id,
+                userProfile: results[0].value.data
+            };
+        }
+        
+        // Check user_hybrid_wallets result
+        if (results[1].status === 'fulfilled' && results[1].value.data) {
+            console.log(`✅ Found user in user_hybrid_wallets: ${results[1].value.data.user_id}`);
+            
+            // Get full profile
+            const { data: profile } = await supabaseService
+                .from('user_profiles')
+                .select('*')
+                .eq('user_id', results[1].value.data.user_id)
+                .single();
+                
+            return {
+                userId: results[1].value.data.user_id,
+                userProfile: profile || results[1].value.data
+            };
+        }
+        
+        // Check privy_wallets result
+        if (results[2].status === 'fulfilled' && results[2].value.data) {
+            console.log(`✅ Found user in privy_wallets: ${results[2].value.data.user_id}`);
+            
+            // Get full profile
+            const { data: profile } = await supabaseService
+                .from('user_profiles')
+                .select('*')
+                .eq('user_id', results[2].value.data.user_id)
+                .single();
+                
+            return {
+                userId: results[2].value.data.user_id,
+                userProfile: profile || { user_id: results[2].value.data.user_id }
+            };
+        }
+        
+        console.log(`❌ User not found in any table for wallet: ${walletAddress}`);
+        return null;
+        
+    } catch (error) {
+        console.error('❌ Error searching for user:', error);
+        return null;
+    }
+}
 // ENHANCED: Function to resolve pending deposits for a specific user
 // FIXED: Function to resolve pending deposits for a specific user
 // FIXED: Function to resolve pending deposits for a specific user
@@ -5023,6 +5104,171 @@ process.on('SIGINT', () => {
     server.close(() => {
         console.log('Process terminated');
     });
+});
+
+// Resolve all pending deposits
+app.post('/api/admin/resolve-all-pending', async (req, res): Promise<void> => {
+    try {
+        console.log('🚨 MANUAL: Resolving all pending deposits...');
+        
+        const { data: pendingDeposits, error } = await supabaseService
+            .from('pending_deposits')
+            .select('*')
+            .eq('status', 'pending');
+
+        if (error || !pendingDeposits || pendingDeposits.length === 0) {
+            res.json({ 
+                success: true, 
+                message: 'No pending deposits found',
+                resolved: 0 
+            });
+            return;
+        }
+
+        console.log(`📋 Found ${pendingDeposits.length} pending deposits to resolve`);
+
+        let resolvedCount = 0;
+        let failedCount = 0;
+        const results = [];
+
+        for (const deposit of pendingDeposits) {
+            try {
+                console.log(`🔄 Processing pending deposit: ${deposit.amount} SOL from ${deposit.wallet_address}`);
+                
+                // Try to find existing user first
+                let userResult = await findUserByWalletAddress(deposit.wallet_address);
+                
+                if (!userResult) {
+                    // Create new user
+                    console.log(`🆕 Creating new user for wallet: ${deposit.wallet_address}`);
+                    const newUserResult = await getOrCreateUser(deposit.wallet_address);
+                    userResult = {
+                        userId: newUserResult.userId,
+                        userProfile: newUserResult.userProfile
+                    };
+                }
+                
+                if (userResult) {
+                    const userId = userResult.userId;
+                    const depositAmount = parseFloat(deposit.amount);
+                    
+                    // Update balance using RPC
+                    const { data: balanceResult, error: balanceError } = await supabaseService
+                        .rpc('update_user_balance', {
+                            p_user_id: userId,
+                            p_custodial_change: depositAmount,
+                            p_privy_change: 0,
+                            p_transaction_type: 'manual_pending_resolved',
+                            p_is_deposit: true,
+                            p_deposit_amount: depositAmount
+                        });
+
+                    if (!balanceError && balanceResult) {
+                        const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
+                        
+                        // Mark as resolved
+                        await supabaseService
+                            .from('pending_deposits')
+                            .update({ 
+                                status: 'resolved',
+                                resolved_at: new Date().toISOString(),
+                                resolved_user_id: userId,
+                                resolution_method: 'manual_admin_resolve'
+                            })
+                            .eq('id', deposit.id);
+
+                        // Broadcast update
+                        io.emit('custodialBalanceUpdate', {
+                            userId,
+                            custodialBalance: newCustodialBalance,
+                            depositAmount: depositAmount,
+                            transactionSignature: deposit.transaction_signature,
+                            timestamp: Date.now(),
+                            source: 'manual_pending_resolved',
+                            walletAddress: deposit.wallet_address,
+                            updateType: 'manual_deposit_resolved'
+                        });
+
+                        results.push({
+                            depositId: deposit.id,
+                            userId,
+                            walletAddress: deposit.wallet_address,
+                            amount: depositAmount,
+                            newBalance: newCustodialBalance,
+                            status: 'resolved'
+                        });
+
+                        resolvedCount++;
+                        console.log(`✅ Resolved: ${depositAmount} SOL for user ${userId}`);
+                    } else {
+                        results.push({
+                            depositId: deposit.id,
+                            walletAddress: deposit.wallet_address,
+                            amount: depositAmount,
+                            status: 'failed',
+                            error: balanceError?.message || 'Balance update failed'
+                        });
+                        failedCount++;
+                    }
+                }
+                
+            } catch (error) {
+                console.error(`❌ Error processing deposit ${deposit.id}:`, error);
+                failedCount++;
+            }
+        }
+
+        res.json({
+            success: true,
+            message: `Processed ${pendingDeposits.length} pending deposits`,
+            resolved: resolvedCount,
+            failed: failedCount,
+            results: results
+        });
+
+    } catch (error) {
+        console.error('❌ Manual resolve error:', error);
+        res.status(500).json({
+            error: 'Failed to resolve pending deposits',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+
+// Check pending deposits
+app.get('/api/admin/pending-deposits', async (req, res): Promise<void> => {
+    try {
+        const { data: pendingDeposits, error } = await supabaseService
+            .from('pending_deposits')
+            .select('*')
+            .order('detected_at', { ascending: false });
+
+        if (error) {
+            throw error;
+        }
+
+        const totalPending = pendingDeposits?.filter(d => d.status === 'pending').length || 0;
+        const totalResolved = pendingDeposits?.filter(d => d.status === 'resolved').length || 0;
+        const totalAmount = pendingDeposits?.reduce((sum, d) => sum + parseFloat(d.amount), 0) || 0;
+
+        res.json({
+            success: true,
+            summary: {
+                totalPending,
+                totalResolved,
+                totalDeposits: pendingDeposits?.length || 0,
+                totalAmount: totalAmount.toFixed(6)
+            },
+            deposits: pendingDeposits || []
+        });
+
+    } catch (error) {
+        console.error('❌ Pending deposits check error:', error);
+        res.status(500).json({
+            error: 'Failed to check pending deposits',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
 });
 
 // FIXED: Enhanced server startup sequence

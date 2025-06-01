@@ -52,23 +52,7 @@ export async function POST(request: NextRequest) {
     const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
     const HOUSE_WALLET_ADDRESS = process.env.HOUSE_WALLET_ADDRESS || 
                              process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS || 
-                             '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56'; // fallback
-
-     // In app/api/transfer/privy-to-custodial/route.ts
-console.log('🔍 Environment check:', {
-  HOUSE_WALLET_ADDRESS: process.env.HOUSE_WALLET_ADDRESS,
-  NEXT_PUBLIC_HOUSE_WALLET_ADDRESS: process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS,
-  NODE_ENV: process.env.NODE_ENV
-});
-
-if (!HOUSE_WALLET_ADDRESS) {
-  console.error('❌ Missing HOUSE_WALLET_ADDRESS environment variable');
-  console.error('Available env vars:', Object.keys(process.env).filter(key => key.includes('WALLET')));
-  return NextResponse.json(
-    { error: 'Server configuration error: Missing house wallet address' },
-    { status: 500 }
-  );
-}                        
+                             '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
 
     if (!SOLANA_RPC_URL) {
       console.error('❌ Missing SOLANA_RPC_URL environment variable');
@@ -98,9 +82,9 @@ if (!HOUSE_WALLET_ADDRESS) {
     const solanaConnection = new Connection(SOLANA_RPC_URL, 'confirmed');
     
     const body = await request.json();
-    const { userId, amount, signedTransaction, autoSign = true } = body;
+    const { userId, amount, signedTransaction, autoSign = true, walletAddress } = body;
     
-    console.log('📋 Transfer details:', { userId, amount, hasSignedTx: !!signedTransaction, autoSign });
+    console.log('📋 Transfer details:', { userId, amount, hasSignedTx: !!signedTransaction, autoSign, walletAddress });
     
     // Validate inputs
     if (!userId || typeof userId !== 'string') {
@@ -126,13 +110,42 @@ if (!HOUSE_WALLET_ADDRESS) {
     
     const transferId = `privy-to-custodial-${userId}-${Date.now()}`;
     
-    // Get user's Privy wallet information
-    const wallet = await privyWalletAPI.getPrivyWallet(userId);
+    // Get user's Privy wallet information - auto-register if not found
+    let wallet = await privyWalletAPI.getPrivyWallet(userId);
     if (!wallet) {
-      return NextResponse.json(
-        { error: 'Privy wallet not found. Please register your wallet first.' },
-        { status: 404 }
-      );
+      console.log(`🔄 Privy wallet not found for user ${userId}, auto-registering...`);
+      
+      let walletToRegister = walletAddress;
+      
+      // If wallet address not provided, try to extract from signed transaction
+      if (!walletToRegister && signedTransaction) {
+        try {
+          const transactionBuffer = Buffer.from(signedTransaction, 'base64');
+          const transaction = Transaction.from(transactionBuffer);
+          walletToRegister = transaction.feePayer?.toString();
+        } catch (parseError) {
+          console.error('❌ Failed to parse transaction for wallet address:', parseError);
+        }
+      }
+      
+      if (walletToRegister && isValidSolanaAddress(walletToRegister)) {
+        console.log(`🔄 Auto-registering Privy wallet: ${walletToRegister} for user ${userId}`);
+        wallet = await privyWalletAPI.registerPrivyWallet(userId, walletToRegister);
+        
+        if (!wallet) {
+          return NextResponse.json(
+            { error: 'Failed to register Privy wallet automatically' },
+            { status: 500 }
+          );
+        }
+        
+        console.log(`✅ Auto-registered Privy wallet for user ${userId}`);
+      } else {
+        return NextResponse.json(
+          { error: 'Could not determine valid wallet address for registration' },
+          { status: 400 }
+        );
+      }
     }
     
     // Update and check current balance

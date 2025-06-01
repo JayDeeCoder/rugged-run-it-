@@ -1854,6 +1854,39 @@ const autoTransferToGameBalance = useCallback(async (amount: number) => {
   
   // ADD THIS NEW FUNCTION:
 // CORRECTED EMERGENCY SYNC FUNCTION:
+// ADD THIS SIMPLER VERSION:
+const handleEmergencyBalanceSync = useCallback(async () => {
+  if (!userId) {
+    toast.error('User not available for sync');
+    return;
+  }
+  
+  toast.loading('Emergency sync...', { id: 'emergency-sync' });
+  
+  try {
+    // Simple API call without complex Promise handling
+    const response = await fetch(`/api/admin/force-refresh-user/${userId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress })
+    });
+    
+    if (response.ok) {
+      // Just trigger a simple refresh
+      setTimeout(() => {
+        refreshCustodialBalance();
+      }, 1000);
+      
+      toast.success('Emergency sync completed!', { id: 'emergency-sync' });
+    } else {
+      toast.error('Emergency sync failed', { id: 'emergency-sync' });
+    }
+    
+  } catch (error) {
+    console.error('Emergency sync error:', error);
+    toast.error('Emergency sync failed', { id: 'emergency-sync' });
+  }
+}, [userId, walletAddress, refreshCustodialBalance]);
  // Use forceRefresh in dependencies
 
   // Enhanced bet placement with stable dependencies
@@ -2486,6 +2519,13 @@ const autoTransferToGameBalance = useCallback(async (amount: number) => {
                 <span className="mr-1">🔄</span>
                 Refresh Balance
               </button>
+              <button
+  onClick={handleEmergencyBalanceSync}
+  className="px-3 py-2 text-sm rounded transition-colors bg-red-600 hover:bg-red-700 text-white flex items-center justify-center"
+>
+  <span className="mr-1">🚨</span>
+  Emergency
+</button>
               <button
                 onClick={() => {
                   console.log('🔄 User triggered emergency balance sync');

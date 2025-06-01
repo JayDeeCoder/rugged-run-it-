@@ -338,9 +338,6 @@ const handleBalanceRefreshResponse = (data: any) => {
       socket.on('custodialCashOutResult', handleCustodialCashoutResult);
       socket.on('pendingDepositResolved', handlePendingDepositResolved);
       // ADD these after your existing socket.on registrations:
-      socket.on('forceBalanceRefresh', handleForceBalanceRefresh);
-      socket.on('mobileBalanceSync', handleMobileBalanceSync);
-      socket.on('balanceRefreshResponse', handleBalanceRefreshResponse);
       
       return () => {
         console.log(`🔌 Cleaning up REAL-TIME custodial balance listeners for user: ${userId}`);
@@ -1857,88 +1854,7 @@ const autoTransferToGameBalance = useCallback(async (amount: number) => {
   
   // ADD THIS NEW FUNCTION:
 // CORRECTED EMERGENCY SYNC FUNCTION:
-const handleEmergencyBalanceSync = useCallback(async () => {
-  if (!userId) {
-    toast.error('User not available for sync');
-    return;
-  }
-  
-  toast.loading('Emergency sync in progress...', { id: 'emergency-sync' });
-  
-  try {
-    // Multiple sync strategies for maximum reliability
-    const syncPromises = [
-      // Strategy 1: Direct API call to force refresh endpoint
-      fetch(`/api/admin/force-refresh-user/${userId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress })
-      }).then(res => res.json()),
-      
-      // Strategy 2: Socket-based balance refresh request
-      new Promise((resolve) => {
-        const socket = (window as any).gameSocket;
-        if (socket) {
-          socket.emit('requestBalanceRefresh', {
-            userId: userId,
-            walletAddress: walletAddress
-          });
-          
-          socket.once('balanceRefreshResponse', (response: any) => {
-            resolve(response);
-          });
-          
-          // Timeout fallback
-          setTimeout(() => resolve({ success: false, error: 'Timeout' }), 5000);
-        } else {
-          resolve({ success: false, error: 'No socket' });
-        }
-      }),
-      
-      // Strategy 3: Direct balance API call and trigger refresh
-      fetch(`/api/custodial/balance/${userId}?emergency=true&force=true&t=${Date.now()}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data.custodialBalance !== undefined) {
-            // Trigger the hook's refresh instead of setting state directly
-            setTimeout(() => {
-              refreshCustodialBalance(); // Use your existing function
-            }, 100);
-            return { success: true, balance: parseFloat(data.custodialBalance) };
-          }
-          return { success: false, error: 'Invalid response' };
-        })
-    ];
-    
-    // Wait for all strategies to complete
-    const results = await Promise.allSettled(syncPromises);
-    
-    // Check if any succeeded
-    const successCount = results.filter(r => 
-      r.status === 'fulfilled' && r.value?.success
-    ).length;
-    
-    if (successCount > 0) {
-      // Also trigger regular refresh after a delay
-      setTimeout(() => {
-        refreshCustodialBalance(); // Use your existing function
-      }, 1500);
-      
-      toast.success(`Emergency sync completed! (${successCount}/3 methods succeeded)`, { 
-        id: 'emergency-sync',
-        duration: 5000 
-      });
-    } else {
-      toast.error('Emergency sync failed - please contact support', { 
-        id: 'emergency-sync' 
-      });
-    }
-    
-  } catch (error) {
-    console.error('Emergency sync error:', error);
-    toast.error('Emergency sync failed', { id: 'emergency-sync' });
-  }
-}, [userId, walletAddress, refreshCustodialBalance()]); // Use forceRefresh in dependencies
+ // Use forceRefresh in dependencies
 
   // Enhanced bet placement with stable dependencies
   const handleBuy = useCallback(async () => {

@@ -1,13 +1,32 @@
-// src/components/modals/WithdrawModal.tsx - Updated with Enhanced Balance Management
+// src/components/modals/WithdrawModal.tsx - ENHANCED VERSION WITH AUTO-SIGNED TRANSACTIONS
 import { FC, useState, useRef, useEffect, useCallback } from 'react';
-import { usePrivy } from '@privy-io/react-auth';
+import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
 import { useContext } from 'react';
 import useOutsideClick from '../../hooks/useOutsideClick';
-import { ArrowDownToLine, Wallet, Check, Loader, X, Copy, ExternalLink, ArrowLeftRight, RefreshCw } from 'lucide-react';
-import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { 
+  ArrowDownToLine, 
+  Wallet, 
+  Check, 
+  Loader, 
+  X, 
+  Copy, 
+  ExternalLink, 
+  ArrowLeftRight, 
+  RefreshCw,
+  ArrowUpRight,
+  Shield,
+  AlertTriangle,
+  TrendingUp,
+  Zap,
+  ChevronRight,
+  Send
+} from 'lucide-react';
+import { Connection, PublicKey, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js';
+import { toast } from 'react-hot-toast';
 
-// 🚩 ADD: Import feature flags
+// Import the updated transfer hook and feature flags
+import { usePrivyAutoTransfer } from '../../hooks/usePrivyAutoTransfer';
 import { 
   isCustodialOnlyMode, 
   shouldShowEmbeddedWalletUI, 
@@ -16,7 +35,6 @@ import {
   logFeatureFlags 
 } from '../../utils/featureFlags';
 
-// Define the TokenType enum locally
 enum TokenType {
   SOL = 'SOL',
   RUGGED = 'RUGGED'
@@ -30,52 +48,30 @@ interface WithdrawModalProps {
   balance: number;
   walletAddress: string;
   userId: string | null;
+  isMobile?: boolean;
 }
 
-// Tab types for different actions
-type ModalTab = 'withdraw' | 'transfer';
+type WithdrawStep = 'transfer' | 'withdraw';
 
-// Balance types
-interface BalanceInfo {
-  custodial: number;
-  embedded: number;
-  loading: boolean;
-}
-
-// 🔧 EXISTING: Your embedded wallet balance hook (unchanged)
+// Enhanced embedded wallet balance hook (matching the pattern from DepositModal)
 const useEmbeddedWalletBalance = (walletAddress: string) => {
   const [balance, setBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<number>(0);
+  const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastWalletRef = useRef<string>('');
+  const socketListenersRef = useRef<boolean>(false);
 
-  // 🚩 ADD: Only fetch if embedded wallets are enabled
   const embeddedEnabled = shouldShowEmbeddedWalletUI();
 
   const updateBalance = useCallback(async () => {
-    // 🚩 ADD: Skip if embedded wallets disabled
-    if (!embeddedEnabled) {
-      console.log('🚩 Embedded wallets disabled, skipping balance fetch');
-      setBalance(0);
-      return;
-    }
-
-    if (!walletAddress) {
-      console.log('🔍 WithdrawModal useEmbeddedWalletBalance: No wallet address provided');
-      return;
-    }
+    if (!embeddedEnabled || !walletAddress || loading) return;
     
-    console.log('🚀 WithdrawModal useEmbeddedWalletBalance: Starting balance fetch for:', walletAddress);
     setLoading(true);
     
     try {
       const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
       const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
-      
-      console.log('🔧 WithdrawModal useEmbeddedWalletBalance RPC config:', {
-        hasRpcUrl: !!rpcUrl,
-        hasApiKey: !!apiKey,
-        rpcUrl: rpcUrl?.substring(0, 50) + '...'
-      });
       
       if (!rpcUrl) {
         console.error('WithdrawModal: Missing NEXT_PUBLIC_SOLANA_RPC_URL environment variable');
@@ -83,14 +79,9 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
         return;
       }
       
-      const connectionConfig: any = {
-        commitment: 'confirmed',
-      };
-      
+      const connectionConfig: any = { commitment: 'confirmed' };
       if (apiKey) {
-        connectionConfig.httpHeaders = {
-          'x-api-key': apiKey
-        };
+        connectionConfig.httpHeaders = { 'x-api-key': apiKey };
       }
       
       const connection = new Connection(rpcUrl, connectionConfig);
@@ -98,35 +89,84 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
       const balanceResponse = await connection.getBalance(publicKey);
       const solBalance = balanceResponse / LAMPORTS_PER_SOL;
       
-      console.log(`✅ WithdrawModal useEmbeddedWalletBalance: Balance fetched and SETTING STATE: ${solBalance.toFixed(3)} SOL`);
       setBalance(solBalance);
       setLastUpdated(Date.now());
       
     } catch (error) {
-      console.error('❌ WithdrawModal useEmbeddedWalletBalance: Failed to fetch balance:', error);
-      setBalance(0);
+      console.error('❌ WithdrawModal: Failed to fetch embedded wallet balance:', error);
     } finally {
       setLoading(false);
     }
-  }, [walletAddress, embeddedEnabled]);
+  }, [walletAddress, loading, embeddedEnabled]);
+
+  const forceRefresh = useCallback(async () => {
+    if (!walletAddress || !embeddedEnabled) return;
+    await updateBalance();
+  }, [walletAddress, updateBalance, embeddedEnabled]);
 
   useEffect(() => {
-    if (walletAddress && embeddedEnabled) {
-      console.log('🔄 WithdrawModal useEmbeddedWalletBalance: useEffect triggered for wallet:', walletAddress);
+    if (walletAddress && embeddedEnabled && walletAddress !== lastWalletRef.current) {
+      lastWalletRef.current = walletAddress;
+      
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+      }
+      
       updateBalance();
-      const interval = setInterval(updateBalance, 30000);
-      return () => clearInterval(interval);
+      
+      updateIntervalRef.current = setInterval(() => {
+        if (!loading) {
+          updateBalance();
+        }
+      }, 30000);
+      
+      return () => {
+        if (updateIntervalRef.current) {
+          clearInterval(updateIntervalRef.current);
+        }
+      };
     } else if (!embeddedEnabled) {
-      // Reset balance when embedded wallets are disabled
       setBalance(0);
       setLoading(false);
     }
   }, [walletAddress, updateBalance, embeddedEnabled]);
 
-  return { balance, loading, lastUpdated, updateBalance };
+  // Socket listeners for real-time updates
+  useEffect(() => {
+    if (!walletAddress || socketListenersRef.current || !embeddedEnabled) return;
+
+    const socket = (window as any).gameSocket;
+    if (socket) {
+      socketListenersRef.current = true;
+      
+      const handleWalletBalanceUpdate = (data: any) => {
+        if (data.walletAddress === walletAddress) {
+          setBalance(parseFloat(data.balance) || 0);
+          setLastUpdated(Date.now());
+        }
+      };
+
+      const handleTransactionConfirmed = (data: any) => {
+        if (data.walletAddress === walletAddress) {
+          setTimeout(forceRefresh, 2000);
+        }
+      };
+  
+      socket.on('walletBalanceUpdate', handleWalletBalanceUpdate);
+      socket.on('transactionConfirmed', handleTransactionConfirmed);
+      
+      return () => {
+        socket.off('walletBalanceUpdate', handleWalletBalanceUpdate);
+        socket.off('transactionConfirmed', handleTransactionConfirmed);
+        socketListenersRef.current = false;
+      };
+    }
+  }, [walletAddress, forceRefresh, embeddedEnabled]);
+
+  return { balance, loading, lastUpdated, updateBalance, forceRefresh };
 };
 
-// 🔧 ENHANCED: Updated custodial balance hook with socket events and force refresh
+// Enhanced custodial balance hook (matching the pattern from DepositModal)
 const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -135,22 +175,15 @@ const useCustodialBalance = (userId: string) => {
   const lastUserIdRef = useRef<string>('');
   const socketListenersRef = useRef<boolean>(false);
 
-  // Create stable update function with useCallback
   const updateCustodialBalance = useCallback(async () => {
-    if (!userId) return;
-    
-    // Prevent multiple simultaneous requests
-    if (loading) return;
+    if (!userId || loading) return;
     
     setLoading(true);
     try {
-      console.log(`🔄 WithdrawModal: Fetching custodial balance for user ${userId}...`);
-      
-      const response = await fetch(`/api/custodial/balance/${userId}`);
+      const response = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}`);
       
       if (!response.ok) {
         if (response.status === 404) {
-          console.log(`👤 WithdrawModal: User ${userId} not found - balance remains 0`);
           setCustodialBalance(0);
           return;
         }
@@ -161,89 +194,70 @@ const useCustodialBalance = (userId: string) => {
       
       if (data.custodialBalance !== undefined) {
         const newBalance = parseFloat(data.custodialBalance) || 0;
-        console.log(`💰 WithdrawModal: Custodial balance updated: ${newBalance.toFixed(6)} SOL`);
         setCustodialBalance(newBalance);
         setLastUpdated(Date.now());
-      } else {
-        console.warn('WithdrawModal: Invalid response format:', data);
       }
     } catch (error) {
       console.error('❌ WithdrawModal: Failed to fetch custodial balance:', error);
-      // Don't reset balance on error, keep previous value
     } finally {
       setLoading(false);
     }
-  }, [userId, loading]); // Stable dependencies
+  }, [userId, loading]);
 
-  // 🔧 NEW: Force refresh function for immediate updates
-  // 🔧 NEW: Enhanced force refresh with cache busting and POST method
-const forceRefresh = useCallback(async () => {
-  if (!userId) return;
-  
-  console.log(`🔄 Force refreshing balance for ${userId}...`);
-  setLoading(true);
-  
-  try {
-    // Method 1: Try POST with refresh action first
-    const postResponse = await fetch(`/api/custodial/balance/${userId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'refresh' })
-    });
+  const forceRefresh = useCallback(async () => {
+    if (!userId) return;
     
-    if (postResponse.ok) {
-      const data = await postResponse.json();
-      if (data.custodialBalance !== undefined) {
-        const newBalance = parseFloat(data.custodialBalance) || 0;
-        console.log(`💰 Force refresh (POST): ${newBalance.toFixed(6)} SOL`);
-        setCustodialBalance(newBalance);
-        setLastUpdated(Date.now());
-        return;
+    setLoading(true);
+    
+    try {
+      const postResponse = await fetch(`/api/custodial/balance/${userId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'refresh', timestamp: Date.now() })
+      });
+      
+      if (postResponse.ok) {
+        const data = await postResponse.json();
+        if (data.custodialBalance !== undefined) {
+          const newBalance = parseFloat(data.custodialBalance) || 0;
+          setCustodialBalance(newBalance);
+          setLastUpdated(Date.now());
+          return;
+        }
       }
-    }
-    
-    // Method 2: Fallback to GET with cache busting
-    const getResponse = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}&refresh=true`);
-    
-    if (getResponse.ok) {
-      const data = await getResponse.json();
-      if (data.custodialBalance !== undefined) {
-        const newBalance = parseFloat(data.custodialBalance) || 0;
-        console.log(`💰 Force refresh (GET): ${newBalance.toFixed(6)} SOL`);
-        setCustodialBalance(newBalance);
-        setLastUpdated(Date.now());
+      
+      const getResponse = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}&refresh=true`);
+      
+      if (getResponse.ok) {
+        const data = await getResponse.json();
+        if (data.custodialBalance !== undefined) {
+          const newBalance = parseFloat(data.custodialBalance) || 0;
+          setCustodialBalance(newBalance);
+          setLastUpdated(Date.now());
+        }
       }
-    } else {
-      console.error('❌ Force refresh failed:', getResponse.status);
+    } catch (error) {
+      console.error('❌ WithdrawModal: Force refresh error:', error);
+    } finally {
+      setLoading(false);
     }
-    
-  } catch (error) {
-    console.error('❌ Force refresh error:', error);
-  } finally {
-    setLoading(false);
-  }
-}, [userId]);
+  }, [userId]);
 
   useEffect(() => {
-    // Only set up polling if userId changes
     if (userId && userId !== lastUserIdRef.current) {
-      console.log(`🎯 WithdrawModal: Setting up custodial balance polling for user: ${userId}`);
       lastUserIdRef.current = userId;
       
-      // Clear existing interval
       if (updateIntervalRef.current) {
         clearInterval(updateIntervalRef.current);
       }
       
-      // Initial fetch
       updateCustodialBalance();
       
-      // Set interval for periodic updates
       updateIntervalRef.current = setInterval(() => {
-        if (!loading) { // Only update if not currently loading
+        if (!loading) {
           updateCustodialBalance();
         }
-      }, 15000); // 15 seconds for faster updates
+      }, 15000);
       
       return () => {
         if (updateIntervalRef.current) {
@@ -253,57 +267,32 @@ const forceRefresh = useCallback(async () => {
     }
   }, [userId, updateCustodialBalance]);
 
-  // 🔧 NEW: Socket event listeners for real-time updates
+  // Socket event listeners for real-time updates
   useEffect(() => {
     if (!userId || socketListenersRef.current) return;
 
     const socket = (window as any).gameSocket;
     if (socket) {
-      console.log(`🔌 WithdrawModal: Setting up real-time balance listeners for user: ${userId}`);
       socketListenersRef.current = true;
       
       const handleCustodialBalanceUpdate = (data: any) => {
         if (data.userId === userId) {
-          console.log(`💰 WithdrawModal: Real-time custodial balance update: ${data.custodialBalance?.toFixed(6)} SOL`);
           setCustodialBalance(parseFloat(data.custodialBalance) || 0);
           setLastUpdated(Date.now());
         }
       };
 
-      const handleBalanceUpdate = (data: any) => {
-        if (data.userId === userId && data.type === 'custodial') {
-          console.log(`💰 WithdrawModal: Real-time balance update: ${data.balance?.toFixed(6)} SOL`);
-          setCustodialBalance(parseFloat(data.balance) || 0);
-          setLastUpdated(Date.now());
-        }
-      };
-
-      const handleDepositConfirmation = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`💰 WithdrawModal: Deposit confirmed, refreshing balance...`);
-          // Force refresh after deposit
-          setTimeout(forceRefresh, 1000);
-        }
-      };
-
       const handleWithdrawConfirmation = (data: any) => {
         if (data.userId === userId) {
-          console.log(`💰 WithdrawModal: Withdraw confirmed, refreshing balance...`);
-          // Force refresh after withdrawal
           setTimeout(forceRefresh, 1000);
         }
       };
   
       socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-      socket.on('balanceUpdate', handleBalanceUpdate);
-      socket.on('depositConfirmed', handleDepositConfirmation);
       socket.on('withdrawConfirmed', handleWithdrawConfirmation);
       
       return () => {
-        console.log(`🔌 WithdrawModal: Cleaning up balance listeners for user: ${userId}`);
         socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-        socket.off('balanceUpdate', handleBalanceUpdate);
-        socket.off('depositConfirmed', handleDepositConfirmation);
         socket.off('withdrawConfirmed', handleWithdrawConfirmation);
         socketListenersRef.current = false;
       };
@@ -313,7 +302,6 @@ const forceRefresh = useCallback(async () => {
   return { custodialBalance, loading, lastUpdated, updateCustodialBalance, forceRefresh };
 };
 
-
 const WithdrawModal: FC<WithdrawModalProps> = ({ 
   isOpen, 
   onClose, 
@@ -321,941 +309,1116 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   currentToken,
   balance,
   walletAddress,
-  userId
+  userId,
+  isMobile = false
 }) => {
-  // 🚩 ADD: Feature flag checks
+  // Feature flag checks
   const custodialOnlyMode = isCustodialOnlyMode();
   const showEmbeddedUI = shouldShowEmbeddedWalletUI();
   const walletMode = getWalletMode();
 
   // Privy wallet setup
   const { authenticated, user } = usePrivy();
+  const { wallets } = useSolanaWallets();
+  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   
-  // Your existing userId management (unchanged)
+  // Get the actual embedded wallet address from Privy
+  const actualEmbeddedWalletAddress = embeddedWallet?.address || walletAddress;
+  
+  // User management
   const [internalUserId, setInternalUserId] = useState<string | null>(userId);
   const [fetchingUserId, setFetchingUserId] = useState<boolean>(false);
   
+  const effectiveUserId = internalUserId || userId;
+  
+  // Balance hooks
+  const { 
+    balance: embeddedBalance, 
+    loading: embeddedLoading, 
+    forceRefresh: refreshEmbeddedBalance 
+  } = useEmbeddedWalletBalance(showEmbeddedUI ? actualEmbeddedWalletAddress : '');
+  
+  const { 
+    custodialBalance, 
+    loading: custodialLoading, 
+    forceRefresh: refreshCustodialBalance 
+  } = useCustodialBalance(effectiveUserId || '');
+  
+  // Enhanced transfer hook (same as TradingControls and DepositModal)
+  const { executeAutoTransfer, loading: transferLoading, error: transferError } = usePrivyAutoTransfer();
+  
+  // State management
+  const [activeStep, setActiveStep] = useState<WithdrawStep>('transfer');
+  const [transferAmount, setTransferAmount] = useState<string>('');
+  const [withdrawAmount, setWithdrawAmount] = useState<string>('');
+  const [destinationAddress, setDestinationAddress] = useState<string>('');
+  const [isWithdrawing, setIsWithdrawing] = useState<boolean>(false);
+  const [success, setSuccess] = useState<boolean>(false);
+  const [successMessage, setSuccessMessage] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
+  const [addressError, setAddressError] = useState<string | null>(null);
+  
+  // Transfer status tracking
+  const [transferStatus, setTransferStatus] = useState<string>('');
+  const [withdrawStatus, setWithdrawStatus] = useState<string>('');
+  
+  const modalRef = useRef<HTMLDivElement>(null);
+  
+  // Enhanced refresh function
+  const refreshAllBalances = useCallback(() => {
+    refreshCustodialBalance();
+    if (showEmbeddedUI) {
+      refreshEmbeddedBalance();
+    }
+  }, [refreshCustodialBalance, refreshEmbeddedBalance, showEmbeddedUI]);
+
+  // User initialization
   useEffect(() => {
-    if (authenticated && walletAddress && !userId && !fetchingUserId) {
+    if (authenticated && actualEmbeddedWalletAddress && !userId && !internalUserId && !fetchingUserId) {
       const fetchUserId = async () => {
         try {
           setFetchingUserId(true);
-          console.log('🔍 WithdrawModal: Fetching userId via API for walletAddress:', walletAddress);
           
           const response = await fetch('/api/users/get-or-create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ walletAddress })
+            body: JSON.stringify({ walletAddress: actualEmbeddedWalletAddress })
           });
           
           if (!response.ok) {
-            const errorText = await response.text();
-            console.error('❌ WithdrawModal: API error:', errorText);
             throw new Error(`API error: ${response.status}`);
           }
           
           const data = await response.json();
           if (data.user && data.user.id) {
             setInternalUserId(data.user.id);
-            console.log('✅ WithdrawModal: Got userId from API:', data.user.id);
-          } else {
-            console.error('❌ WithdrawModal: No user in API response:', data);
           }
         } catch (error) {
-          console.error('❌ WithdrawModal: Failed to fetch userId via API:', error);
+          console.error('❌ WithdrawModal: Failed to fetch userId:', error);
+          setError('Failed to initialize user account');
         } finally {
           setFetchingUserId(false);
         }
       };
       
       fetchUserId();
-    } else if (userId) {
-      setInternalUserId(userId);
-      console.log('✅ WithdrawModal: Using provided userId:', userId);
     }
-  }, [authenticated, walletAddress, userId, fetchingUserId]);
+  }, [authenticated, actualEmbeddedWalletAddress, userId, internalUserId, fetchingUserId]);
 
-  const retryGetUserId = useCallback(async () => {
-    if (!walletAddress || fetchingUserId) return;
+  // Step 1: Transfer from custodial to embedded using the same method as DepositModal
+  const handleTransferToEmbedded = useCallback(async () => {
+    if (!embeddedWallet || !actualEmbeddedWalletAddress || !effectiveUserId) {
+      toast.error('Wallet not ready for transfer');
+      return;
+    }
+
+    const amount = parseFloat(transferAmount);
+    if (!amount || amount <= 0 || amount > custodialBalance) {
+      setError(`Invalid amount. Available: ${custodialBalance.toFixed(3)} SOL`);
+      return;
+    }
+
+    if (amount < 0.001) {
+      setError('Minimum transfer amount is 0.001 SOL');
+      return;
+    }
+
+    console.log('🚀 WithdrawModal: Starting transfer from custodial to embedded');
+    
+    setError(null);
+    setTransferStatus('Preparing transfer...');
     
     try {
-      setFetchingUserId(true);
-      console.log('🔄 WithdrawModal: Manual retry fetching userId via API for:', walletAddress);
-      
-      const response = await fetch('/api/users/get-or-create', {
+      // This is actually a reverse transfer - from custodial TO embedded
+      // We need to use the custodial withdraw API to move funds to the embedded wallet
+      const response = await fetch('/api/custodial/withdraw-to-embedded', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress })
+        body: JSON.stringify({
+          userId: effectiveUserId,
+          amount: amount,
+          embeddedWalletAddress: actualEmbeddedWalletAddress
+        })
       });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ WithdrawModal: Retry API error:', errorText);
-        throw new Error(`API error: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      if (data.user && data.user.id) {
-        setInternalUserId(data.user.id);
-        console.log('✅ WithdrawModal: Retry got userId from API:', data.user.id);
-      } else {
-        console.error('❌ WithdrawModal: Retry - No user in API response:', data);
-      }
-    } catch (error) {
-      console.error('❌ WithdrawModal: Retry failed to fetch userId via API:', error);
-    } finally {
-      setFetchingUserId(false);
-    }
-  }, [walletAddress, fetchingUserId]);
-  
-  const effectiveUserId = internalUserId || userId;
-  
-  // 🔧 UPDATED: Conditional hook usage based on feature flags
-  const { 
-    balance: embeddedBalance, 
-    loading: embeddedLoading, 
-    updateBalance: updateEmbeddedBalance 
-  } = useEmbeddedWalletBalance(showEmbeddedUI ? walletAddress : '');
-  
-  const { 
-    custodialBalance, 
-    loading: custodialLoading, 
-    updateCustodialBalance,
-    forceRefresh: forceRefreshCustodial 
-  } = useCustodialBalance(effectiveUserId || '');
-  
-  // 🚩 UPDATE: Tab state - default to withdraw, hide transfer in custodial-only mode
-  const [activeTab, setActiveTab] = useState<ModalTab>('withdraw');
-  
-  // Your existing form states (unchanged)
-  const [amount, setAmount] = useState<string>('');
-  const [destinationAddress, setDestinationAddress] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<boolean>(false);
-  const [addressError, setAddressError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string>('');
-  
-  // 🚩 UPDATE: Transfer states - only used if not custodial-only
-  const [transferDirection, setTransferDirection] = useState<'custodial-to-embedded' | 'embedded-to-custodial'>('custodial-to-embedded');
-  const [withdrawSource, setWithdrawSource] = useState<'custodial' | 'embedded'>(
-    custodialOnlyMode ? 'custodial' : 'custodial'
-  );
-  
-  const modalRef = useRef<HTMLDivElement>(null);
-  
-  // 🔧 UPDATED: Combined balances with conditional loading
-  const balances = {
-    custodial: custodialBalance,
-    embedded: showEmbeddedUI ? embeddedBalance : 0,
-    loading: custodialLoading || (showEmbeddedUI && embeddedLoading)
-  };
-  
-  // 🔧 UPDATED: Enhanced refresh function using force refresh
-  const refreshBalances = useCallback(() => {
-    console.log('🔄 WithdrawModal: Manual balance refresh triggered');
-    
-    // Use force refresh for immediate updates
-    forceRefreshCustodial();
-    
-    if (showEmbeddedUI) {
-      updateEmbeddedBalance();
-    }
-  }, [forceRefreshCustodial, updateEmbeddedBalance, showEmbeddedUI]);
 
-  // Your existing validation and handler functions (mostly unchanged)
-  const validateAddress = (address: string): boolean => {
-    const isValidFormat = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Transfer failed');
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        setTransferStatus('Transfer completed!');
+        toast.success(`Successfully moved ${amount} SOL to embedded wallet!`);
+        
+        // Refresh balances
+        setTimeout(() => {
+          refreshAllBalances();
+        }, 1000);
+        
+        // Move to next step
+        setActiveStep('withdraw');
+        setTransferStatus('');
+        
+      } else {
+        throw new Error(result.error || 'Transfer failed');
+      }
+      
+    } catch (error) {
+      console.error('❌ WithdrawModal: Transfer error:', error);
+      
+      let errorMessage = 'Transfer failed';
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
+      setError(errorMessage);
+      setTransferStatus('');
+    }
+  }, [
+    embeddedWallet, 
+    actualEmbeddedWalletAddress, 
+    effectiveUserId, 
+    transferAmount, 
+    custodialBalance,
+    refreshAllBalances
+  ]);
+
+  // Step 2: Auto-signed withdrawal from embedded wallet to external address
+  const handleEmbeddedWithdraw = useCallback(async () => {
+    if (!embeddedWallet || !actualEmbeddedWalletAddress || !destinationAddress) {
+      toast.error('Missing required information for withdrawal');
+      return;
+    }
+
+    // Validate destination address
+    try {
+      new PublicKey(destinationAddress);
+    } catch (error) {
+      setAddressError('Invalid Solana address');
+      return;
+    }
+
+    const amount = parseFloat(withdrawAmount);
+    if (!amount || amount <= 0 || amount > embeddedBalance) {
+      setError(`Invalid amount. Available: ${embeddedBalance.toFixed(6)} SOL`);
+      return;
+    }
+
+    if (amount < 0.001) {
+      setError('Minimum withdrawal amount is 0.001 SOL');
+      return;
+    }
+
+    console.log('🚀 WithdrawModal: Starting auto-signed withdrawal from embedded wallet');
     
-    if (!address) {
-      setAddressError('Destination address is required');
-      return false;
-    } else if (!isValidFormat) {
+    setIsWithdrawing(true);
+    setError(null);
+    setAddressError(null);
+    
+    const withdrawToastId = `withdraw-${Date.now()}`;
+    
+    try {
+      // Step 1: Prepare transaction
+      setWithdrawStatus('Preparing withdrawal...');
+      toast.loading('Preparing withdrawal transaction...', { id: withdrawToastId });
+      
+      const connection = new Connection(
+        process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVzzNb_M2I0WQ0b85sYoNEYx'
+      );
+      
+      const fromPubkey = new PublicKey(actualEmbeddedWalletAddress);
+      const toPubkey = new PublicKey(destinationAddress);
+      const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
+      
+      // Check balance on blockchain
+      const actualBalance = await connection.getBalance(fromPubkey);
+      const actualSOL = actualBalance / LAMPORTS_PER_SOL;
+      
+      if (actualSOL < amount) {
+        throw new Error(`Insufficient balance on blockchain. Available: ${actualSOL.toFixed(6)} SOL`);
+      }
+      
+      // Step 2: Get latest blockhash
+      setWithdrawStatus('Getting network information...');
+      toast.loading('Getting network info...', { id: withdrawToastId });
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      
+      const transaction = new Transaction({
+        recentBlockhash: blockhash,
+        feePayer: fromPubkey
+      }).add(
+        SystemProgram.transfer({
+          fromPubkey,
+          toPubkey,
+          lamports
+        })
+      );
+      
+      // Step 3: Auto-sign and send transaction
+      setWithdrawStatus('Signing and sending transaction...');
+      toast.loading('Signing and sending transaction...', { id: withdrawToastId });
+      const signature = await embeddedWallet.sendTransaction(transaction, connection);
+      console.log('✅ WithdrawModal: Transaction sent with signature:', signature);
+      
+      // Step 4: Wait for confirmation
+      setWithdrawStatus('Waiting for confirmation...');
+      toast.loading('Waiting for blockchain confirmation...', { id: withdrawToastId });
+      const confirmation = await connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight
+      }, 'confirmed');
+      
+      if (confirmation.value.err) {
+        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      }
+      
+      console.log('✅ WithdrawModal: Transaction confirmed on blockchain');
+      
+      // Step 5: Success!
+      setWithdrawStatus('Withdrawal completed!');
+      toast.success(`Successfully withdrew ${amount} SOL!`, { id: withdrawToastId });
+      
+      setSuccess(true);
+      setSuccessMessage(`Successfully withdrew ${amount} SOL to ${destinationAddress.slice(0, 8)}...${destinationAddress.slice(-8)}`);
+      
+      // Refresh embedded wallet balance
+      setTimeout(() => {
+        refreshEmbeddedBalance();
+      }, 2000);
+      
+      if (onSuccess) onSuccess();
+      
+    } catch (error) {
+      console.error('❌ WithdrawModal: Withdrawal error:', error);
+      
+      let errorMessage = 'Withdrawal failed';
+      if (error instanceof Error) {
+        if (error.message.includes('User rejected') || error.message.includes('rejected')) {
+          errorMessage = 'Withdrawal cancelled by user';
+        } else if (error.message.includes('insufficient funds') || error.message.includes('Insufficient balance')) {
+          errorMessage = 'Insufficient SOL for withdrawal + network fees';
+        } else if (error.message.includes('Transaction failed')) {
+          errorMessage = 'Blockchain transaction failed';
+        } else if (error.message.includes('timeout')) {
+          errorMessage = 'Withdrawal timed out - please try again';
+        } else {
+          errorMessage = `Withdrawal failed: ${error.message}`;
+        }
+      }
+      
+      setError(errorMessage);
+      toast.error(errorMessage, { id: withdrawToastId });
+    } finally {
+      setIsWithdrawing(false);
+      setWithdrawStatus('');
+    }
+  }, [
+    embeddedWallet, 
+    actualEmbeddedWalletAddress, 
+    destinationAddress, 
+    withdrawAmount, 
+    embeddedBalance,
+    onSuccess,
+    refreshEmbeddedBalance
+  ]);
+
+  // Quick amount handlers
+  const setQuickTransferAmount = (amt: number) => {
+    setTransferAmount(amt.toString());
+    setError(null);
+  };
+
+  const setMaxTransferAmount = () => {
+    if (custodialBalance > 0) {
+      const maxAmount = Math.max(0, custodialBalance - 0.001);
+      setTransferAmount(maxAmount.toFixed(6));
+      setError(null);
+    }
+  };
+
+  const setQuickWithdrawAmount = (amt: number) => {
+    setWithdrawAmount(amt.toString());
+    setError(null);
+  };
+
+  const setMaxWithdrawAmount = () => {
+    if (embeddedBalance > 0) {
+      const maxAmount = Math.max(0, embeddedBalance - 0.001); // Reserve for fees
+      setWithdrawAmount(maxAmount.toFixed(6));
+      setError(null);
+    }
+  };
+
+  // Handle amount changes
+  const handleTransferAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (/^(\d+)?(\.\d{0,6})?$/.test(value) || value === '') {
+      setTransferAmount(value);
+      setError(null);
+    }
+  };
+
+  const handleWithdrawAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (/^(\d+)?(\.\d{0,6})?$/.test(value) || value === '') {
+      setWithdrawAmount(value);
+      setError(null);
+    }
+  };
+
+  // Address validation
+  const validateAddress = (address: string): boolean => {
+    try {
+      new PublicKey(address);
+      setAddressError(null);
+      return true;
+    } catch (error) {
       setAddressError('Please enter a valid Solana address');
       return false;
     }
-    
-    setAddressError(null);
-    return true;
   };
-  
-  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    if (/^(\d+)?(\.\d{0,6})?$/.test(value) || value === '') {
-      setAmount(value);
-    }
-  };
-  
-  const handleSetMaxAmount = () => {
-    let maxBalance = 0;
-    
-    if (activeTab === 'withdraw') {
-      if (custodialOnlyMode) {
-        maxBalance = balances.custodial;
-      } else {
-        maxBalance = withdrawSource === 'custodial' ? balances.custodial : balances.embedded;
-      }
-    } else {
-      maxBalance = transferDirection === 'custodial-to-embedded' ? balances.custodial : balances.embedded;
-    }
-    
-    if (maxBalance > 0) {
-      const maxAmount = Math.max(0, maxBalance - 0.001);
-      setAmount(maxAmount.toFixed(6));
-    }
-  };
-  
-  // 🔧 UPDATED: Enhanced withdraw handler
-  const handleWithdraw = async () => {
-    try {
-      setError(null);
-      
-      if (!effectiveUserId) {
-        setError('User not initialized. Please wait a moment and try again.');
-        console.error('❌ Withdraw failed: No userId available');
-        return;
-      }
-      
-      if (!amount || parseFloat(amount) <= 0) {
-        setError('Please enter a valid amount');
-        return;
-      }
-      
-      if (!validateAddress(destinationAddress)) {
-        return;
-      }
-      
-      const withdrawAmount = parseFloat(amount);
-      
-      // 🚩 UPDATE: Determine source based on mode
-      let sourceBalance: number;
-      let actualWithdrawSource: 'custodial' | 'embedded';
-      
-      if (custodialOnlyMode) {
-        sourceBalance = balances.custodial;
-        actualWithdrawSource = 'custodial';
-      } else {
-        sourceBalance = withdrawSource === 'custodial' ? balances.custodial : balances.embedded;
-        actualWithdrawSource = withdrawSource;
-      }
-      
-      if (withdrawAmount > sourceBalance) {
-        setError('Insufficient balance');
-        return;
-      }
-      
-      setIsLoading(true);
-      
-      if (actualWithdrawSource === 'custodial') {
-        console.log('🔄 Withdrawing from custodial balance:', { userId: effectiveUserId, amount: withdrawAmount, destinationAddress });
-        
-        // 🚩 UPDATE: Use simple custodial withdraw for custodial-only mode
-        const endpoint = custodialOnlyMode ? '/api/custodial/simple-withdraw' : '/api/custodial/withdraw';
-        
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: effectiveUserId,
-            amount: withdrawAmount,
-            destinationAddress
-          })
-        });
-        
-        console.log('📡 Custodial withdraw response status:', response.status);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('❌ Custodial withdraw API error:', errorText);
-          throw new Error(`Withdrawal failed: ${response.status} ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        console.log('📡 Custodial withdraw result:', result);
-        
-        if (result.success) {
-          setSuccess(true);
-          setSuccessMessage(`Successfully withdrew ${withdrawAmount} SOL from ${custodialOnlyMode ? 'game balance' : 'custodial balance'}`);
-          
-          // 🔧 ENHANCED: Immediate balance refresh after successful withdrawal
-          setTimeout(() => {
-            refreshBalances();
-          }, 500);
-          
-          if (onSuccess) onSuccess();
-        } else {
-          throw new Error(result.error || 'Withdrawal failed');
-        }
-      } else {
-        // Only available in hybrid mode
-        console.log('🔄 Withdrawing from embedded wallet:', { userId: effectiveUserId, walletAddress, amount: withdrawAmount, destinationAddress });
-        
-        const response = await fetch('/api/privy/withdraw', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: effectiveUserId,
-            walletAddress,
-            amount: withdrawAmount,
-            destinationAddress
-          })
-        });
-        
-        console.log('📡 Privy withdraw response status:', response.status);
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('❌ Privy withdraw API error:', errorText);
-          throw new Error(`Withdrawal failed: ${response.status} ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        console.log('📡 Privy withdraw result:', result);
-        
-        if (result.success) {
-          setSuccess(true);
-          setSuccessMessage(`Successfully withdrew ${withdrawAmount} SOL from embedded wallet`);
-          
-          // 🔧 ENHANCED: Immediate balance refresh after successful withdrawal
-          setTimeout(() => {
-            refreshBalances();
-          }, 500);
-          
-          if (onSuccess) onSuccess();
-        } else {
-          throw new Error(result.error || 'Withdrawal failed');
-        }
-      }
-      
-    } catch (err) {
-      console.error('❌ Withdraw error:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Withdrawal failed';
-      setError(errorMessage);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  
-  // Your existing transfer handler (unchanged but only used if not custodial-only)
-  const handleTransfer = async () => {
-    if (custodialOnlyMode) {
-      setError('Transfers are not available in custodial-only mode');
-      return;
-    }
-    
-    // ... rest of your existing transfer logic unchanged
-    try {
-      setError(null);
-      
-      if (!effectiveUserId) {
-        setError('User not initialized. Please wait a moment and try again.');
-        console.error('❌ Transfer failed: No userId available');
-        return;
-      }
-      
-      if (!amount || parseFloat(amount) <= 0) {
-        setError('Please enter a valid amount');
-        return;
-      }
-      
-      const transferAmount = parseFloat(amount);
-      const sourceBalance = transferDirection === 'custodial-to-embedded' ? balances.custodial : balances.embedded;
-      
-      if (transferAmount > sourceBalance) {
-        setError('Insufficient balance');
-        return;
-      }
-      
-      setIsLoading(true);
-      
-      if (transferDirection === 'custodial-to-embedded') {
-        console.log('🔄 Transferring custodial to embedded:', { userId: effectiveUserId, amount: transferAmount });
-        
-        const response = await fetch('/api/transfer/custodial-to-privy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: effectiveUserId,
-            amount: transferAmount
-          })
-        });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('❌ Custodial to embedded API error:', errorText);
-          throw new Error(`Transfer failed: ${response.status} ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        
-        if (result.success) {
-          setSuccess(true);
-          setSuccessMessage(`Successfully transferred ${transferAmount} SOL to embedded wallet`);
-          
-          // 🔧 ENHANCED: Immediate balance refresh after successful transfer
-          setTimeout(() => {
-            refreshBalances();
-          }, 500);
-          
-          if (onSuccess) onSuccess();
-        } else {
-          throw new Error(result.error || 'Transfer failed');
-        }
-      } else {
-        console.log('🔄 Transferring embedded to custodial:', { userId: effectiveUserId, amount: transferAmount });
-        
-        const response = await fetch('/api/transfer/privy-to-custodial', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: effectiveUserId,
-            amount: transferAmount
-          })
-        });
-        
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Transfer failed: ${response.status} ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        
-        if (result.success) {
-          setSuccess(true);
-          setSuccessMessage(`Successfully transferred ${transferAmount} SOL to game balance`);
-          
-          // 🔧 ENHANCED: Immediate balance refresh after successful transfer
-          setTimeout(() => {
-            refreshBalances();
-          }, 500);
-          
-          if (onSuccess) onSuccess();
-        } else {
-          throw new Error(result.error || 'Transfer failed');
-        }
-      }
-      
-    } catch (err) {
-      console.error('❌ Transfer error:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Transfer failed';
-      setError(errorMessage);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  
+
   // Reset state when modal opens/closes
   useEffect(() => {
     if (isOpen) {
-      console.log('🚀 WithdrawModal: Modal opened, resetting state and refreshing balances');
-      setAmount('');
+      setTransferAmount('');
+      setWithdrawAmount('');
       setDestinationAddress('');
       setError(null);
-      setSuccess(false);
       setAddressError(null);
+      setSuccess(false);
       setSuccessMessage('');
-      setActiveTab('withdraw');
-      
-      // 🚩 UPDATE: Reset withdraw source for custodial-only mode
-      if (custodialOnlyMode) {
-        setWithdrawSource('custodial');
-      }
+      setActiveStep('transfer');
+      setTransferStatus('');
+      setWithdrawStatus('');
       
       setTimeout(() => {
-        refreshBalances();
+        refreshAllBalances();
       }, 500);
     }
-  }, [isOpen, refreshBalances, custodialOnlyMode]);
-  
-  // 🔧 NEW: Socket listeners for withdrawal and transfer confirmations
-  useEffect(() => {
-    const socket = (window as any).gameSocket;
-    if (socket && effectiveUserId) {
-      console.log(`🔌 WithdrawModal: Setting up transaction listeners for user: ${effectiveUserId}`);
-      
-      const handleWithdrawConfirmed = (data: any) => {
-        if (data.userId === effectiveUserId) {
-          console.log(`💸 WithdrawModal: Withdraw confirmed for ${effectiveUserId}, refreshing balances...`);
-          setTimeout(refreshBalances, 1000);
-        }
-      };
+  }, [isOpen, refreshAllBalances]);
 
-      const handleTransferConfirmed = (data: any) => {
-        if (data.userId === effectiveUserId) {
-          console.log(`🔄 WithdrawModal: Transfer confirmed for ${effectiveUserId}, refreshing balances...`);
-          setTimeout(refreshBalances, 1000);
-        }
-      };
-
-      const handleTransactionConfirmed = (data: any) => {
-        if (data.walletAddress === walletAddress || data.userId === effectiveUserId) {
-          console.log(`🔗 WithdrawModal: Transaction confirmed, refreshing balances...`);
-          setTimeout(refreshBalances, 2000);
-        }
-      };
-
-      socket.on('withdrawConfirmed', handleWithdrawConfirmed);
-      socket.on('transferConfirmed', handleTransferConfirmed);
-      socket.on('transactionConfirmed', handleTransactionConfirmed);
-      
-      return () => {
-        console.log(`🔌 WithdrawModal: Cleaning up transaction listeners for user: ${effectiveUserId}`);
-        socket.off('withdrawConfirmed', handleWithdrawConfirmed);
-        socket.off('transferConfirmed', handleTransferConfirmed);
-        socket.off('transactionConfirmed', handleTransactionConfirmed);
-      };
-    }
-  }, [effectiveUserId, walletAddress, refreshBalances]);
-
-  // 🚩 ADD: Log feature flags and balances
-  useEffect(() => {
-    logFeatureFlags();
-    console.log('📊 WithdrawModal: Balance state updated:', {
-      custodial: custodialBalance.toFixed(6),
-      embedded: embeddedBalance.toFixed(6),
-      custodialLoading,
-      embeddedLoading,
-      walletMode,
-      custodialOnlyMode,
-      showEmbeddedUI,
-      walletAddress: walletAddress?.slice(0, 8) + '...' + walletAddress?.slice(-4),
-      propUserId: userId,
-      effectiveUserId: effectiveUserId
-    });
-  }, [custodialBalance, embeddedBalance, custodialLoading, embeddedLoading, walletAddress, userId, effectiveUserId, walletMode, custodialOnlyMode, showEmbeddedUI]);
-  
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
-    if (isOpen && !isLoading) onClose();
+    if (isOpen && !transferLoading && !isWithdrawing) onClose();
   });
   
   if (!isOpen) return null;
-  
+
   const tokenSymbol = currentToken;
-  
+  const quickAmounts = [0.01, 0.05, 0.1, 0.5];
+
+  // Mobile Layout
+  if (isMobile) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-70 flex items-end justify-center z-50">
+        <div 
+          ref={modalRef} 
+          className="bg-[#0d0d0f] border border-gray-800 rounded-t-2xl w-full max-h-[90vh] overflow-y-auto"
+        >
+          {/* Mobile Header */}
+          <div className="flex justify-between items-center p-4 border-b border-gray-800 sticky top-0 bg-[#0d0d0f]">
+            <h2 className="text-lg font-bold text-white flex items-center">
+              <ArrowUpRight size={18} className="mr-2" />
+              Withdraw {tokenSymbol}
+            </h2>
+            <button
+              onClick={onClose}
+              disabled={transferLoading || isWithdrawing}
+              className="text-gray-400 hover:text-white transition-colors p-1"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          
+          <div className="p-4">
+            {success ? (
+              <div className="text-center py-8">
+                <div className="flex justify-center mb-4">
+                  <div className="w-16 h-16 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
+                    <Check size={32} className="text-green-500" />
+                  </div>
+                </div>
+                <h3 className="text-xl font-bold text-white mb-2">Withdrawal Successful!</h3>
+                <p className="text-gray-400 mb-6 text-sm">{successMessage}</p>
+                <button
+                  onClick={onClose}
+                  className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition-colors w-full"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Enhanced Balance Display */}
+                <div className="bg-gradient-to-r from-purple-900 to-blue-900 bg-opacity-50 rounded-xl p-4 mb-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="text-gray-300 text-sm">Your Balances</span>
+                    <button 
+                      onClick={refreshAllBalances}
+                      disabled={custodialLoading || embeddedLoading}
+                      className="text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-1 text-sm"
+                    >
+                      <RefreshCw size={14} className={(custodialLoading || embeddedLoading) ? 'animate-spin' : ''} />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div className="bg-green-900 bg-opacity-30 rounded-lg p-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-green-400 text-sm flex items-center">
+                          🎮 Game Balance
+                        </span>
+                        <span className="text-white font-bold">
+                          {custodialLoading ? (
+                            <span className="flex items-center">
+                              <Loader size={12} className="animate-spin mr-1" />
+                              Loading...
+                            </span>
+                          ) : (
+                            `${custodialBalance.toFixed(6)} SOL`
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="bg-purple-900 bg-opacity-30 rounded-lg p-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-purple-400 text-sm flex items-center">
+                          💼 Embedded Wallet
+                        </span>
+                        <span className="text-white font-bold">
+                          {embeddedLoading ? (
+                            <span className="flex items-center">
+                              <Loader size={12} className="animate-spin mr-1" />
+                              Loading...
+                            </span>
+                          ) : (
+                            `${embeddedBalance.toFixed(6)} SOL`
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Withdrawal Flow Steps */}
+                <div className="bg-blue-900 bg-opacity-20 border border-blue-700 rounded-xl p-4 mb-4">
+                  <div className="flex items-center mb-2">
+                    <TrendingUp size={16} className="mr-2 text-blue-400" />
+                    <div className="font-medium text-blue-300">Withdrawal Flow</div>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <div className={`flex items-center ${activeStep === 'transfer' ? 'text-blue-300' : 'text-gray-500'}`}>
+                      <span className="mr-1">🎮</span>
+                      Game Balance
+                    </div>
+                    <ChevronRight size={14} className="text-gray-400" />
+                    <div className={`flex items-center ${activeStep === 'withdraw' || embeddedBalance > 0.001 ? 'text-purple-300' : 'text-gray-500'}`}>
+                      <span className="mr-1">💼</span>
+                      Embedded Wallet
+                    </div>
+                    <ChevronRight size={14} className="text-gray-400" />
+                    <div className="flex items-center text-orange-300">
+                      <span className="mr-1">🌐</span>
+                      External Wallet
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step Content */}
+                {activeStep === 'transfer' ? (
+                  <div className="space-y-4">
+                    {/* Step 1: Transfer to Embedded */}
+                    <div className="bg-gradient-to-r from-green-900 to-purple-900 bg-opacity-30 border border-green-700 text-green-300 p-4 rounded-xl">
+                      <div className="flex items-center mb-2">
+                        <Zap size={20} className="mr-2 text-yellow-400" />
+                        <div className="font-medium">Step 1: Move to Embedded Wallet</div>
+                      </div>
+                      <div className="text-sm opacity-90">
+                        Transfer SOL from your game balance to your embedded wallet for withdrawal.
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2 font-medium">Transfer Amount (SOL)</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={transferAmount}
+                          onChange={handleTransferAmountChange}
+                          placeholder="0.000"
+                          className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 pr-16 text-white placeholder-gray-500 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-20 transition-all"
+                        />
+                        <button
+                          onClick={setMaxTransferAmount}
+                          className="absolute right-3 top-1/2 transform -translate-y-1/2 text-green-400 text-sm hover:text-green-300 font-medium"
+                        >
+                          MAX
+                        </button>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-2">
+                        Available: {custodialBalance.toFixed(6)} SOL
+                      </div>
+                    </div>
+
+                    {/* Quick Transfer Amounts */}
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2 font-medium">Quick Amounts:</label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {quickAmounts.map((amt) => (
+                          <button
+                            key={amt}
+                            onClick={() => setQuickTransferAmount(amt)}
+                            disabled={amt > custodialBalance}
+                            className={`py-2 px-2 text-xs rounded-lg transition-all font-medium ${
+                              parseFloat(transferAmount) === amt
+                                ? 'bg-gradient-to-r from-green-600 to-purple-600 text-white shadow-lg'
+                                : amt > custodialBalance
+                                ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            }`}
+                          >
+                            {amt} SOL
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Transfer Status */}
+                    {transferStatus && (
+                      <div className="bg-blue-900 bg-opacity-30 border border-blue-800 text-blue-400 p-3 rounded-lg">
+                        <div className="flex items-center">
+                          <Loader size={16} className="animate-spin mr-2" />
+                          <span className="text-sm">{transferStatus}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Transfer Button */}
+                    <button
+                      onClick={handleTransferToEmbedded}
+                      disabled={transferLoading || !transferAmount || parseFloat(transferAmount) <= 0 || parseFloat(transferAmount) > custodialBalance}
+                      className="w-full bg-gradient-to-r from-green-600 to-purple-600 hover:from-green-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white py-4 px-4 rounded-xl transition-all flex items-center justify-center font-bold shadow-lg"
+                    >
+                      {transferLoading ? (
+                        <>
+                          <Loader size={20} className="animate-spin mr-2" />
+                          <span>Processing Transfer...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowLeftRight size={20} className="mr-2" />
+                          <span>Transfer {transferAmount || '0'} SOL to Embedded Wallet</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Skip to Step 2 if embedded wallet has balance */}
+                    {embeddedBalance > 0.001 && (
+                      <button
+                        onClick={() => setActiveStep('withdraw')}
+                        className="w-full bg-gray-700 hover:bg-gray-600 text-white py-3 px-4 rounded-xl transition-all flex items-center justify-center font-medium"
+                      >
+                        <span>Skip - Use Existing Embedded Balance ({embeddedBalance.toFixed(3)} SOL)</span>
+                        <ChevronRight size={16} className="ml-2" />
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Step 2: Withdraw from Embedded */}
+                    <div className="bg-gradient-to-r from-purple-900 to-orange-900 bg-opacity-30 border border-purple-700 text-purple-300 p-4 rounded-xl">
+                      <div className="flex items-center mb-2">
+                        <Send size={20} className="mr-2 text-orange-400" />
+                        <div className="font-medium">Step 2: Withdraw to External Wallet</div>
+                      </div>
+                      <div className="text-sm opacity-90">
+                        Send SOL from your embedded wallet to any external Solana address.
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2 font-medium">Withdrawal Amount (SOL)</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={withdrawAmount}
+                          onChange={handleWithdrawAmountChange}
+                          placeholder="0.000"
+                          className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 pr-16 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-20 transition-all"
+                        />
+                        <button
+                          onClick={setMaxWithdrawAmount}
+                          className="absolute right-3 top-1/2 transform -translate-y-1/2 text-purple-400 text-sm hover:text-purple-300 font-medium"
+                        >
+                          MAX
+                        </button>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-2">
+                        Available: {embeddedBalance.toFixed(6)} SOL
+                      </div>
+                    </div>
+
+                    {/* Quick Withdraw Amounts */}
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2 font-medium">Quick Amounts:</label>
+                      <div className="grid grid-cols-4 gap-2">
+                        {quickAmounts.map((amt) => (
+                          <button
+                            key={amt}
+                            onClick={() => setQuickWithdrawAmount(amt)}
+                            disabled={amt > embeddedBalance}
+                            className={`py-2 px-2 text-xs rounded-lg transition-all font-medium ${
+                              parseFloat(withdrawAmount) === amt
+                                ? 'bg-gradient-to-r from-purple-600 to-orange-600 text-white shadow-lg'
+                                : amt > embeddedBalance
+                                ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            }`}
+                          >
+                            {amt} SOL
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Destination Address */}
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2 font-medium">Destination Address</label>
+                      <input
+                        type="text"
+                        value={destinationAddress}
+                        onChange={(e) => {
+                          setDestinationAddress(e.target.value);
+                          if (e.target.value) {
+                            validateAddress(e.target.value);
+                          }
+                        }}
+                        placeholder="Enter Solana wallet address"
+                        className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-20 transition-all"
+                      />
+                      {addressError && (
+                        <div className="text-red-400 text-sm mt-2 flex items-center">
+                          <AlertTriangle size={14} className="mr-1" />
+                          {addressError}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Withdraw Status */}
+                    {withdrawStatus && (
+                      <div className="bg-purple-900 bg-opacity-30 border border-purple-800 text-purple-400 p-3 rounded-lg">
+                        <div className="flex items-center">
+                          <Loader size={16} className="animate-spin mr-2" />
+                          <span className="text-sm">{withdrawStatus}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Withdraw Button */}
+                    <button
+                      onClick={handleEmbeddedWithdraw}
+                      disabled={isWithdrawing || !withdrawAmount || parseFloat(withdrawAmount) <= 0 || parseFloat(withdrawAmount) > embeddedBalance || !destinationAddress || !!addressError}
+                      className="w-full bg-gradient-to-r from-purple-600 to-orange-600 hover:from-purple-700 hover:to-orange-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white py-4 px-4 rounded-xl transition-all flex items-center justify-center font-bold shadow-lg"
+                    >
+                      {isWithdrawing ? (
+                        <>
+                          <Loader size={20} className="animate-spin mr-2" />
+                          <span>Processing Withdrawal...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send size={20} className="mr-2" />
+                          <span>Withdraw {withdrawAmount || '0'} SOL</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Back Button */}
+                    <button
+                      onClick={() => setActiveStep('transfer')}
+                      disabled={isWithdrawing}
+                      className="w-full bg-gray-700 hover:bg-gray-600 text-white py-3 px-4 rounded-xl transition-all flex items-center justify-center font-medium"
+                    >
+                      <ArrowLeftRight size={16} className="mr-2" />
+                      Back to Transfer Step
+                    </button>
+                  </div>
+                )}
+                
+                {/* Error Message */}
+                {error && (
+                  <div className="bg-red-900 bg-opacity-30 border border-red-700 text-red-400 p-4 rounded-xl mt-4">
+                    <div className="flex items-center">
+                      <AlertTriangle size={16} className="mr-2 flex-shrink-0" />
+                      {error}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Desktop Layout (similar structure but with desktop styling)
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
       <div 
         ref={modalRef} 
-        className="bg-[#0d0d0f] border border-gray-800 rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
+        className="bg-[#0d0d0f] border border-gray-800 rounded-2xl p-6 max-w-lg w-full mx-4 shadow-2xl"
       >
-        {/* 🚩 UPDATE: Header with mode indicator */}
+        {/* Desktop Header */}
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold text-white flex items-center">
-            <Wallet size={20} className="mr-2" />
-            Wallet Manager
-            {/* Mode indicator */}
-            <span className="ml-2 text-xs bg-blue-600 text-white px-2 py-1 rounded">
+          <h2 className="text-2xl font-bold text-white flex items-center">
+            <ArrowUpRight size={24} className="mr-3" />
+            Withdraw {tokenSymbol}
+            <span className="ml-3 text-xs bg-purple-600 text-white px-3 py-1 rounded-full">
               {walletMode.toUpperCase()}
             </span>
           </h2>
           <button
             onClick={onClose}
-            disabled={isLoading}
-            className="text-gray-400 hover:text-white transition-colors"
+            disabled={transferLoading || isWithdrawing}
+            className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-gray-800 rounded-lg"
           >
-            <X size={20} />
+            <X size={24} />
           </button>
         </div>
         
         {success ? (
-          <div className="text-center py-8">
-            <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
-                <Check size={32} className="text-green-500" />
+          <div className="text-center py-12">
+            <div className="flex justify-center mb-6">
+              <div className="w-20 h-20 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
+                <Check size={40} className="text-green-500" />
               </div>
             </div>
-            <h3 className="text-xl font-bold text-white mb-2">Success!</h3>
-            <p className="text-gray-400 mb-6">{successMessage}</p>
+            <h3 className="text-2xl font-bold text-white mb-3">Withdrawal Successful!</h3>
+            <p className="text-gray-400 mb-8">{successMessage}</p>
             <button
               onClick={onClose}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md transition-colors w-full"
+              className="bg-gradient-to-r from-green-600 to-purple-600 hover:from-green-700 hover:to-purple-700 text-white px-8 py-3 rounded-xl transition-all font-medium shadow-lg"
             >
               Done
             </button>
           </div>
         ) : (
           <>
-            {/* 🚩 UPDATE: Enhanced debug info with feature flags */}
-            {process.env.NODE_ENV === 'development' && (
-              <div className="bg-gray-900 p-3 rounded mb-4 text-xs space-y-1">
-                <div className="text-gray-400 font-bold">🔍 Debug Info:</div>
-                <div className="text-purple-400">Wallet Mode: {walletMode}</div>
-                <div className="text-orange-400">Custodial Only: {custodialOnlyMode ? 'Yes' : 'No'}</div>
-                <div className="text-cyan-400">Show Embedded UI: {showEmbeddedUI ? 'Yes' : 'No'}</div>
-                <div className="text-green-400">Prop UserId: {userId || 'None'}</div>
-                <div className="text-cyan-400">Internal UserId: {internalUserId || 'None'}</div>
-                <div className="text-lime-400">Effective UserId: {effectiveUserId || 'None'}</div>
-                <div className="text-blue-400">WalletAddress: {walletAddress || 'None'}</div>
-                <div className="text-yellow-400">Authenticated: {authenticated ? 'Yes' : 'No'}</div>
-                <div className="text-purple-400">Fetching UserId: {fetchingUserId ? 'Yes' : 'No'}</div>
-                <div className="text-teal-400">
-                  Hook States: Custodial Loading: {custodialLoading ? 'Yes' : 'No'}, 
-                  Embedded Loading: {embeddedLoading ? 'Yes' : 'No'}
-                </div>
-                {!effectiveUserId && !fetchingUserId && (
-                  <div className="text-red-400 font-bold">⚠️ No userId available - transfers will fail!</div>
-                )}
-                {fetchingUserId && (
-                  <div className="text-yellow-400 font-bold">🔄 Fetching userId from API...</div>
-                )}
-              </div>
-            )}
-            
-            {/* Mode description */}
-            {custodialOnlyMode && (
-              <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md mb-4 text-sm">
-                <div className="font-medium mb-1">🏦 {getModeDescription()}</div>
-                <div className="text-xs">
-                  All funds are managed in your game balance for instant transactions and easy withdrawals.
-                </div>
-              </div>
-            )}
-            
-            {/* User ID status notification */}
-            {authenticated && walletAddress && !effectiveUserId && !fetchingUserId && (
-              <div className="bg-yellow-900 bg-opacity-20 border border-yellow-800 text-yellow-500 p-3 rounded-md mb-4 text-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-bold mb-1">⚠️ User Setup Required</div>
-                    <div className="text-xs">Unable to initialize user account. Please retry.</div>
-                  </div>
-                  <button
-                    onClick={retryGetUserId}
-                    className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-xs"
-                  >
-                    Retry
-                  </button>
-                </div>
-              </div>
-            )}
-            
-            {/* 🚩 UPDATE: Conditional balance display */}
-            <div className="bg-gray-800 p-4 rounded-md mb-6">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-gray-400 text-sm">Your Balances</span>
+            {/* Enhanced Balance Display - Desktop */}
+            <div className="bg-gradient-to-r from-purple-900 to-blue-900 bg-opacity-50 rounded-xl p-5 mb-6">
+              <div className="flex justify-between items-center mb-4">
+                <span className="text-gray-300">Your Balances</span>
                 <button 
-                  onClick={refreshBalances}
-                  disabled={balances.loading}
-                  className="text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-1"
-                  title="Refresh balances"
+                  onClick={refreshAllBalances}
+                  disabled={custodialLoading || embeddedLoading}
+                  className="text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-2"
                 >
-                  <RefreshCw size={14} className={balances.loading ? 'animate-spin' : ''} />
-                  <span className="text-xs">Refresh</span>
+                  <RefreshCw size={16} className={(custodialLoading || embeddedLoading) ? 'animate-spin' : ''} />
+                  <span>Refresh</span>
                 </button>
               </div>
               
-              <div className="space-y-3">
-                {/* Always show custodial balance */}
-                <div className="flex justify-between items-center">
-                  <span className="text-green-400 text-sm">
-                    🎮 {custodialOnlyMode ? 'Game Balance' : 'Game Balance'}
-                  </span>
-                  <span className="text-white font-bold">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-green-900 bg-opacity-30 rounded-xl p-4">
+                  <div className="text-green-400 text-sm mb-2 flex items-center">
+                    🎮 Game Balance
+                  </div>
+                  <div className="text-white font-bold text-lg">
                     {custodialLoading ? (
                       <span className="flex items-center">
-                        <Loader size={12} className="animate-spin mr-1" />
+                        <Loader size={16} className="animate-spin mr-2" />
                         Loading...
                       </span>
                     ) : (
                       `${custodialBalance.toFixed(6)} SOL`
                     )}
-                  </span>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-1">Available for transfer</div>
                 </div>
                 
-                {/* Only show embedded balance if not custodial-only */}
-                {showEmbeddedUI && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-blue-400 text-sm">💼 Embedded Wallet</span>
-                    <span className="text-white font-bold">
-                      {embeddedLoading ? (
-                        <span className="flex items-center">
-                          <Loader size={12} className="animate-spin mr-1" />
-                          Loading...
-                        </span>
-                      ) : (
-                        `${embeddedBalance.toFixed(6)} SOL`
-                      )}
-                    </span>
+                <div className="bg-purple-900 bg-opacity-30 rounded-xl p-4">
+                  <div className="text-purple-400 text-sm mb-2 flex items-center">
+                    💼 Embedded Wallet
                   </div>
-                )}
+                  <div className="text-white font-bold text-lg">
+                    {embeddedLoading ? (
+                      <span className="flex items-center">
+                        <Loader size={16} className="animate-spin mr-2" />
+                        Loading...
+                      </span>
+                    ) : (
+                      `${embeddedBalance.toFixed(6)} SOL`
+                    )}
+                  </div>
+                  <div className="text-xs text-gray-400 mt-1">Ready for withdrawal</div>
+                </div>
               </div>
-              
-              {/* Show wallet address for debugging */}
-              {walletAddress && (
-                <div className="mt-3 pt-2 border-t border-gray-700">
-                  <div className="text-xs text-gray-500">
-                    Wallet: {walletAddress.slice(0, 8)}...{walletAddress.slice(-8)}
-                  </div>
-                </div>
-              )}
-              
-              {/* Show total balance */}
-              {!balances.loading && (
-                <div className="mt-2 pt-2 border-t border-gray-700">
-                  <div className="flex justify-between items-center">
-                    <span className="text-gray-400 text-xs">Total Balance</span>
-                    <span className="text-yellow-400 text-sm font-bold">
-                      {(custodialBalance + (showEmbeddedUI ? embeddedBalance : 0)).toFixed(6)} SOL
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {balances.loading && (
-                <div className="mt-2 pt-2 border-t border-gray-700">
-                  <div className="flex items-center justify-center">
-                    <Loader size={16} className="animate-spin mr-2" />
-                    <span className="text-sm text-gray-400">Fetching latest balances...</span>
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            {/* 🚩 UPDATE: Conditional tab navigation */}
-            <div className="flex mb-6 bg-gray-800 rounded-md p-1">
-              <button
-                onClick={() => setActiveTab('withdraw')}
-                className={`flex-1 py-2 px-4 rounded text-sm font-medium transition-colors ${
-                  activeTab === 'withdraw'
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                <ArrowDownToLine size={16} className="inline mr-2" />
-                Withdraw
-              </button>
-              
-              {/* Only show transfer tab if not custodial-only */}
-              {!custodialOnlyMode && (
-                <button
-                  onClick={() => setActiveTab('transfer')}
-                  className={`flex-1 py-2 px-4 rounded text-sm font-medium transition-colors ${
-                    activeTab === 'transfer'
-                      ? 'bg-green-600 text-white'
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  <ArrowLeftRight size={16} className="inline mr-2" />
-                  Transfer
-                </button>
-              )}
             </div>
 
-            {/* 🚩 UPDATE: Conditional tab content */}
-            {activeTab === 'withdraw' ? (
-              <div className="space-y-4">
-                {/* 🚩 UPDATE: Conditional source selection */}
-                {!custodialOnlyMode && (
+            {/* Withdrawal Flow Steps - Desktop */}
+            <div className="bg-blue-900 bg-opacity-20 border border-blue-700 rounded-xl p-5 mb-6">
+              <div className="flex items-center mb-3">
+                <TrendingUp size={20} className="mr-2 text-blue-400" />
+                <div className="font-medium text-blue-300 text-lg">Withdrawal Process</div>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className={`flex items-center ${activeStep === 'transfer' ? 'text-blue-300 font-medium' : 'text-gray-400'}`}>
+                  <span className="mr-2 text-lg">🎮</span>
                   <div>
-                    <label className="block text-sm text-gray-400 mb-2">Withdraw From</label>
-                    <div className="flex space-x-2">
+                    <div className="text-sm">Game Balance</div>
+                    <div className="text-xs opacity-75">{custodialBalance.toFixed(3)} SOL</div>
+                  </div>
+                </div>
+                <ChevronRight size={20} className="text-gray-400 mx-4" />
+                <div className={`flex items-center ${activeStep === 'withdraw' || embeddedBalance > 0.001 ? 'text-purple-300 font-medium' : 'text-gray-400'}`}>
+                  <span className="mr-2 text-lg">💼</span>
+                  <div>
+                    <div className="text-sm">Embedded Wallet</div>
+                    <div className="text-xs opacity-75">{embeddedBalance.toFixed(3)} SOL</div>
+                  </div>
+                </div>
+                <ChevronRight size={20} className="text-gray-400 mx-4" />
+                <div className="flex items-center text-orange-300">
+                  <span className="mr-2 text-lg">🌐</span>
+                  <div>
+                    <div className="text-sm">External Wallet</div>
+                    <div className="text-xs opacity-75">Your choice</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Desktop Step Content - Similar to mobile but with desktop styling */}
+            {activeStep === 'transfer' ? (
+              <div className="space-y-6">
+                {/* Step 1 content for desktop */}
+                <div className="bg-gradient-to-r from-green-900 to-purple-900 bg-opacity-30 border border-green-700 text-green-300 p-5 rounded-xl">
+                  <div className="flex items-center mb-3">
+                    <Zap size={24} className="mr-3 text-yellow-400" />
+                    <div className="font-medium text-lg">Step 1: Move to Embedded Wallet</div>
+                  </div>
+                  <div className="text-sm opacity-90">
+                    Transfer SOL from your game balance to your embedded wallet for external withdrawal.
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-400 mb-3 font-medium">Transfer Amount (SOL)</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={transferAmount}
+                      onChange={handleTransferAmountChange}
+                      placeholder="0.000000"
+                      className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-4 pr-20 text-white placeholder-gray-500 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-20 transition-all text-lg"
+                    />
+                    <button
+                      onClick={setMaxTransferAmount}
+                      className="absolute right-4 top-1/2 transform -translate-y-1/2 text-green-400 hover:text-green-300 font-medium"
+                    >
+                      MAX
+                    </button>
+                  </div>
+                  <div className="text-sm text-gray-500 mt-2">
+                    Available: {custodialBalance.toFixed(6)} SOL
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-400 mb-3 font-medium">Quick Transfer Amounts:</label>
+                  <div className="grid grid-cols-4 gap-3">
+                    {quickAmounts.map((amt) => (
                       <button
-                        onClick={() => setWithdrawSource('custodial')}
-                        className={`flex-1 py-2 px-3 rounded text-sm transition-colors ${
-                          withdrawSource === 'custodial'
-                            ? 'bg-green-600 text-white'
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        key={amt}
+                        onClick={() => setQuickTransferAmount(amt)}
+                        disabled={amt > custodialBalance}
+                        className={`py-4 px-3 text-sm rounded-xl transition-all font-medium ${
+                          parseFloat(transferAmount) === amt
+                            ? 'bg-gradient-to-r from-green-600 to-purple-600 text-white shadow-lg transform scale-105'
+                            : amt > custodialBalance
+                            ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600 hover:transform hover:scale-105'
                         }`}
                       >
-                        🎮 Game Balance
-                        <div className="text-xs opacity-75">
-                          {custodialBalance.toFixed(6)} SOL
+                        <div className="flex flex-col items-center">
+                          <span className="font-bold text-lg">{amt}</span>
+                          <span className="text-xs opacity-75">SOL</span>
                         </div>
                       </button>
-                      <button
-                        onClick={() => setWithdrawSource('embedded')}
-                        className={`flex-1 py-2 px-3 rounded text-sm transition-colors ${
-                          withdrawSource === 'embedded'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                        }`}
-                      >
-                        💼 Embedded Wallet
-                        <div className="text-xs opacity-75">
-                          {embeddedBalance.toFixed(6)} SOL
-                        </div>
-                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {transferStatus && (
+                  <div className="bg-blue-900 bg-opacity-30 border border-blue-800 text-blue-400 p-4 rounded-xl">
+                    <div className="flex items-center">
+                      <Loader size={18} className="animate-spin mr-3" />
+                      <span>{transferStatus}</span>
                     </div>
                   </div>
                 )}
 
-                {/* Amount Input */}
+                <button
+                  onClick={handleTransferToEmbedded}
+                  disabled={transferLoading || !transferAmount || parseFloat(transferAmount) <= 0 || parseFloat(transferAmount) > custodialBalance}
+                  className="w-full bg-gradient-to-r from-green-600 to-purple-600 hover:from-green-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white py-5 px-4 rounded-xl transition-all flex items-center justify-center font-bold text-lg shadow-lg"
+                >
+                  {transferLoading ? (
+                    <>
+                      <Loader size={24} className="animate-spin mr-3" />
+                      <span>Processing Transfer...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ArrowLeftRight size={24} className="mr-3" />
+                      <span>Transfer {transferAmount || '0'} SOL to Embedded Wallet</span>
+                    </>
+                  )}
+                </button>
+
+                {embeddedBalance > 0.001 && (
+                  <button
+                    onClick={() => setActiveStep('withdraw')}
+                    className="w-full bg-gray-700 hover:bg-gray-600 text-white py-3 px-4 rounded-xl transition-all flex items-center justify-center font-medium"
+                  >
+                    <span>Skip - Use Existing Embedded Balance ({embeddedBalance.toFixed(3)} SOL)</span>
+                    <ChevronRight size={18} className="ml-2" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Step 2 content for desktop - similar structure */}
+                <div className="bg-gradient-to-r from-purple-900 to-orange-900 bg-opacity-30 border border-purple-700 text-purple-300 p-5 rounded-xl">
+                  <div className="flex items-center mb-3">
+                    <Send size={24} className="mr-3 text-orange-400" />
+                    <div className="font-medium text-lg">Step 2: Withdraw to External Wallet</div>
+                  </div>
+                  <div className="text-sm opacity-90">
+                    Send SOL from your embedded wallet to any external Solana address. Transaction will be auto-signed.
+                  </div>
+                </div>
+
                 <div>
-                  <label className="block text-sm text-gray-400 mb-2">Amount ({tokenSymbol})</label>
+                  <label className="block text-sm text-gray-400 mb-3 font-medium">Withdrawal Amount (SOL)</label>
                   <div className="relative">
                     <input
                       type="text"
-                      value={amount}
-                      onChange={handleAmountChange}
-                      placeholder="0.000"
-                      className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 pr-16 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                      value={withdrawAmount}
+                      onChange={handleWithdrawAmountChange}
+                      placeholder="0.000000"
+                      className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-4 pr-20 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-20 transition-all text-lg"
                     />
                     <button
-                      onClick={handleSetMaxAmount}
-                      className="absolute right-2 top-1/2 transform -translate-y-1/2 text-blue-400 text-xs hover:text-blue-300"
+                      onClick={setMaxWithdrawAmount}
+                      className="absolute right-4 top-1/2 transform -translate-y-1/2 text-purple-400 hover:text-purple-300 font-medium"
                     >
                       MAX
                     </button>
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Available: {custodialOnlyMode 
-                      ? custodialBalance.toFixed(6) 
-                      : (withdrawSource === 'custodial' ? custodialBalance.toFixed(6) : embeddedBalance.toFixed(6))
-                    } SOL
+                  <div className="text-sm text-gray-500 mt-2">
+                    Available: {embeddedBalance.toFixed(6)} SOL (minus network fees)
                   </div>
                 </div>
 
-                {/* Destination Address */}
                 <div>
-                  <label className="block text-sm text-gray-400 mb-2">Destination Address</label>
+                  <label className="block text-sm text-gray-400 mb-3 font-medium">Quick Withdrawal Amounts:</label>
+                  <div className="grid grid-cols-4 gap-3">
+                    {quickAmounts.map((amt) => (
+                      <button
+                        key={amt}
+                        onClick={() => setQuickWithdrawAmount(amt)}
+                        disabled={amt > embeddedBalance}
+                        className={`py-4 px-3 text-sm rounded-xl transition-all font-medium ${
+                          parseFloat(withdrawAmount) === amt
+                            ? 'bg-gradient-to-r from-purple-600 to-orange-600 text-white shadow-lg transform scale-105'
+                            : amt > embeddedBalance
+                            ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                            : 'bg-gray-700 text-gray-300 hover:bg-gray-600 hover:transform hover:scale-105'
+                        }`}
+                      >
+                        <div className="flex flex-col items-center">
+                          <span className="font-bold text-lg">{amt}</span>
+                          <span className="text-xs opacity-75">SOL</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-400 mb-3 font-medium">Destination Address</label>
                   <input
                     type="text"
                     value={destinationAddress}
-                    onChange={(e) => setDestinationAddress(e.target.value)}
-                    placeholder="Enter Solana wallet address"
-                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                    onChange={(e) => {
+                      setDestinationAddress(e.target.value);
+                      if (e.target.value) {
+                        validateAddress(e.target.value);
+                      }
+                    }}
+                    placeholder="Enter Solana wallet address (e.g., 7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56)"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-4 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-20 transition-all"
                   />
                   {addressError && (
-                    <div className="text-red-500 text-sm mt-1">{addressError}</div>
+                    <div className="text-red-400 text-sm mt-2 flex items-center">
+                      <AlertTriangle size={16} className="mr-2" />
+                      {addressError}
+                    </div>
                   )}
                 </div>
 
-                {/* Withdraw Button */}
+                {withdrawStatus && (
+                  <div className="bg-purple-900 bg-opacity-30 border border-purple-800 text-purple-400 p-4 rounded-xl">
+                    <div className="flex items-center">
+                      <Loader size={18} className="animate-spin mr-3" />
+                      <span>{withdrawStatus}</span>
+                    </div>
+                  </div>
+                )}
+
                 <button
-                  onClick={handleWithdraw}
-                  disabled={isLoading || !effectiveUserId || !amount || !destinationAddress}
-                  className="w-full bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-md transition-colors flex items-center justify-center"
+                  onClick={handleEmbeddedWithdraw}
+                  disabled={isWithdrawing || !withdrawAmount || parseFloat(withdrawAmount) <= 0 || parseFloat(withdrawAmount) > embeddedBalance || !destinationAddress || !!addressError}
+                  className="w-full bg-gradient-to-r from-purple-600 to-orange-600 hover:from-purple-700 hover:to-orange-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white py-5 px-4 rounded-xl transition-all flex items-center justify-center font-bold text-lg shadow-lg"
                 >
-                  {isLoading ? (
+                  {isWithdrawing ? (
                     <>
-                      <Loader size={16} className="animate-spin mr-2" />
-                      Processing Withdrawal...
+                      <Loader size={24} className="animate-spin mr-3" />
+                      <span>Processing Withdrawal...</span>
                     </>
                   ) : (
                     <>
-                      <ArrowDownToLine size={16} className="mr-2" />
-                      Withdraw {amount || '0'} SOL
-                    </>
-                  )}
-                </button>
-              </div>
-            ) : (
-              // Transfer tab - only shown if not custodial-only
-              <div className="space-y-4">
-                {/* Your existing transfer UI - unchanged */}
-                <div>
-                  <label className="block text-sm text-gray-400 mb-2">Transfer Direction</label>
-                  <div className="space-y-2">
-                    <button
-                      onClick={() => setTransferDirection('custodial-to-embedded')}
-                      className={`w-full py-3 px-4 rounded text-sm transition-colors flex items-center justify-between ${
-                        transferDirection === 'custodial-to-embedded'
-                          ? 'bg-green-600 text-white'
-                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      }`}
-                    >
-                      <div className="flex items-center">
-                        <span className="mr-3">🎮→💼</span>
-                        <div className="text-left">
-                          <div className="font-medium">Game → Embedded Wallet</div>
-                          <div className="text-xs opacity-75">
-                            Move SOL to your embedded wallet
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-xs">
-                        {custodialBalance.toFixed(6)} SOL available
-                      </div>
-                    </button>
-                    
-                    <button
-                      onClick={() => setTransferDirection('embedded-to-custodial')}
-                      className={`w-full py-3 px-4 rounded text-sm transition-colors flex items-center justify-between ${
-                        transferDirection === 'embedded-to-custodial'
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      }`}
-                    >
-                      <div className="flex items-center">
-                        <span className="mr-3">💼→🎮</span>
-                        <div className="text-left">
-                          <div className="font-medium">Embedded Wallet → Game</div>
-                          <div className="text-xs opacity-75">
-                            Move SOL to your game balance
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-xs">
-                        {embeddedBalance.toFixed(6)} SOL available
-                      </div>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Amount Input for Transfer */}
-                <div>
-                  <label className="block text-sm text-gray-400 mb-2">Amount ({tokenSymbol})</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={amount}
-                      onChange={handleAmountChange}
-                      placeholder="0.000"
-                      className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 pr-16 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
-                    />
-                    <button
-                      onClick={handleSetMaxAmount}
-                      className="absolute right-2 top-1/2 transform -translate-y-1/2 text-blue-400 text-xs hover:text-blue-300"
-                    >
-                      MAX
-                    </button>
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Available: {transferDirection === 'custodial-to-embedded' 
-                      ? custodialBalance.toFixed(6) 
-                      : embeddedBalance.toFixed(6)} SOL
-                  </div>
-                </div>
-
-                {/* Transfer Button */}
-                <button
-                  onClick={handleTransfer}
-                  disabled={isLoading || !effectiveUserId || !amount}
-                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 px-4 rounded-md transition-colors flex items-center justify-center"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader size={16} className="animate-spin mr-2" />
-                      Processing Transfer...
-                    </>
-                  ) : (
-                    <>
-                      <ArrowLeftRight size={16} className="mr-2" />
-                      Transfer {amount || '0'} SOL
-                      <span className="ml-2">
-                        {transferDirection === 'custodial-to-embedded' ? '🎮→💼' : '💼→🎮'}
-                      </span>
+                      <Send size={24} className="mr-3" />
+                      <span>Withdraw {withdrawAmount || '0'} SOL</span>
                     </>
                   )}
                 </button>
 
-                {/* Transfer Info */}
-                <div className="bg-blue-900 bg-opacity-20 border border-blue-800 text-blue-400 p-3 rounded-md text-sm">
-                  <div className="font-medium mb-1">ℹ️ Transfer Info</div>
-                  <div className="text-xs">
-                    {transferDirection === 'custodial-to-embedded' 
-                      ? 'Moving SOL from your game balance to your embedded wallet for withdrawals or external use.'
-                      : 'Moving SOL from your embedded wallet to your game balance for trading and gameplay.'
-                    }
-                  </div>
-                </div>
+                <button
+                  onClick={() => setActiveStep('transfer')}
+                  disabled={isWithdrawing}
+                  className="w-full bg-gray-700 hover:bg-gray-600 text-white py-3 px-4 rounded-xl transition-all flex items-center justify-center font-medium"
+                >
+                  <ArrowLeftRight size={18} className="mr-2" />
+                  Back to Transfer Step
+                </button>
               </div>
             )}
             
             {/* Error Message */}
             {error && (
-              <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-500 p-3 rounded-md mt-4">
-                {error}
+              <div className="bg-red-900 bg-opacity-30 border border-red-700 text-red-400 p-4 rounded-xl mt-6">
+                <div className="flex items-center">
+                  <AlertTriangle size={20} className="mr-3 flex-shrink-0" />
+                  {error}
+                </div>
               </div>
             )}
           </>

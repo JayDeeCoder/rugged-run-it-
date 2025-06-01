@@ -1,6 +1,7 @@
 // app/api/transfer/privy-to-custodial/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, TransactionInstruction } from '@solana/web3.js';
+import { createClient } from '@supabase/supabase-js'; // 🔥 ADD THIS IMPORT
 import { privyWalletAPI } from '../../../../services/privyWalletAPI';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../../../../utils/walletUtils';
 import logger from '../../../../utils/logger';
@@ -240,6 +241,80 @@ export async function POST(request: NextRequest) {
       }
       
       console.log(`✅ Transfer transaction confirmed: ${signature}`);
+      
+      // 🔥 CRITICAL FIX: Update custodial balance in database
+      try {
+        const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        
+        if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+          const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+          
+          console.log(`💰 Updating custodial balance for user ${userId} (+${amount} SOL)`);
+          
+          // First, get current custodial balance or create user profile if it doesn't exist
+          const { data: currentUser, error: selectError } = await supabase
+            .from('user_profiles')
+            .select('custodial_balance, privy_balance, total_balance, total_transfers_to_custodial')
+            .eq('user_id', userId)
+            .single();
+          
+          if (selectError && selectError.code !== 'PGRST116') {
+            console.error('❌ Error fetching current balance:', selectError);
+            throw selectError;
+          }
+          
+          const currentCustodialBalance = parseFloat(currentUser?.custodial_balance || '0');
+          const currentPrivyBalance = parseFloat(currentUser?.privy_balance || '0');
+          const newCustodialBalance = currentCustodialBalance + amount;
+          const newPrivyBalance = Math.max(0, currentPrivyBalance - amount); // Decrease privy balance
+          const newTotalBalance = newCustodialBalance + newPrivyBalance;
+          
+          if (!currentUser) {
+            // Create new user profile
+            const { error: insertError } = await supabase
+              .from('user_profiles')
+              .insert({
+                user_id: userId,
+                custodial_balance: newCustodialBalance.toString(),
+                privy_balance: newPrivyBalance.toString(),
+                total_balance: newTotalBalance.toString(),
+                total_transfers_to_custodial: amount,
+                updated_at: new Date().toISOString()
+              });
+            
+            if (insertError) {
+              console.error('❌ Failed to create user profile:', insertError);
+            } else {
+              console.log(`✅ Created user profile with custodial balance: ${newCustodialBalance} SOL`);
+            }
+          } else {
+            // Update existing user profile
+            const { error: updateError } = await supabase
+              .from('user_profiles')
+              .update({ 
+                custodial_balance: newCustodialBalance.toString(),
+                privy_balance: newPrivyBalance.toString(),
+                total_balance: newTotalBalance.toString(),
+                total_transfers_to_custodial: (parseFloat(currentUser.total_transfers_to_custodial || '0') + amount).toString(),
+                updated_at: new Date().toISOString()
+              })
+              .eq('user_id', userId);
+            
+            if (updateError) {
+              console.error('❌ Failed to update custodial balance:', updateError);
+            } else {
+              console.log(`✅ Custodial balance updated: ${currentCustodialBalance} → ${newCustodialBalance} SOL`);
+              console.log(`✅ Privy balance updated: ${currentPrivyBalance} → ${newPrivyBalance} SOL`);
+            }
+          }
+        } else {
+          console.warn('⚠️ Missing Supabase config - custodial balance not updated');
+        }
+      } catch (dbError) {
+        console.error('❌ Database update error:', dbError);
+        // Don't fail the transaction for DB errors, but log them
+      }
       
       // Log the successful transaction
       await privyWalletAPI.logTransaction(

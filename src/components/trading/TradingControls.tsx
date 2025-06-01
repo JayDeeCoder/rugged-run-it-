@@ -5,6 +5,7 @@ import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import useLocalStorage from '../../hooks/useLocalStorage';
 import Button from '../common/Button';
 import { useGameSocket, initializeUser } from '../../hooks/useGameSocket';
+import { usePrivyAutoTransfer } from '../../hooks/usePrivyAutoTransfer';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
@@ -584,7 +585,8 @@ const BalanceDisplay: FC<{
   onRefresh
 }) => {
   const activeBalance = currentToken === TokenType.SOL ? custodialBalance : ruggedBalance;
-  
+  const { executeAutoTransfer, loading: transferLoading, error: transferError } = usePrivyAutoTransfer();
+
   const formatBalance = (balance: number, token: TokenType) => {
     if (token === TokenType.SOL) {
       return balance.toFixed(3);
@@ -1335,6 +1337,9 @@ const TradingControls: FC<TradingControlsProps> = ({
     forceRefresh: refreshRuggedBalance 
   } = useRuggedBalance(walletAddress);
 
+  // Add this after your other hooks like useGameSocket, useCustodialBalance, etc.
+const { executeAutoTransfer, loading: transferLoading, error: transferError } = usePrivyAutoTransfer();
+
   // Memoized calculations
   const gameState = useMemo(() => {
     const countdownSeconds = countdown ? Math.ceil(countdown / 1000) : 0;
@@ -1571,206 +1576,65 @@ const TradingControls: FC<TradingControlsProps> = ({
   }, [userId, authenticated, custodialBalance, balanceIssueDetected, debugLog]);
 
   // Enhanced auto transfer function
-  const autoTransferToGameBalance = useCallback(async (amount: number) => {
-    if (!embeddedWallet || !walletAddress || !userId) {
-      toast.error('Wallet not ready for transfer');
-      return false;
-    }
+ // Replace the entire autoTransferToGameBalance function with this:
+const autoTransferToGameBalance = useCallback(async (amount: number) => {
+  if (!embeddedWallet || !walletAddress || !userId) {
+    toast.error('Wallet not ready for transfer');
+    return false;
+  }
 
-    if (amount <= 0 || amount > embeddedWalletBalance) {
-      toast.error(`Invalid amount. Available: ${embeddedWalletBalance.toFixed(3)} SOL`);
-      return false;
-    }
+  if (amount <= 0 || amount > embeddedWalletBalance) {
+    toast.error(`Invalid amount. Available: ${embeddedWalletBalance.toFixed(3)} SOL`);
+    return false;
+  }
 
-    console.log('🚀 Starting enhanced auto-transfer:', { amount, from: walletAddress, to: HOUSE_WALLET, userId });
-    
-    try {
-      toast.loading('Transferring SOL to game balance...', { id: 'transfer' });
-      
-      const connection = new Connection(
-        process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVzzNb_M2I0WQ0b85sYoNEYx'
-      );
-      
-      const fromPubkey = new PublicKey(walletAddress);
-      const toPubkey = new PublicKey(HOUSE_WALLET);
-      const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
-      
-      const { blockhash } = await connection.getLatestBlockhash();
-      
-      const transaction = new Transaction({
-        recentBlockhash: blockhash,
-        feePayer: fromPubkey
-      }).add(
-        SystemProgram.transfer({
-          fromPubkey,
-          toPubkey,
-          lamports
-        })
-      );
-      
-      const signature = await embeddedWallet.sendTransaction(transaction, connection); 
-      console.log('✅ Transaction sent, signature:', signature);
-      
-      // Update transfer attempts tracking with signature
-      const currentAttempt = transferAttempts.current[transferAttempts.current.length - 1];
-      if (currentAttempt && Math.abs(currentAttempt.amount - amount) < 0.0001) {
-        currentAttempt.signature = signature;
-        debugLog('Transfer signature recorded', { amount, signature });
+  console.log('🚀 Starting transfer using updated API:', { amount, userId });
+  
+  try {
+    // 🔥 Use the updated hook that calls our fixed API endpoint
+    const result = await executeAutoTransfer(
+      userId, 
+      amount,
+      // This callback will refresh the custodial balance immediately
+      async () => {
+        console.log('🔄 Transfer completed, refreshing custodial balance...');
+        await refreshCustodialBalance();
+        
+        // Also trigger a delayed refresh for safety
+        setTimeout(() => {
+          refreshCustodialBalance();
+        }, 1500);
       }
+    );
+
+    if (result.success) {
+      console.log('✅ Transfer completed successfully:', result);
       
-      const confirmation = await connection.confirmTransaction(signature, 'confirmed');
-      
-      if (confirmation.value.err) {
-        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-      }
-      
-      console.log('✅ Transaction confirmed on blockchain');
-      toast.success(`Transferred ${amount} SOL to game balance!`, { id: 'transfer' });
-      
-      // Strategy 1: Set expected balance for monitoring
-      console.log('🔄 Strategy 1: Set expected balance for monitoring');
-      expectedBalance.current = custodialBalance + amount;
-      debugLog('Set expected balance after transfer', { 
-        previous: custodialBalance, 
-        transferAmount: amount, 
-        expected: expectedBalance.current 
+      // Update transfer tracking
+      transferAttempts.current.push({
+        timestamp: Date.now(),
+        amount: amount,
+        signature: result.transactionId
       });
       
-      // Strategy 2: Multiple API calls with retries
-      const performBalanceUpdate = async (attempt: number = 1, maxAttempts: number = 5) => {
-        try {
-          console.log(`🔄 Strategy 2: API balance update attempt ${attempt}/${maxAttempts}`);
-          
-          const creditResponse = await fetch('/api/custodial/balance/' + userId, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              action: 'credit',
-              amount: amount,
-              source: 'embedded_wallet_transfer',
-              transactionId: signature,
-              walletAddress: walletAddress,
-              timestamp: Date.now(),
-              forceRefresh: true
-            })
-          });
-          
-          if (creditResponse.ok) {
-            const creditData = await creditResponse.json();
-            console.log('✅ Manual credit API response:', creditData);
-            
-            if (creditData.custodialBalance !== undefined) {
-              console.log(`💰 Balance from credit API: ${creditData.custodialBalance} SOL`);
-            }
-          }
-          
-          const refreshResponse = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}&refresh=true&txId=${signature}`, {
-            method: 'GET',
-            headers: { 'Cache-Control': 'no-cache' }
-          });
-          
-          if (refreshResponse.ok) {
-            const refreshData = await refreshResponse.json();
-            console.log('✅ Force refresh API response:', refreshData);
-            
-            if (refreshData.custodialBalance !== undefined) {
-              console.log(`💰 Balance from refresh API: ${refreshData.custodialBalance} SOL`);
-            }
-          }
-          
-        } catch (error) {
-          console.error(`❌ Balance update attempt ${attempt} failed:`, error);
-          
-          if (attempt < maxAttempts) {
-            const delay = attempt * 1000;
-            console.log(`⏳ Retrying balance update in ${delay}ms...`);
-            setTimeout(() => performBalanceUpdate(attempt + 1, maxAttempts), delay);
-          } else {
-            console.error('❌ All balance update attempts failed, using hook fallback');
-            try {
-              refreshCustodialBalance();
-            } catch (hookError) {
-              console.error('❌ Hook fallback also failed:', hookError);
-            }
-          }
-        }
-      };
+      transferAttempts.current = transferAttempts.current.slice(-10);
       
-      performBalanceUpdate();
-      
-      // Strategy 3: Socket event trigger
-      const socket = (window as any).gameSocket;
-      if (socket && socket.connected) {
-        console.log('🔄 Strategy 3: Triggering socket balance refresh');
-        socket.emit('requestBalanceUpdate', {
-          userId: userId,
-          walletAddress: walletAddress,
-          transactionId: signature,
-          amount: amount,
-          type: 'embedded_wallet_transfer'
-        });
-      }
-      
-      // Strategy 4: Periodic verification
-      let verificationCount = 0;
-      const maxVerifications = 6;
-      
-      const verifyBalanceUpdate = async () => {
-        if (verificationCount >= maxVerifications) {
-          console.log('✅ Balance verification completed');
-          return;
-        }
-        
-        verificationCount++;
-        console.log(`🔍 Balance verification ${verificationCount}/${maxVerifications}`);
-        
-        try {
-          const verifyResponse = await fetch(`/api/custodial/balance/${userId}?verify=true&t=${Date.now()}`);
-          if (verifyResponse.ok) {
-            const verifyData = await verifyResponse.json();
-            if (verifyData.custodialBalance !== undefined) {
-              const currentBalance = parseFloat(verifyData.custodialBalance) || 0;
-              console.log(`💰 Verification balance: ${currentBalance.toFixed(6)} SOL`);
-              refreshCustodialBalance();
-            }
-          }
-        } catch (error) {
-          console.warn(`⚠️ Balance verification ${verificationCount} failed:`, error);
-        }
-        
-        if (verificationCount < maxVerifications) {
-          setTimeout(verifyBalanceUpdate, 5000);
-        }
-      };
-      
-      setTimeout(verifyBalanceUpdate, 3000);
-      
-      // Strategy 5: User feedback
-      toast.loading('Updating balance...', { id: 'balance-update' });
-      setTimeout(() => {
-        toast.success('Balance update in progress. Please wait a moment.', { id: 'balance-update' });
-      }, 3000);
+      // Reset any balance issue flags
+      setBalanceIssueDetected(false);
       
       return true;
-      
-    } catch (error) {
-      console.error('❌ Enhanced auto-transfer failed:', error);
-      
-      let errorMessage = 'Transfer failed';
-      if (error instanceof Error) {
-        if (error.message.includes('User rejected')) {
-          errorMessage = 'Transfer cancelled by user';
-        } else if (error.message.includes('insufficient funds')) {
-          errorMessage = 'Insufficient SOL for transfer + fees';
-        } else {
-          errorMessage = `Transfer failed: ${error.message}`;
-        }
-      }
-      
-      toast.error(errorMessage, { id: 'transfer' });
+    } else {
+      console.error('❌ Transfer failed:', result.error);
+      toast.error(result.error || 'Transfer failed');
       return false;
     }
-  }, [embeddedWallet, walletAddress, userId, embeddedWalletBalance, refreshCustodialBalance, custodialBalance, debugLog]);
+    
+  } catch (error) {
+    console.error('❌ Transfer error:', error);
+    toast.error(error instanceof Error ? error.message : 'Transfer failed');
+    return false;
+  }
+}, [embeddedWallet, walletAddress, userId, embeddedWalletBalance, executeAutoTransfer, refreshCustodialBalance, setBalanceIssueDetected]);
 
   // Enhanced cashout with stable dependencies
   const handleCashout = useCallback(async () => {

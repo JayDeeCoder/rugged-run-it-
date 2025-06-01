@@ -54,10 +54,13 @@ export const usePrivyAutoTransfer = () => {
   /**
    * Execute auto-transfer from Privy wallet to custodial balance
    * This handles the full flow: create transaction -> sign -> submit
+   * 
+   * @param onBalanceUpdate - Optional callback to refresh custodial balance after successful transfer
    */
   const executeAutoTransfer = useCallback(async (
     userId: string, 
-    amount: number
+    amount: number,
+    onBalanceUpdate?: () => Promise<void> | void // 🔥 NEW: Add callback parameter
   ): Promise<TransferResult> => {
     if (!embeddedWallet) {
       const error = 'No embedded wallet found. Please create an embedded wallet first.';
@@ -129,6 +132,18 @@ export const usePrivyAutoTransfer = () => {
 
       logger.info(`Auto-transfer completed successfully: ${submitData.transactionId}`);
 
+      // 🔥 NEW: Trigger balance refresh immediately after successful transfer
+      if (onBalanceUpdate) {
+        try {
+          logger.info('Triggering custodial balance refresh...');
+          await onBalanceUpdate();
+          logger.info('Custodial balance refresh completed');
+        } catch (refreshError) {
+          logger.error('Balance refresh failed:', refreshError);
+          // Don't fail the whole transfer for balance refresh errors
+        }
+      }
+
       const result: TransferResult = {
         success: true,
         transactionId: submitData.transactionId,
@@ -141,6 +156,15 @@ export const usePrivyAutoTransfer = () => {
         error: null, 
         lastTransfer: result 
       });
+
+      // 🔥 NEW: Also trigger a global balance update event for other components
+      window.dispatchEvent(new CustomEvent('custodialBalanceUpdate', { 
+        detail: { 
+          userId, 
+          transferAmount: amount,
+          transactionId: submitData.transactionId 
+        } 
+      }));
 
       return result;
 

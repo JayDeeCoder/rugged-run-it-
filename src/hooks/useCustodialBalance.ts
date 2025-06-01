@@ -91,6 +91,19 @@ export function useCustodialBalance(userId: string) {
     }
   }, [userId, updateCustodialBalance]);
 
+  // 🔥 NEW: Listen for global balance update events from transfers
+  useEffect(() => {
+    const handleBalanceUpdate = (event: CustomEvent) => {
+      if (event.detail.userId === userId) {
+        console.log('🔄 useCustodialBalance: Received balance update event from transfer');
+        updateCustodialBalance();
+      }
+    };
+    
+    window.addEventListener('custodialBalanceUpdate', handleBalanceUpdate as EventListener);
+    return () => window.removeEventListener('custodialBalanceUpdate', handleBalanceUpdate as EventListener);
+  }, [userId, updateCustodialBalance]);
+
   return { 
     custodialBalance, 
     embeddedBalance,
@@ -148,6 +161,19 @@ export const useCustodialBalanceInWithdrawModal = (userId: string) => {
       const interval = setInterval(updateCustodialBalance, 10000);
       return () => clearInterval(interval);
     }
+  }, [userId, updateCustodialBalance]);
+
+  // 🔥 NEW: Listen for global balance update events from transfers (WithdrawModal version)
+  useEffect(() => {
+    const handleBalanceUpdate = (event: CustomEvent) => {
+      if (event.detail.userId === userId) {
+        console.log('🔄 WithdrawModal: Received balance update event from transfer');
+        updateCustodialBalance();
+      }
+    };
+    
+    window.addEventListener('custodialBalanceUpdate', handleBalanceUpdate as EventListener);
+    return () => window.removeEventListener('custodialBalanceUpdate', handleBalanceUpdate as EventListener);
   }, [userId, updateCustodialBalance]);
 
   return { custodialBalance, loading, lastUpdated, updateCustodialBalance };

@@ -1855,6 +1855,7 @@ const autoTransferToGameBalance = useCallback(async (amount: number) => {
   // ADD THIS NEW FUNCTION:
 // CORRECTED EMERGENCY SYNC FUNCTION:
 // ADD THIS SIMPLER VERSION:
+// ADD THIS SIMPLE VERSION:
 const handleEmergencyBalanceSync = useCallback(async () => {
   if (!userId) {
     toast.error('User not available for sync');
@@ -1864,7 +1865,7 @@ const handleEmergencyBalanceSync = useCallback(async () => {
   toast.loading('Emergency sync...', { id: 'emergency-sync' });
   
   try {
-    // Simple API call without complex Promise handling
+    // Simple API call to our new server endpoint
     const response = await fetch(`/api/admin/force-refresh-user/${userId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1872,7 +1873,7 @@ const handleEmergencyBalanceSync = useCallback(async () => {
     });
     
     if (response.ok) {
-      // Just trigger a simple refresh
+      // Simple refresh trigger
       setTimeout(() => {
         refreshCustodialBalance();
       }, 1000);

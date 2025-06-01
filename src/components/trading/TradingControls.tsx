@@ -1856,6 +1856,7 @@ const autoTransferToGameBalance = useCallback(async (amount: number) => {
 // CORRECTED EMERGENCY SYNC FUNCTION:
 // ADD THIS SIMPLER VERSION:
 // ADD THIS SIMPLE VERSION:
+// REPLACE your handleEmergencyBalanceSync function with this:
 const handleEmergencyBalanceSync = useCallback(async () => {
   if (!userId) {
     toast.error('User not available for sync');
@@ -1865,29 +1866,35 @@ const handleEmergencyBalanceSync = useCallback(async () => {
   toast.loading('Emergency sync...', { id: 'emergency-sync' });
   
   try {
-    // Simple API call to our new server endpoint
-    const response = await fetch(`/api/admin/force-refresh-user/${userId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ walletAddress })
-    });
+    // Use existing endpoint instead of the new admin endpoint
+    const response = await fetch(`/api/custodial/balance/${userId}?force=true&emergency=true&t=${Date.now()}`);
     
     if (response.ok) {
-      // Simple refresh trigger
+      const data = await response.json();
+      
+      // Trigger refresh to get the latest data
       setTimeout(() => {
         refreshCustodialBalance();
+      }, 500);
+      
+      // Also try to trigger updateCustodialBalance
+      setTimeout(() => {
+        updateCustodialBalance();
       }, 1000);
       
-      toast.success('Emergency sync completed!', { id: 'emergency-sync' });
+      toast.success(`Emergency sync completed! Balance: ${(data.custodialBalance || 0).toFixed(3)} SOL`, { 
+        id: 'emergency-sync',
+        duration: 4000 
+      });
     } else {
-      toast.error('Emergency sync failed', { id: 'emergency-sync' });
+      toast.error('Emergency sync failed - endpoint error', { id: 'emergency-sync' });
     }
     
   } catch (error) {
     console.error('Emergency sync error:', error);
-    toast.error('Emergency sync failed', { id: 'emergency-sync' });
+    toast.error('Emergency sync failed - connection error', { id: 'emergency-sync' });
   }
-}, [userId, walletAddress, refreshCustodialBalance]);
+}, [userId, refreshCustodialBalance, updateCustodialBalance]);
  // Use forceRefresh in dependencies
 
   // Enhanced bet placement with stable dependencies

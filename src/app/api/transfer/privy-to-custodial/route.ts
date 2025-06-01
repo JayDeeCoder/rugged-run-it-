@@ -50,9 +50,7 @@ export async function POST(request: NextRequest) {
     
     // Validate environment variables
     const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-    const HOUSE_WALLET_ADDRESS = process.env.HOUSE_WALLET_ADDRESS || 
-                             process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS || 
-                             '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
+    const HOUSE_WALLET_ADDRESS = process.env.HOUSE_WALLET_ADDRESS || process.env.NEXT_PUBLIC_HOUSE_WALLET_ADDRESS;
 
     if (!SOLANA_RPC_URL) {
       console.error('❌ Missing SOLANA_RPC_URL environment variable');
@@ -84,7 +82,30 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { userId, amount, signedTransaction, autoSign = true, walletAddress } = body;
     
+    // 🔍 Complete request debug
+    console.log('🔍 Received request body:', JSON.stringify(body, null, 2));
+    
     console.log('📋 Transfer details:', { userId, amount, hasSignedTx: !!signedTransaction, autoSign, walletAddress });
+    
+    // 🔍 Debug wallet information
+    console.log('🔍 Debug wallet registration:', {
+      userId,
+      walletAddress,
+      walletAddressType: typeof walletAddress,
+      walletAddressLength: walletAddress?.length,
+      hasSignedTransaction: !!signedTransaction,
+      signedTransactionLength: signedTransaction?.length
+    });
+
+    // Also add validation check if wallet address provided
+    if (walletAddress) {
+      console.log('🔍 Wallet address validation:', {
+        address: walletAddress,
+        isValid: isValidSolanaAddress(walletAddress),
+        isString: typeof walletAddress === 'string',
+        length: walletAddress.length
+      });
+    }
     
     // Validate inputs
     if (!userId || typeof userId !== 'string') {

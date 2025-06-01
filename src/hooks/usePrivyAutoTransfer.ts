@@ -72,16 +72,31 @@ export const usePrivyAutoTransfer = () => {
 
     try {
       logger.info(`Starting auto-transfer: ${amount} SOL for user ${userId}`);
+      
+      // 🔍 executeAutoTransfer debug
+      console.log('🔍 executeAutoTransfer debug:', {
+        userId,
+        amount,
+        embeddedWallet: !!embeddedWallet,
+        walletAddress: embeddedWallet?.address,
+        walletClientType: embeddedWallet?.walletClientType,
+        walletAddressLength: embeddedWallet?.address?.length
+      });
 
       // Step 1: Get unsigned transaction from backend
+      const step1Body = { 
+        userId, 
+        amount, 
+        autoSign: false, // Request unsigned transaction
+        walletAddress: embeddedWallet.address // 🔥 ADD: Include wallet address
+      };
+      
+      console.log('🔍 Step 1 request body:', JSON.stringify(step1Body, null, 2));
+      
       const createResponse = await fetch('/api/transfer/privy-to-custodial', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          userId, 
-          amount, 
-          autoSign: false // Request unsigned transaction
-        })
+        body: JSON.stringify(step1Body)
       });
 
       const createData = await createResponse.json();
@@ -110,14 +125,19 @@ export const usePrivyAutoTransfer = () => {
       logger.info('Transaction signed successfully, submitting to network...');
 
       // Step 3: Submit signed transaction to backend
+      const step2Body = {
+        userId,
+        amount,
+        signedTransaction: signedBase64,
+        walletAddress: embeddedWallet.address // 🔥 ADD: Include wallet address
+      };
+      
+      console.log('🔍 Step 2 request body:', JSON.stringify(step2Body, null, 2));
+      
       const submitResponse = await fetch('/api/transfer/privy-to-custodial', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          amount,
-          signedTransaction: signedBase64
-        })
+        body: JSON.stringify(step2Body)
       });
 
       const submitData = await submitResponse.json();

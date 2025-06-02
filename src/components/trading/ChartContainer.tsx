@@ -12,15 +12,232 @@ import { useGameSocket } from '../../hooks/useGameSocket';
 import { toast } from 'react-hot-toast';
 import type { Order } from '../../types/trade';
 import { GameResult } from '../../types/trade';
-import { useEmbeddedGameWallet } from '../../hooks/useEmbeddedGameWallet';
 
 interface ChartContainerProps {
   useMobileHeight?: boolean;
 }
 
+// 🚀 ENHANCED: Custodial balance hook with real-time socket listeners
+const useCustodialBalance = (userId: string) => {
+  const [custodialBalance, setCustodialBalance] = useState<number>(0);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [lastUpdated, setLastUpdated] = useState<number>(0);
+  const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastUserIdRef = useRef<string>('');
+  const socketListenersRef = useRef<boolean>(false);
+
+  // Create stable update function with useCallback
+  const updateCustodialBalance = useCallback(async () => {
+    if (!userId) return;
+    
+    if (loading) return;
+    
+    setLoading(true);
+    try {
+      console.log(`🔄 Fetching custodial balance for user ${userId}...`);
+      
+      const response = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}`);
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`👤 User ${userId} not found - balance remains 0`);
+          setCustodialBalance(0);
+          return;
+        }
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.custodialBalance !== undefined) {
+        const newBalance = parseFloat(data.custodialBalance) || 0;
+        console.log(`💰 Custodial balance updated: ${newBalance.toFixed(6)} SOL`);
+        setCustodialBalance(newBalance);
+        setLastUpdated(Date.now());
+      } else {
+        console.warn('Invalid response format:', data);
+      }
+    } catch (error) {
+      console.error('❌ Failed to fetch custodial balance:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, loading]);
+
+  // Enhanced force refresh
+  const forceRefresh = useCallback(async () => {
+    if (!userId) return;
+    console.log(`🔄 Force refreshing custodial balance for ${userId}...`);
+    setLoading(true);
+
+    try {
+      const postResponse = await fetch(`/api/custodial/balance/${userId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'refresh', timestamp: Date.now() })
+      });
+      
+      if (postResponse.ok) {
+        const data = await postResponse.json();
+        if (data.custodialBalance !== undefined) {
+          const newBalance = parseFloat(data.custodialBalance) || 0;
+          console.log(`💰 Force refresh (POST): ${newBalance.toFixed(6)} SOL`);
+          setCustodialBalance(newBalance);
+          setLastUpdated(Date.now());
+          return;
+        }
+      }
+      
+      const getResponse = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}&refresh=true`);
+      
+      if (getResponse.ok) {
+        const data = await getResponse.json();
+        if (data.custodialBalance !== undefined) {
+          const newBalance = parseFloat(data.custodialBalance) || 0;
+          console.log(`💰 Force refresh (GET): ${newBalance.toFixed(6)} SOL`);
+          setCustodialBalance(newBalance);
+          setLastUpdated(Date.now());
+        }
+      } else {
+        console.error('❌ Force refresh failed:', getResponse.status);
+      }
+      
+    } catch (error) {
+      console.error('❌ Force refresh error:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+   
+  // Polling setup
+  useEffect(() => {
+    if (userId && userId !== lastUserIdRef.current) {
+      console.log(`🎯 Setting up custodial balance polling for user: ${userId}`);
+      lastUserIdRef.current = userId;
+      
+      if (updateIntervalRef.current) {
+        clearInterval(updateIntervalRef.current);
+      }
+      
+      updateCustodialBalance();
+      
+      updateIntervalRef.current = setInterval(() => {
+        if (!loading) {
+          updateCustodialBalance();
+        }
+      }, 15000); // 15 seconds
+      
+      return () => {
+        if (updateIntervalRef.current) {
+          clearInterval(updateIntervalRef.current);
+        }
+      };
+    }
+  }, [userId, updateCustodialBalance]);
+   
+  // 🚀 ENHANCED REAL-TIME SOCKET LISTENERS
+  useEffect(() => {
+    if (!userId || socketListenersRef.current) return;
+    
+    const socket = (window as any).gameSocket;
+    if (socket) {
+      console.log(`🔌 Setting up REAL-TIME custodial balance listeners for user: ${userId}`);
+      socketListenersRef.current = true;
+      
+      const handleCustodialBalanceUpdate = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💰 REAL-TIME: Custodial balance update - ${data.custodialBalance?.toFixed(6)} SOL`);
+          setCustodialBalance(parseFloat(data.custodialBalance) || 0);
+          setLastUpdated(Date.now());
+          
+          if (data.updateType === 'deposit_processed') {
+            toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL`);
+          } else if (data.updateType === 'bet_placed') {
+            toast(`Bet placed: -${data.change?.toFixed(3)} SOL`, { icon: '🎯' });
+          } else if (data.updateType === 'cashout_processed') {
+            toast.success(`Cashout: +${data.change?.toFixed(3)} SOL`);
+          }
+        }
+      };
+
+      const handleUserBalanceUpdate = (data: any) => {
+        if (data.userId === userId && data.balanceType === 'custodial') {
+          console.log(`💰 REAL-TIME: User balance update - ${data.newBalance?.toFixed(6)} SOL`);
+          setCustodialBalance(parseFloat(data.newBalance) || 0);
+          setLastUpdated(Date.now());
+          
+          if (data.transactionType === 'deposit') {
+            toast.success(`Deposit: +${data.change?.toFixed(3)} SOL`);
+          }
+        }
+      };
+
+      const handleDepositConfirmation = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💰 REAL-TIME: Deposit confirmed for ${userId}, amount: ${data.depositAmount}`);
+          
+          setCustodialBalance(prev => prev + (parseFloat(data.depositAmount) || 0));
+          setLastUpdated(Date.now());
+          
+          setTimeout(forceRefresh, 1500);
+          
+          toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL!`);
+        }
+      };
+
+      const handleCustodialBetResult = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`🎯 REAL-TIME: Custodial bet result for ${userId}`);
+          
+          if (data.success && data.custodialBalance !== undefined) {
+            setCustodialBalance(parseFloat(data.custodialBalance) || 0);
+            setLastUpdated(Date.now());
+          } else {
+            setTimeout(forceRefresh, 1000);
+          }
+        }
+      };
+
+      const handleCustodialCashoutResult = (data: any) => {
+        if (data.userId === userId) {
+          console.log(`💸 REAL-TIME: Custodial cashout result for ${userId}`);
+          
+          if (data.success && data.custodialBalance !== undefined) {
+            setCustodialBalance(parseFloat(data.custodialBalance) || 0);
+            setLastUpdated(Date.now());
+            
+            if (data.payout) {
+              toast.success(`Cashout: +${data.payout?.toFixed(3)} SOL`);
+            }
+          } else {
+            setTimeout(forceRefresh, 1000);
+          }
+        }
+      };
+      
+      socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+      socket.on('userBalanceUpdate', handleUserBalanceUpdate);
+      socket.on('depositConfirmed', handleDepositConfirmation);
+      socket.on('custodialBetResult', handleCustodialBetResult);
+      socket.on('custodialCashOutResult', handleCustodialCashoutResult);
+      
+      return () => {
+        console.log(`🔌 Cleaning up REAL-TIME custodial balance listeners for user: ${userId}`);
+        socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+        socket.off('userBalanceUpdate', handleUserBalanceUpdate);
+        socket.off('depositConfirmed', handleDepositConfirmation);
+        socket.off('custodialBetResult', handleCustodialBetResult);
+        socket.off('custodialCashOutResult', handleCustodialCashoutResult);
+        socketListenersRef.current = false;
+      };
+    }
+  }, [userId, forceRefresh]);
+
+  return { custodialBalance, loading, lastUpdated, updateCustodialBalance, forceRefresh };
+};
+
 const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) => {
   const { width } = useWindowSize();
-  const [walletBalance, setWalletBalance] = useState<number>(0);
   const [holdings, setHoldings] = useState<number>(0);
   const [triggerSellEffect, setTriggerSellEffect] = useState<boolean>(false);
   const [sellSuccess, setSellSuccess] = useState<boolean>(false);
@@ -32,39 +249,40 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   const [userBet, setUserBet] = useState<number>(0);
   const [betEntryMultiplier, setBetEntryMultiplier] = useState<number>(1.0);
   const [lastGameNumber, setLastGameNumber] = useState<number>(0);
-  const [userCashedOut, setUserCashedOut] = useState<boolean>(false); // NEW: Track if user cashed out
+  const [userCashedOut, setUserCashedOut] = useState<boolean>(false);
   
-  // Create a reference to the chart container
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
   // Use Privy hooks for authentication
   const { authenticated } = usePrivy();
   const { wallets } = useSolanaWallets();
   
-  // Use embedded game wallet hook
-  const { wallet: gameWallet, walletData } = useEmbeddedGameWallet();
-
-  const { trades, currentPrice, balance: gameBalance, placeOrder } = useContext(TradeContext);
+  const { trades, currentPrice, placeOrder } = useContext(TradeContext);
   const { isAuthenticated, currentUser } = useContext(UserContext);
 
   // Get wallet address for game socket
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   const walletAddress = embeddedWallet?.address || '';
   
-  // Connect to real game server - ENHANCED with full data extraction
+  // 🚀 UPDATED: Use custodial balance instead of embedded wallet balance
+  const { 
+    custodialBalance, 
+    loading: custodialBalanceLoading, 
+    forceRefresh: refreshCustodialBalance 
+  } = useCustodialBalance(currentUser?.id || '');
+  
+  // Connect to real game server
   const { 
     currentGame, 
     isConnected, 
-    placeBet, 
-    cashOut, 
     countdown,
     isWaitingPeriod,
-    canBet 
+    canBet,
+    placeCustodialBet,
+    custodialCashOut
   } = useGameSocket(walletAddress, currentUser?.id);
 
   const isMobile = width ? width < 768 : false;
-
-  // Use ref to track if the component is mounted to avoid state updates after unmount
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -92,40 +310,12 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   useEffect(() => {
     if (gameResults.length > 0) {
       try {
-        localStorage.setItem('gameResults', JSON.stringify(gameResults.slice(-50))); // Keep last 50 results
+        localStorage.setItem('gameResults', JSON.stringify(gameResults.slice(-50)));
       } catch (error) {
         console.error('Failed to save game results:', error);
       }
     }
   }, [gameResults]);
-
-  // Fetch wallet balance
-  useEffect(() => {
-    const fetchBalance = async () => {
-      if (authenticated && gameWallet) {
-        try {
-          // Use wallet data from the hook
-          if (walletData && walletData.balance) {
-            if (isMountedRef.current) {
-              setWalletBalance(parseFloat(walletData.balance));
-            }
-          }
-        } catch (error) {
-          console.error('Failed to fetch wallet balance:', error);
-        }
-      } else {
-        if (isAuthenticated && gameBalance && isMountedRef.current) {
-          setWalletBalance(gameBalance);
-        } else if (isMountedRef.current) {
-          setWalletBalance(0);
-        }
-      }
-    };
-
-    fetchBalance();
-    const intervalId = setInterval(fetchBalance, 5000);
-    return () => clearInterval(intervalId);
-  }, [authenticated, gameWallet, walletData, gameBalance, isAuthenticated]);
 
   // Calculate holdings from trades
   useEffect(() => {
@@ -145,7 +335,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   useEffect(() => {
     if (!currentGame || !isMountedRef.current) return;
 
-    // Reset user bet state on new game - COMPLETE CLEAN SLATE
+    // Reset user bet state on new game
     if (currentGame.gameNumber !== lastGameNumber) {
       setUserBet(0);
       setBetEntryMultiplier(1.0);
@@ -155,11 +345,10 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       console.log(`🎮 New game #${currentGame.gameNumber} - User state reset`);
     }
 
-    // Handle game crash - only process real server events
+    // Handle game crash
     if (currentGame.status === 'crashed') {
       const crashMultiplier = currentGame.multiplier;
       
-      // Add to real game results
       const newResult: GameResult = {
         value: crashMultiplier,
         label: `${crashMultiplier.toFixed(2)}x`,
@@ -168,36 +357,31 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       
       setGameResults(prev => [newResult, ...prev.slice(0, 49)]);
       
-      // Handle user's bet result - server should tell us the result
       if (userBet > 0) {
-        // If we had a bet and game crashed, we lost (unless we cashed out)
         setSellSuccess(false);
         setTriggerSellEffect(true);
         toast.error(`Crashed at ${crashMultiplier.toFixed(2)}x! Lost ${userBet.toFixed(3)} SOL`);
         
-        // Reset user bet
         setUserBet(0);
         setBetEntryMultiplier(1.0);
-        setUserCashedOut(false); // Reset cashout flag
+        setUserCashedOut(false);
       }
     }
   }, [currentGame, lastGameNumber, userBet]);
 
-  // Handle effect completion
   const handleEffectComplete = () => {
     if (isMountedRef.current) {
       setTriggerSellEffect(false);
     }
   };
 
-  // ENHANCED: Real server bet placement with result tracking
+  // 🚀 UPDATED: Use custodial betting instead of regular betting
   const handleBuy = useCallback(async (amount: number) => {
-    if (amount <= 0 || amount > walletBalance || !currentGame || !isMountedRef.current) {
+    if (amount <= 0 || amount > custodialBalance || !currentGame || !isMountedRef.current) {
       toast.error('Cannot buy right now');
       return;
     }
 
-    // Allow betting during waiting period OR active game
     if (currentGame.status !== 'active' && currentGame.status !== 'waiting') {
       toast.error('Game not available');
       return;
@@ -208,35 +392,19 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       return;
     }
 
+    if (!currentUser?.id) {
+      toast.error('User not authenticated');
+      return;
+    }
+
     setIsPlacingBet(true);
     
     try {
-      console.log(`Placing real bet: ${amount} SOL in game #${currentGame.gameNumber} (${currentGame.status})`);
+      console.log(`Placing custodial bet: ${amount} SOL in game #${currentGame.gameNumber} (${currentGame.status})`);
 
-      // Place bet on real server - handle both return types
-      const result = await placeBet(walletAddress, amount, currentUser?.id);
-      
-      // Handle different return types from useGameSocket with proper type guards
-      let success: boolean;
-      let entryMultiplier: number;
-      let reason: string | undefined;
-
-      if (typeof result === 'boolean') {
-        success = result;
-        entryMultiplier = currentGame.multiplier;
-        reason = undefined;
-      } else if (result && typeof result === 'object' && 'success' in result) {
-        success = (result as any).success;
-        entryMultiplier = (result as any).entryMultiplier || currentGame.multiplier;
-        reason = (result as any).reason;
-      } else {
-        success = false;
-        entryMultiplier = currentGame.multiplier;
-        reason = 'Unknown response format';
-      }
+      const success = await placeCustodialBet(currentUser.id, amount);
       
       if (success) {
-        // Create order for local tracking
         const order: Order = {
           side: 'buy',
           amount,
@@ -245,35 +413,39 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
 
         placeOrder(order);
         
-        // Track bet with entry multiplier from server or current game multiplier
+        const entryMultiplier = currentGame.status === 'waiting' ? 1.0 : currentGame.multiplier;
         setUserBet(amount);
         setBetEntryMultiplier(entryMultiplier);
         
         const betType = currentGame.status === 'waiting' ? 'Pre-game bet' : 'Live bet';
         toast.success(`${betType} placed: ${amount} SOL @ ${entryMultiplier.toFixed(2)}x`);
       } else {
-        toast.error(reason || 'Failed to place buy on server');
+        toast.error('Failed to place bet');
       }
     } catch (error) {
-      console.error('Failed to place buy:', error);
-      toast.error('Failed to place buy');
+      console.error('Failed to place bet:', error);
+      toast.error('Failed to place bet');
     } finally {
       if (isMountedRef.current) {
         setIsPlacingBet(false);
       }
     }
-  }, [walletBalance, currentGame, placeBet, walletAddress, currentUser?.id, placeOrder, canBet]);
+  }, [custodialBalance, currentGame, placeCustodialBet, currentUser?.id, placeOrder, canBet]);
 
-  // ENHANCED: Real server cashout with server result tracking
+  // 🚀 UPDATED: Use custodial cashout instead of regular cashout
   const handleSell = useCallback(async (percentage: number) => {
     if (userBet <= 0 || !currentGame || currentGame.status !== 'active' || !isMountedRef.current) {
       toast.error('No active bet to RUG');
       return;
     }
 
-    // Only allow 100% cashout with current server API
     if (percentage < 100) {
       toast.error('Partial cashouts not supported yet');
+      return;
+    }
+
+    if (!currentUser?.id) {
+      toast.error('User not authenticated');
       return;
     }
 
@@ -283,10 +455,8 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       const currentMultiplier = currentGame.multiplier;
       console.log(`Cashing out 100% at multiplier ${currentMultiplier}x`);
 
-      // Cash out on real server - handle both return types
-      const result = await cashOut(walletAddress);
+      const result = await custodialCashOut(currentUser.id, walletAddress);
       
-      // Handle different return types from useGameSocket with proper type guards
       let success: boolean;
       let payout: number | undefined;
       let reason: string | undefined;
@@ -306,13 +476,10 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       }
       
       if (success) {
-        // Calculate payout if not provided by server
-        const finalPayout = payout || (userBet * currentMultiplier * 0.6); // 40% house edge
+        const finalPayout = payout || (userBet * currentMultiplier * 0.6);
         
-        // Mark that user cashed out
         setUserCashedOut(true);
         
-        // Create sell order for local tracking
         const order: Order = {
           side: 'sell',
           amount: finalPayout,
@@ -321,7 +488,6 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
 
         placeOrder(order);
         
-        // Add to game results for successful cashouts
         const newResult: GameResult = {
           value: currentMultiplier,
           label: `${currentMultiplier.toFixed(2)}x`,
@@ -330,19 +496,17 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         
         setGameResults(prev => [newResult, ...prev.slice(0, 49)]);
         
-        // Show win effect
         setSellSuccess(true);
         setTriggerSellEffect(true);
         
-        // Reset user bet since we cashed out
         setUserBet(0);
         setBetEntryMultiplier(1.0);
-        setUserCashedOut(false); // Reset cashout flag for next bet
+        setUserCashedOut(false);
         
         const profit = finalPayout - userBet;
         toast.success(`Cashed out: +${profit.toFixed(3)} SOL (${finalPayout.toFixed(3)} total)`);
       } else {
-        toast.error(reason || 'Failed to RUG on server');
+        toast.error(reason || 'Failed to RUG');
       }
     } catch (error) {
       console.error('Failed to RUG:', error);
@@ -352,9 +516,8 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         setIsCashingOut(false);
       }
     }
-  }, [userBet, currentGame, cashOut, walletAddress, placeOrder]);
+  }, [userBet, currentGame, custodialCashOut, currentUser?.id, walletAddress, placeOrder]);
 
-  // Calculate game statistics from real results
   const calculateGameStats = useCallback(() => {
     if (gameResults.length === 0) {
       return { average: "0.00", highest: "0.00" };
@@ -371,12 +534,11 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   
   const gameStats = calculateGameStats();
 
-  // Calculate chart height based on viewport size - COMPACT SIZE
   const getChartHeight = () => {
     if (useMobileHeight && isMobile) {
-      return 240; // Back to 240px - perfect UI size
+      return 240;
     }
-    return isMobile ? 260 : 500; // Mobile max 260px
+    return isMobile ? 260 : 500;
   };
 
   // Real game data from server
@@ -390,7 +552,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
 
   return (
     <div className="p-2 flex flex-col">
-      {/* Game Identification and Status - more compact for mobile */}
+      {/* Game Identification and Status */}
       <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg flex items-center justify-between border border-gray-800 ${isMobile ? 'text-xs' : 'text-sm md:text-base'}`}>
         <div className="flex items-center">
           <span className="text-gray-400 mr-1">Round #</span>
@@ -421,11 +583,11 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         </div>
       </div>
 
-      {/* Balance and Holdings Display - more compact */}
+      {/* 🚀 UPDATED: Balance Display - Now shows custodial balance */}
       <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg flex flex-wrap justify-between border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>
         <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
           <span className="text-gray-400">Balance:</span>
-          <span className="text-green-400 ml-1 font-bold">{walletBalance.toFixed(3)}</span>
+          <span className="text-green-400 ml-1 font-bold">{custodialBalance.toFixed(3)}</span>
         </div>
         <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
           <span className="text-gray-400">Ape:</span>
@@ -447,31 +609,31 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         </div>
       </div>
 
-      {/* Real game info - compact */}
+      {/* 🚀 UPDATED: Real game info - Changed "Players" to "RUGGERS" */}
       {currentGame && (
         <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs'} text-gray-400`}>
           <div className="flex justify-between">
-            <span>Players: {currentGame.totalPlayers || 0}</span>
+            <span>RUGGERS: {currentGame.totalPlayers || 0}</span>
             <span>Total Liq: {(currentGame.totalBets || 0).toFixed(3)} SOL</span>
             {showCountdown && <span className="text-blue-400">Next: {countdownSeconds}s</span>}
           </div>
         </div>
       )}
 
-      {/* Mini charts showing recent game results - REAL DATA */}
+      {/* Mini charts showing recent game results */}
       <div className="mb-2">
         <MiniCharts 
           data={gameResults} 
-          maxCharts={isMobile ? 4 : 8} // Reduced for mobile
+          maxCharts={isMobile ? 4 : 8}
           onNewGame={(result) => {
             console.log('New game result:', result);
           }}
         />
       </div>
 
-      {/* Mobile optimized layout - smaller containers */}
+      {/* Mobile optimized layout */}
       <div className={`grid grid-cols-1 ${isMobile ? '' : 'md:grid-cols-4'} gap-4`}>
-        {/* Chart container - SMALLER mobile height with better margins */}
+        {/* Chart container */}
         <div 
           key={`game-${gameId}`} 
           ref={chartContainerRef}
@@ -479,17 +641,16 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
           style={{ height: `${getChartHeight()}px` }}
         >
           <CandlestickChart 
-            onMultiplierUpdate={() => {}} // Multiplier comes from real server now
-            onGameCrash={() => {}} // Handled by real server events
+            onMultiplierUpdate={() => {}}
+            onGameCrash={() => {}}
             currentBet={userBet}
             betPlacedAt={betEntryMultiplier}
             height={getChartHeight()}
             useMobileHeight={isMobile}
-            // REAL SERVER DATA
             serverMultiplier={currentMultiplier}
             serverGameStatus={gameStatus}
             isServerConnected={isConnected}
-            didCashOut={userCashedOut} // NEW: Pass cashout flag
+            didCashOut={userCashedOut}
           />
 
           {triggerSellEffect && (
@@ -501,25 +662,24 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
             />
           )}
           
-          {/* Simple countdown overlay */}
           {showCountdown && (
             <div className="absolute inset-0 flex items-center justify-center z-50 bg-gradient-to-b from-black/60 to-black/70 backdrop-blur-sm">
               <GameCountdown 
                 seconds={countdownSeconds} 
-                onComplete={() => {}} // Server handles game start
+                onComplete={() => {}}
                 lastCrashMultiplier={gameResults[0]?.value || null}
-                isServerSynced={isConnected} // NEW: Sync with server when connected
+                isServerSynced={isConnected}
               />
             </div>
           )}
         </div>
 
-        {/* Trading controls - always visible */}
+        {/* 🚀 UPDATED: Trading controls - Now uses custodial balance */}
         <div className={`${isMobile ? '' : 'md:col-span-1'}`}>
           <TradingControls 
             onBuy={handleBuy} 
             onSell={handleSell} 
-            walletBalance={walletBalance}
+            walletBalance={custodialBalance}
             holdings={holdings}
             currentMultiplier={currentMultiplier}
             isPlacingBet={isPlacingBet}
@@ -531,7 +691,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         </div>
       </div>
 
-      {/* Game Statistics - from real results, more compact */}
+      {/* Game Statistics */}
       <div className={`mt-4 bg-[#0d0d0f] p-3 rounded-lg border border-gray-800 ${isMobile ? 'p-2' : 'p-3'}`}>
         <div className="grid grid-cols-3 gap-4">
           <div className="text-center">

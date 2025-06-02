@@ -37,29 +37,16 @@ const ReferralSection: React.FC<ReferralSectionProps> = ({
       try {
         console.log(`🔄 ReferralSection: Fetching stats for user ${userId}...`);
         
-        // Try the frontend service first (read-only operations)
+        // Try the frontend service (now with auto-creation)
         const referralStats = await referralService.getReferralStats(userId);
         
         if (referralStats) {
           setStats(referralStats);
           console.log(`✅ ReferralSection: Stats loaded for user ${userId}`);
         } else {
-          // If no stats from frontend service, try API route as fallback
-          console.log(`🔄 ReferralSection: Trying API fallback for user ${userId}...`);
-          
-          const response = await fetch(`/api/referrals/stats?userId=${userId}`);
-          
-          if (response.ok) {
-            const apiStats = await response.json();
-            setStats(apiStats);
-            console.log(`✅ ReferralSection: Stats loaded via API for user ${userId}`);
-          } else if (response.status === 404) {
-            // User profile doesn't exist yet
-            console.log(`📝 ReferralSection: No profile found for user ${userId}`);
-            setStats(null);
-          } else {
-            throw new Error(`API request failed: ${response.status}`);
-          }
+          // If still no stats, user profile creation might have failed
+          console.log(`⚠️ ReferralSection: Unable to create/load profile for user ${userId}`);
+          setStats(null);
         }
         
       } catch (err) {
@@ -126,12 +113,12 @@ const ReferralSection: React.FC<ReferralSectionProps> = ({
           <Gift size={20} className="mr-2" />
           Referral Program
         </h2>
-        <div className="bg-yellow-900 bg-opacity-30 border border-yellow-800 rounded-lg p-4">
-          <div className="text-yellow-400 text-sm">
-            ℹ️ Referral profile not set up yet
+        <div className="bg-blue-900 bg-opacity-30 border border-blue-800 rounded-lg p-4">
+          <div className="text-blue-400 text-sm">
+            🔄 Setting up your referral profile...
           </div>
           <div className="text-gray-400 text-xs mt-1">
-            Your referral profile will be created automatically on your next game interaction.
+            Your unique referral code will be generated automatically. Try refreshing in a moment!
           </div>
         </div>
       </div>

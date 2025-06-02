@@ -1,9 +1,6 @@
-// src/services/ReferralService.ts - Clean, error-free version
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-
-// Hardcoded fallback values for frontend use
-const FALLBACK_SUPABASE_URL = 'https://ineaxxqjkryoobobxrsw.supabase.co';
-const FALLBACK_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImluZWF4eHFqa3J5b29ib2J4cnN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc3NzMxMzIsImV4cCI6MjA2MzM0OTEzMn0.DiFLCCe5-UnzsGpG7dsqJWoUbxmaJxc_v89pxxsa1aA';
+// src/services/ReferralService.ts - Clean frontend-safe version
+import { SupabaseClient } from '@supabase/supabase-js';
+import { getFrontendSupabaseClient } from '../utils/supabase';
 
 export interface ReferralData {
   id: string;
@@ -59,69 +56,30 @@ export class ReferralService {
   private initialized = false;
 
   /**
-   * Initialize the Supabase client with proper error handling
+   * Initialize the service with frontend-safe Supabase client
    */
   private async initialize(): Promise<void> {
     if (this.initialized) return;
 
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || FALLBACK_SUPABASE_URL;
-      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || FALLBACK_SUPABASE_ANON_KEY;
-
-      console.log('🔧 ReferralService Config:', {
-        hasEnvUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-        hasEnvKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-        usingFallback: !process.env.NEXT_PUBLIC_SUPABASE_URL,
-        url: supabaseUrl.substring(0, 30) + '...'
-      });
-
-      if (!supabaseUrl || !supabaseAnonKey) {
-        throw new Error('Missing Supabase configuration');
-      }
-
-      this.supabase = createClient(supabaseUrl, supabaseAnonKey);
+      console.log('🔧 ReferralService: Initializing...');
+      
+      this.supabase = getFrontendSupabaseClient();
       this.initialized = true;
 
-      console.log('✅ ReferralService initialized successfully (frontend-safe)');
+      console.log('✅ ReferralService: Initialized successfully (frontend-safe)');
       
-      // Test connection in background without blocking
-      this.testConnectionInBackground();
+      // Test connection in background (don't await)
+      this.performConnectionTest();
 
     } catch (error) {
-      console.error('❌ Failed to initialize ReferralService:', error);
+      console.error('❌ ReferralService: Failed to initialize:', error);
       throw error;
     }
   }
 
   /**
-   * Test Supabase connection in background
-   */
-  private testConnectionInBackground(): void {
-    // Use setTimeout to avoid blocking initialization
-    setTimeout(() => {
-      this.performConnectionTest();
-    }, 100);
-  }
-
-  /**
-   * Perform the actual connection test
-   */
-  private async performConnectionTest(): Promise<void> {
-    if (!this.supabase) {
-      console.warn('⚠️ ReferralService: No Supabase client for connection test');
-      return;
-    }
-
-    try {
-      await this.supabase.from('profiles').select('count').limit(1);
-      console.log('✅ ReferralService connection test passed');
-    } catch (error) {
-      console.warn('⚠️ ReferralService connection test failed:', error);
-    }
-  }
-
-  /**
-   * Get the initialized Supabase client
+   * Get initialized Supabase client
    */
   private async getSupabase(): Promise<SupabaseClient> {
     await this.initialize();
@@ -132,7 +90,27 @@ export class ReferralService {
   }
 
   /**
-   * Get referral stats for user
+   * Perform connection test (fire and forget)
+   */
+  private performConnectionTest(): void {
+    if (!this.supabase) {
+      console.warn('⚠️ ReferralService: No client available for connection test');
+      return;
+    }
+
+    // Use setTimeout to run async test without blocking
+    setTimeout(async () => {
+      try {
+        await this.supabase!.from('player_bets').select('count').limit(1);
+        console.log('✅ ReferralService: Connection test passed');
+      } catch (error) {
+        console.warn('⚠️ ReferralService: Connection test failed:', error);
+      }
+    }, 100);
+  }
+
+  /**
+   * Get referral stats for user (READ-ONLY operations safe for frontend)
    */
   async getReferralStats(userId: string): Promise<ReferralStats | null> {
     try {
@@ -149,6 +127,7 @@ export class ReferralService {
       if (profileError) {
         console.error('❌ ReferralService: Profile query error:', profileError);
         if (profileError.code === 'PGRST116') {
+          // No rows returned - user doesn't exist yet
           console.log(`📝 ReferralService: No profile found for user ${userId}`);
           return null;
         }
@@ -199,7 +178,7 @@ export class ReferralService {
         referralCode: profile.referral_code || '',
         totalReferrals: profile.total_referrals || 0,
         totalRewards: profile.total_referral_rewards || 0,
-        pendingRewards: pendingRewards?.reduce((sum, reward) => sum + parseFloat(reward.amount.toString()), 0) || 0,
+        pendingRewards: pendingRewards?.reduce((sum, reward) => sum + parseFloat(reward.amount), 0) || 0,
         recentReferrals: recentReferrals || [],
         pendingReferralRewards: pendingRewards || [],
         nextMilestone: nextMilestone ? {
@@ -219,7 +198,7 @@ export class ReferralService {
   }
 
   /**
-   * Validate referral code
+   * Validate referral code (READ-ONLY, safe for frontend)
    */
   async validateReferralCode(code: string): Promise<{
     valid: boolean;
@@ -236,6 +215,7 @@ export class ReferralService {
 
       if (error) {
         if (error.code === 'PGRST116') {
+          // No rows found
           return { valid: false };
         }
         throw error;
@@ -258,7 +238,7 @@ export class ReferralService {
   }
 
   /**
-   * Get user referral code
+   * Get basic user referral info (READ-ONLY, safe for frontend)
    */
   async getUserReferralCode(userId: string): Promise<string | null> {
     try {
@@ -285,35 +265,17 @@ export class ReferralService {
     }
   }
 
-  /**
-   * Check if service is ready
-   */
-  isReady(): boolean {
-    return this.initialized && this.supabase !== null;
-  }
-
-  /**
-   * Get service status for debugging
-   */
-  getStatus(): {
-    initialized: boolean;
-    hasClient: boolean;
-    config: {
-      hasEnvUrl: boolean;
-      hasEnvKey: boolean;
-      usingFallback: boolean;
-    };
-  } {
-    return {
-      initialized: this.initialized,
-      hasClient: this.supabase !== null,
-      config: {
-        hasEnvUrl: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
-        hasEnvKey: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-        usingFallback: !process.env.NEXT_PUBLIC_SUPABASE_URL
-      }
-    };
-  }
+  /*
+  ⚠️ WRITE OPERATIONS DISABLED FOR FRONTEND SAFETY
+  
+  The following operations require server-side execution with service role key:
+  - createUserProfile()
+  - processUserLogin() 
+  - processReferralPayout()
+  - activateReferralAndReward()
+  
+  These should be implemented as API routes in /app/api/referrals/
+  */
 }
 
 // Create and export singleton instance

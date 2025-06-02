@@ -1,3 +1,5 @@
+// Replace the top section of your Dashboard component with this:
+
 'use client';
 
 import { FC, useState, useEffect, useContext, useCallback, useRef } from 'react';
@@ -13,17 +15,44 @@ import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import ReferralSection from '../../components/ReferralSection';
 
-// 🚀 FIX: Create singleton Supabase client to avoid multiple instances
+// 🚀 FIX: Hardcoded Supabase config with environment variable fallback
+const FALLBACK_SUPABASE_URL = 'https://ineaxxqjkryoobobxrsw.supabase.co';
+const FALLBACK_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImluZWF4eHFqa3J5b29ib2J4cnN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc3NzMxMzIsImV4cCI6MjA2MzM0OTEzMn0.DiFLCCe5-UnzsGpG7dsqJWoUbxmaJxc_v89pxxsa1aA';
+
 let supabaseClient: any = null;
 const getSupabaseClient = () => {
   if (!supabaseClient) {
-    supabaseClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
+    // Try environment variables first, fallback to hardcoded values
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || FALLBACK_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || FALLBACK_SUPABASE_ANON_KEY;
+    
+    // Debug logging
+    console.log('🔧 Supabase initialization:', {
+      envUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'FOUND' : 'MISSING',
+      envKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'FOUND' : 'MISSING',
+      usingFallback: !process.env.NEXT_PUBLIC_SUPABASE_URL,
+      finalUrl: supabaseUrl.substring(0, 30) + '...'
+    });
+    
+    try {
+      supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+      console.log('✅ Supabase client created successfully');
+      
+      // Test the connection
+      supabaseClient.from('player_bets').select('count').limit(1)
+        .then(() => console.log('✅ Supabase connection test passed'))
+        .catch((err: any) => console.warn('⚠️ Supabase test query failed:', err.message));
+        
+    } catch (error) {
+      console.error('❌ Failed to create Supabase client:', error);
+      throw error;
+    }
   }
   return supabaseClient;
 };
+
+// Rest of your component code stays the same...
+// Just make sure you're using getSupabaseClient() instead of createClient directly
 
 // 🚀 FIX: TypeScript interface for bet data from Supabase
 interface PlayerBet {

@@ -399,22 +399,40 @@ export class ChartAPI {
 }
 
 // User API
+// src/services/api.ts - Enhanced UserAPI with validation
+// Replace your existing UserAPI class with this enhanced version
+
 export class UserAPI {
+  /**
+   * Enhanced getUserOrCreate with validation to prevent mapping issues
+   */
   static async getUserOrCreate(walletAddress: string): Promise<UserData | null> {
     try {
-      // Try to get existing user
+      console.log(`🔍 Getting user for wallet: ${walletAddress}`);
+      
+      if (!walletAddress) {
+        throw new Error('Wallet address is required');
+      }
+      
+      // Normalize wallet address (lowercase for consistency)
+      const normalizedWallet = walletAddress.toLowerCase();
+      
+      // Step 1: Try to get existing user with validation
+      console.log(`📡 Fetching user from Supabase for wallet: ${normalizedWallet}`);
       let { data: user, error } = await supabase
         .from('users')
         .select('*')
-        .eq('wallet_address', walletAddress)
+        .eq('wallet_address', normalizedWallet)
         .single();
 
       if (error && error.code === 'PGRST116') {
         // User doesn't exist, create new one
+        console.log(`👤 Creating new user for wallet: ${normalizedWallet}`);
+        
         const { data: newUser, error: createError } = await supabase
           .from('users')
           .insert({
-            wallet_address: walletAddress,
+            wallet_address: normalizedWallet,
             username: `user${walletAddress.slice(-4)}`,
             avatar: '👤',
             level: 1,
@@ -424,28 +442,270 @@ export class UserAPI {
           .single();
 
         if (createError) {
-          logger.error('Error creating user:', createError);
-          throw createError;
+          console.error('❌ Error creating user:', createError);
+          
+          // Check if it's a duplicate key error (another user creation race condition)
+          if (createError.code === '23505') {
+            console.log(`🔄 Duplicate user detected during creation, fetching existing user...`);
+            
+            // Try to fetch the user that was created by another process
+            const { data: existingUser, error: fetchError } = await supabase
+              .from('users')
+              .select('*')
+              .eq('wallet_address', normalizedWallet)
+              .single();
+            
+            if (fetchError) {
+              console.error('❌ Failed to fetch user after duplicate creation:', fetchError);
+              throw createError;
+            }
+            
+            user = existingUser;
+            console.log(`✅ Found user created by another process: ${user.id}`);
+          } else {
+            throw createError;
+          }
+        } else {
+          user = newUser;
+          console.log(`✅ Created new user: ${user.id} for wallet: ${normalizedWallet}`);
         }
-        user = newUser;
       } else if (error) {
-        logger.error('Error fetching user:', error);
+        console.error('❌ Error fetching user:', error);
         throw error;
+      } else {
+        console.log(`✅ Found existing user: ${user.id} for wallet: ${normalizedWallet}`);
       }
 
-      return user;
+      // CRITICAL VALIDATION: Ensure the returned user actually owns this wallet
+      if (!user || !user.wallet_address) {
+        console.error(`❌ Invalid user data returned:`, user);
+        throw new Error('Invalid user data returned from database');
+      }
+      
+      if (user.wallet_address.toLowerCase() !== normalizedWallet) {
+        console.error(`❌ USER MAPPING ERROR DETECTED!`);
+        console.error(`   Requested wallet: ${walletAddress}`);
+        console.error(`   Normalized wallet: ${normalizedWallet}`);
+        console.error(`   Database wallet: ${user.wallet_address}`);
+        console.error(`   User ID: ${user.id}`);
+        
+        // Log this critical error for investigation
+        console.error(`🚨 CRITICAL: Invalid user-wallet mapping detected - needs immediate attention`);
+        
+        // Try to log this to your audit system if you have one
+        try {
+          await supabase
+            .from('audit_log')
+            .insert({
+              action: 'MAPPING_ERROR_DETECTED',
+              details: {
+                requestedWallet: walletAddress,
+                normalizedWallet: normalizedWallet,
+                databaseWallet: user.wallet_address,
+                userId: user.id,
+                timestamp: new Date().toISOString(),
+                userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'server'
+              }
+            });
+        } catch (auditError) {
+          console.warn('⚠️ Failed to log mapping error to audit trail:', auditError);
+        }
+        
+        throw new Error(`Invalid user-wallet mapping detected for wallet ${walletAddress}`);
+      }
+
+      // Additional validation: Check if this makes sense
+      if (!user.id || user.id.length < 10) {
+        console.error(`❌ Invalid user ID: ${user.id}`);
+        throw new Error('Invalid user ID returned from database');
+      }
+
+      console.log(`✅ VALIDATED user mapping: ${user.id} <-> ${normalizedWallet}`);
+      
+      // Convert snake_case to camelCase for frontend consistency
+      const userData: UserData = {
+        id: user.id,
+        wallet_address: user.wallet_address,
+        username: user.username,
+        avatar: user.avatar,
+        level: user.level,
+        experience: user.experience,
+        badge: user.badge,
+        created_at: user.created_at,
+        updated_at: user.updated_at
+      };
+      
+      return userData;
+      
     } catch (error) {
-      logger.error('Error getting/creating user:', error);
+      console.error('❌ UserAPI.getUserOrCreate error:', error);
+      
+      // If it's a mapping error, provide helpful debug info
+      if (error instanceof Error && error.message.includes('Invalid user-wallet mapping')) {
+        console.error(`🔧 DEBUG INFO for support:`);
+        console.error(`   Wallet: ${walletAddress}`);
+        console.error(`   Timestamp: ${new Date().toISOString()}`);
+        console.error(`   User Agent: ${typeof navigator !== 'undefined' ? navigator.userAgent : 'server'}`);
+      }
+      
       return null;
     }
   }
 
+  /**
+   * NEW: Force refresh user data (for when mappings might be stale)
+   */
+  static async refreshUserData(walletAddress: string): Promise<UserData | null> {
+    try {
+      console.log(`🔄 Force refreshing user data for wallet: ${walletAddress}`);
+      
+      const normalizedWallet = walletAddress.toLowerCase();
+      
+      // Force a fresh query by using a timestamp
+      const { data: user, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('wallet_address', normalizedWallet)
+        .single();
+
+      if (error) {
+        console.error(`❌ Failed to refresh user data: ${error.message}`);
+        return null;
+      }
+
+      console.log(`✅ Refreshed user data: ${user.id} for wallet: ${walletAddress}`);
+      return user;
+    } catch (error) {
+      console.error('❌ Error refreshing user data:', error);
+      return null;
+    }
+  }
+
+  /**
+   * NEW: Validate that a user-wallet mapping is correct
+   */
+  static async validateUserWalletMapping(userId: string, walletAddress: string): Promise<boolean> {
+    try {
+      console.log(`🔍 Validating mapping: ${userId} <-> ${walletAddress}`);
+      
+      const { data: user, error } = await supabase
+        .from('users')
+        .select('id, wallet_address')
+        .eq('id', userId)
+        .single();
+
+      if (error) {
+        console.warn(`⚠️ Validation failed - user not found: ${error.message}`);
+        return false;
+      }
+
+      const isValid = user.wallet_address?.toLowerCase() === walletAddress.toLowerCase();
+      
+      if (!isValid) {
+        console.warn(`⚠️ VALIDATION FAILED:`);
+        console.warn(`   User ID: ${userId}`);
+        console.warn(`   Expected wallet: ${walletAddress}`);
+        console.warn(`   Database wallet: ${user.wallet_address}`);
+      } else {
+        console.log(`✅ Validation passed: ${userId} <-> ${walletAddress}`);
+      }
+
+      return isValid;
+    } catch (error) {
+      console.error('❌ Failed to validate user-wallet mapping:', error);
+      return false;
+    }
+  }
+
+  /**
+   * NEW: Check for duplicate wallet addresses (admin/debug function)
+   */
+  static async checkForDuplicateWallets(): Promise<any[]> {
+    try {
+      console.log(`🔍 Checking for duplicate wallet addresses...`);
+      
+      // This query finds all wallet addresses that appear more than once
+      const { data, error } = await supabase
+        .rpc('find_duplicate_wallets'); // You'll need to create this function in Supabase
+      
+      if (error) {
+        console.error('❌ Failed to check for duplicates:', error);
+        return [];
+      }
+      
+      if (data && data.length > 0) {
+        console.warn(`⚠️ Found ${data.length} duplicate wallet addresses:`, data);
+      } else {
+        console.log(`✅ No duplicate wallet addresses found`);
+      }
+      
+      return data || [];
+    } catch (error) {
+      console.error('❌ Error checking for duplicate wallets:', error);
+      return [];
+    }
+  }
+
+  /**
+   * NEW: Emergency user lookup with comprehensive validation
+   */
+  static async emergencyUserLookup(walletAddress: string): Promise<any> {
+    try {
+      console.log(`🚨 Emergency user lookup for wallet: ${walletAddress}`);
+      
+      const normalizedWallet = walletAddress.toLowerCase();
+      
+      // Get all users with this wallet address (should only be one)
+      const { data: users, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('wallet_address', normalizedWallet);
+
+      const result = {
+        walletAddress: walletAddress,
+        normalizedWallet: normalizedWallet,
+        usersFound: users?.length || 0,
+        users: users || [],
+        error: error?.message,
+        timestamp: new Date().toISOString()
+      };
+
+      console.log(`🚨 Emergency lookup result:`, result);
+      
+      if (users && users.length > 1) {
+        console.error(`❌ CRITICAL: Found ${users.length} users with wallet ${walletAddress}!`);
+        
+        // Log this critical issue
+        try {
+          await supabase
+            .from('audit_log')
+            .insert({
+              action: 'DUPLICATE_WALLET_DETECTED',
+              details: result
+            });
+        } catch (auditError) {
+          console.warn('⚠️ Failed to log duplicate wallet to audit trail:', auditError);
+        }
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('❌ Emergency lookup error:', error);
+      return {
+        walletAddress,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: new Date().toISOString()
+      };
+    }
+  }
+
+  // Keep all your existing methods below unchanged...
   static async updateUser(walletAddress: string, updates: Partial<UserData>): Promise<boolean> {
     try {
       const { error } = await supabase
         .from('users')
         .update({ ...updates, updated_at: new Date().toISOString() })
-        .eq('wallet_address', walletAddress);
+        .eq('wallet_address', walletAddress.toLowerCase()); // Normalize here too
 
       if (error) {
         logger.error('Error updating user:', error);
@@ -459,12 +719,13 @@ export class UserAPI {
     }
   }
 
+  // ... rest of your existing methods stay the same
   static async getUserStats(walletAddress: string): Promise<UserStats | null> {
     try {
       const { data, error } = await supabase
         .from('player_bets')
         .select('bet_amount, profit_loss, cashout_multiplier')
-        .eq('wallet_address', walletAddress);
+        .eq('wallet_address', walletAddress.toLowerCase()); // Normalize here too
 
       if (error) {
         logger.error('Error fetching user stats:', error);
@@ -481,7 +742,6 @@ export class UserAPI {
         };
       }
 
-      // Use proper typing for the partial bet data
       const betData: BetStatsData[] = data;
 
       const totalWagered = betData.reduce((sum: number, bet: BetStatsData) => sum + bet.bet_amount, 0);
@@ -515,7 +775,7 @@ export class UserAPI {
             crash_multiplier
           )
         `)
-        .eq('wallet_address', walletAddress)
+        .eq('wallet_address', walletAddress.toLowerCase()) // Normalize here too
         .order('created_at', { ascending: false })
         .limit(limit);
 
@@ -543,7 +803,7 @@ export class UserAPI {
         .from('player_bets')
         .insert({
           game_id: gameId,
-          wallet_address: walletAddress,
+          wallet_address: walletAddress.toLowerCase(), // Normalize here too
           bet_amount: betAmount,
           cashout_multiplier: cashoutMultiplier,
           profit_loss: profitLoss

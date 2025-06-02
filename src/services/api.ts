@@ -414,25 +414,53 @@ export class UserAPI {
         throw new Error('Wallet address is required');
       }
       
-      // Normalize wallet address (lowercase for consistency)
-      const normalizedWallet = walletAddress.toLowerCase();
-      
-      // Step 1: Try to get existing user with validation
-      console.log(`📡 Fetching user from Supabase for wallet: ${normalizedWallet}`);
+      // First, try to find user with EXACT case match
+      console.log(`📡 Trying exact case match: ${walletAddress}`);
       let { data: user, error } = await supabase
         .from('users')
         .select('*')
-        .eq('wallet_address', normalizedWallet)
+        .eq('wallet_address', walletAddress) // Exact case first!
         .single();
-
+  
+      // If not found, try lowercase
       if (error && error.code === 'PGRST116') {
-        // User doesn't exist, create new one
-        console.log(`👤 Creating new user for wallet: ${normalizedWallet}`);
+        console.log(`📡 Trying lowercase: ${walletAddress.toLowerCase()}`);
+        const { data: userLower, error: errorLower } = await supabase
+          .from('users')
+          .select('*')
+          .eq('wallet_address', walletAddress.toLowerCase())
+          .single();
+        
+        if (userLower && !errorLower) {
+          user = userLower;
+          error = null;
+          console.log(`✅ Found user with lowercase search: ${user.id}`);
+        }
+      }
+  
+      // If not found, try case-insensitive search
+      if (error && error.code === 'PGRST116') {
+        console.log(`📡 Trying case-insensitive search with ilike...`);
+        const { data: users, error: errorIlike } = await supabase
+          .from('users')
+          .select('*')
+          .ilike('wallet_address', walletAddress); // Case-insensitive search
+        
+        if (users && users.length > 0 && !errorIlike) {
+          user = users[0]; // Take the first match
+          error = null;
+          console.log(`✅ Found user with case-insensitive search: ${user.id}`);
+        }
+      }
+  
+      if (error && error.code === 'PGRST116') {
+        // User truly doesn't exist, create new one
+        console.log(`👤 Creating new user for wallet: ${walletAddress}`);
         
         const { data: newUser, error: createError } = await supabase
           .from('users')
           .insert({
-            wallet_address: normalizedWallet,
+            wallet_address: walletAddress, // Keep original case!
             username: `user${walletAddress.slice(-4)}`,
             avatar: '👤',
             level: 1,
@@ -440,114 +468,25 @@ export class UserAPI {
           })
           .select()
           .single();
-
+  
         if (createError) {
           console.error('❌ Error creating user:', createError);
-          
-          // Check if it's a duplicate key error (another user creation race condition)
-          if (createError.code === '23505') {
-            console.log(`🔄 Duplicate user detected during creation, fetching existing user...`);
-            
-            // Try to fetch the user that was created by another process
-            const { data: existingUser, error: fetchError } = await supabase
-              .from('users')
-              .select('*')
-              .eq('wallet_address', normalizedWallet)
-              .single();
-            
-            if (fetchError) {
-              console.error('❌ Failed to fetch user after duplicate creation:', fetchError);
-              throw createError;
-            }
-            
-            user = existingUser;
-            console.log(`✅ Found user created by another process: ${user.id}`);
-          } else {
-            throw createError;
-          }
-        } else {
-          user = newUser;
-          console.log(`✅ Created new user: ${user.id} for wallet: ${normalizedWallet}`);
+          throw createError;
         }
+        
+        user = newUser;
+        console.log(`✅ Created new user: ${user.id} for wallet: ${walletAddress}`);
       } else if (error) {
         console.error('❌ Error fetching user:', error);
         throw error;
       } else {
-        console.log(`✅ Found existing user: ${user.id} for wallet: ${normalizedWallet}`);
+        console.log(`✅ Found existing user: ${user.id} for wallet: ${walletAddress}`);
       }
-
-      // CRITICAL VALIDATION: Ensure the returned user actually owns this wallet
-      if (!user || !user.wallet_address) {
-        console.error(`❌ Invalid user data returned:`, user);
-        throw new Error('Invalid user data returned from database');
-      }
-      
-      if (user.wallet_address.toLowerCase() !== normalizedWallet) {
-        console.error(`❌ USER MAPPING ERROR DETECTED!`);
-        console.error(`   Requested wallet: ${walletAddress}`);
-        console.error(`   Normalized wallet: ${normalizedWallet}`);
-        console.error(`   Database wallet: ${user.wallet_address}`);
-        console.error(`   User ID: ${user.id}`);
-        
-        // Log this critical error for investigation
-        console.error(`🚨 CRITICAL: Invalid user-wallet mapping detected - needs immediate attention`);
-        
-        // Try to log this to your audit system if you have one
-        try {
-          await supabase
-            .from('audit_log')
-            .insert({
-              action: 'MAPPING_ERROR_DETECTED',
-              details: {
-                requestedWallet: walletAddress,
-                normalizedWallet: normalizedWallet,
-                databaseWallet: user.wallet_address,
-                userId: user.id,
-                timestamp: new Date().toISOString(),
-                userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'server'
-              }
-            });
-        } catch (auditError) {
-          console.warn('⚠️ Failed to log mapping error to audit trail:', auditError);
-        }
-        
-        throw new Error(`Invalid user-wallet mapping detected for wallet ${walletAddress}`);
-      }
-
-      // Additional validation: Check if this makes sense
-      if (!user.id || user.id.length < 10) {
-        console.error(`❌ Invalid user ID: ${user.id}`);
-        throw new Error('Invalid user ID returned from database');
-      }
-
-      console.log(`✅ VALIDATED user mapping: ${user.id} <-> ${normalizedWallet}`);
-      
-      // Convert snake_case to camelCase for frontend consistency
-      const userData: UserData = {
-        id: user.id,
-        wallet_address: user.wallet_address,
-        username: user.username,
-        avatar: user.avatar,
-        level: user.level,
-        experience: user.experience,
-        badge: user.badge,
-        created_at: user.created_at,
-        updated_at: user.updated_at
-      };
-      
-      return userData;
+  
+      return user;
       
     } catch (error) {
       console.error('❌ UserAPI.getUserOrCreate error:', error);
-      
-      // If it's a mapping error, provide helpful debug info
-      if (error instanceof Error && error.message.includes('Invalid user-wallet mapping')) {
-        console.error(`🔧 DEBUG INFO for support:`);
-        console.error(`   Wallet: ${walletAddress}`);
-        console.error(`   Timestamp: ${new Date().toISOString()}`);
-        console.error(`   User Agent: ${typeof navigator !== 'undefined' ? navigator.userAgent : 'server'}`);
-      }
-      
       return null;
     }
   }

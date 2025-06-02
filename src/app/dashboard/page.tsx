@@ -13,6 +13,27 @@ import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import ReferralSection from '../../components/ReferralSection';
 
+// 🚀 FIX: Create singleton Supabase client to avoid multiple instances
+let supabaseClient: any = null;
+const getSupabaseClient = () => {
+  if (!supabaseClient) {
+    supabaseClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+  }
+  return supabaseClient;
+};
+
+// 🚀 FIX: TypeScript interface for bet data from Supabase
+interface PlayerBet {
+  bet_amount: number;
+  profit_loss: number;
+  cashout_amount?: number;
+  cashout_multiplier?: number;
+  status: string;
+}
+
 // 🚀 OPTIMIZED: Custodial balance hook with controlled refresh timing
 const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
@@ -241,11 +262,8 @@ const Dashboard: FC = () => {
     lastUpdated: custodialLastUpdated
   } = useCustodialBalance(userId || '');
   
-  // Initialize Supabase client
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
+  // 🚀 FIX: Use singleton Supabase client
+  const supabase = getSupabaseClient();
   
   // State
   const [walletBalance, setWalletBalance] = useState<number>(0);
@@ -500,7 +518,7 @@ const Dashboard: FC = () => {
         let profitLoss = 0;
 
         if (bets && bets.length > 0) {
-          bets.forEach(bet => {
+          bets.forEach((bet: PlayerBet) => {
             // 🚀 FIX: Count all bets since bet_type doesn't exist
             gamesPlayed++;
             
@@ -608,7 +626,8 @@ const Dashboard: FC = () => {
         if (!error && bets) {
           let totalWagered = 0, totalPayouts = 0, gamesPlayed = 0, profitLoss = 0;
           
-          bets.forEach(bet => {
+          // 🚀 FIX: Add proper type annotation for bet parameter
+          bets.forEach((bet: PlayerBet) => {
             // 🚀 FIX: Count all bets since bet_type doesn't exist
             gamesPlayed++;
             totalWagered += bet.bet_amount || 0;

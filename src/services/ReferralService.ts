@@ -293,6 +293,145 @@ export class ReferralService {
   }
 
   /**
+   * Process user login (frontend-safe version that calls API)
+   */
+  async processUserLogin(userId: string, userAgent?: string): Promise<{
+    isFirstLogin: boolean;
+    referralActivated: boolean;
+    referrerUsername?: string;
+  }> {
+    try {
+      console.log(`🔄 ReferralService: Processing login for user ${userId}...`);
+
+      // Call API route for server-side processing
+      const response = await fetch('/api/referrals/process-login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          userAgent
+        })
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          // API route not implemented yet, return default values
+          console.warn('⚠️ ReferralService: Login processing API not available, using defaults');
+          return {
+            isFirstLogin: false,
+            referralActivated: false
+          };
+        }
+        throw new Error(`Login processing failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log(`✅ ReferralService: Login processed for ${userId}:`, result);
+      return result;
+
+    } catch (error) {
+      console.error('❌ ReferralService: Error processing user login:', error);
+      // Return safe defaults on error
+      return {
+        isFirstLogin: false,
+        referralActivated: false
+      };
+    }
+  }
+
+  /**
+   * Create user profile (frontend-safe version that calls API)
+   */
+  async createUserProfile(
+    userId: string, 
+    username?: string, 
+    walletAddress?: string, 
+    referralCode?: string
+  ): Promise<string | null> {
+    try {
+      console.log(`🔄 ReferralService: Creating profile for user ${userId}...`);
+
+      const response = await fetch('/api/referrals/create-profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          username,
+          walletAddress,
+          referralCode
+        })
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.warn('⚠️ ReferralService: Create profile API not available');
+          return null;
+        }
+        throw new Error(`Profile creation failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log(`✅ ReferralService: Profile created for ${userId}`);
+      return result.referralCode || null;
+
+    } catch (error) {
+      console.error('❌ ReferralService: Error creating user profile:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Process referral payout (frontend-safe version that calls API)
+   */
+  async processReferralPayout(userId: string): Promise<{
+    success: boolean;
+    totalPaid?: number;
+    transactionIds?: string[];
+    error?: string;
+  }> {
+    try {
+      console.log(`🔄 ReferralService: Processing payout for user ${userId}...`);
+
+      const response = await fetch('/api/referrals/process-payout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userId })
+      });
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          return {
+            success: false,
+            error: 'Payout API not available'
+          };
+        }
+        const errorData = await response.json();
+        return {
+          success: false,
+          error: errorData.error || 'Payout failed'
+        };
+      }
+
+      const result = await response.json();
+      console.log(`✅ ReferralService: Payout processed for ${userId}`);
+      return result;
+
+    } catch (error) {
+      console.error('❌ ReferralService: Error processing payout:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Payout failed'
+      };
+    }
+  }
+
+  /**
    * Get service status for debugging
    */
   getStatus(): {

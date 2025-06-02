@@ -13,7 +13,7 @@ import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import ReferralSection from '../../components/ReferralSection';
 
-// 🚀 ENHANCED: Custodial balance hook with real-time socket listeners (from TradingControls)
+// 🚀 OPTIMIZED: Custodial balance hook with controlled refresh timing
 const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -21,13 +21,21 @@ const useCustodialBalance = (userId: string) => {
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastUserIdRef = useRef<string>('');
   const socketListenersRef = useRef<boolean>(false);
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Create stable update function with useCallback
-  const updateCustodialBalance = useCallback(async () => {
+  // 🚀 OPTIMIZED: Debounced update function to prevent rapid refreshes
+  const updateCustodialBalance = useCallback(async (skipDebounce = false) => {
     if (!userId) return;
     
     // Prevent multiple simultaneous requests
     if (loading) return;
+    
+    // Skip if updated recently (unless forced)
+    const timeSinceLastUpdate = Date.now() - lastUpdated;
+    if (!skipDebounce && timeSinceLastUpdate < 5000) { // 5 second minimum between updates
+      console.log(`⏭️ Dashboard: Skipping update, last updated ${timeSinceLastUpdate}ms ago`);
+      return;
+    }
     
     setLoading(true);
     try {
@@ -48,11 +56,16 @@ const useCustodialBalance = (userId: string) => {
       
       if (data.custodialBalance !== undefined) {
         const newBalance = parseFloat(data.custodialBalance) || 0;
-        console.log(`💰 Dashboard: Custodial balance updated: ${newBalance.toFixed(6)} SOL`);
-        setCustodialBalance(newBalance);
-        setLastUpdated(Date.now());
-      } else {
-        console.warn('Dashboard: Invalid response format:', data);
+        
+        // Only update if balance actually changed to prevent unnecessary re-renders
+        setCustodialBalance(prevBalance => {
+          if (Math.abs(prevBalance - newBalance) > 0.000001) { // Only update if significant change
+            console.log(`💰 Dashboard: Balance updated: ${prevBalance.toFixed(6)} → ${newBalance.toFixed(6)} SOL`);
+            setLastUpdated(Date.now());
+            return newBalance;
+          }
+          return prevBalance;
+        });
       }
     } catch (error) {
       console.error('❌ Dashboard: Failed to fetch custodial balance:', error);
@@ -60,56 +73,22 @@ const useCustodialBalance = (userId: string) => {
     } finally {
       setLoading(false);
     }
-  }, [userId, loading]);
+  }, [userId, loading, lastUpdated]);
 
-  // Enhanced force refresh with cache busting
+  // 🚀 OPTIMIZED: Debounced force refresh
   const forceRefresh = useCallback(async () => {
     if (!userId) return;
-    console.log(`🔄 Dashboard: Force refreshing custodial balance for ${userId}...`);
-    setLoading(true);
-
-    try {
-      // Try POST with refresh action first
-      const postResponse = await fetch(`/api/custodial/balance/${userId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'refresh', timestamp: Date.now() })
-      });
-      
-      if (postResponse.ok) {
-        const data = await postResponse.json();
-        if (data.custodialBalance !== undefined) {
-          const newBalance = parseFloat(data.custodialBalance) || 0;
-          console.log(`💰 Dashboard: Force refresh (POST): ${newBalance.toFixed(6)} SOL`);
-          setCustodialBalance(newBalance);
-          setLastUpdated(Date.now());
-          return;
-        }
-      }
-      
-      // Fallback to GET with cache busting
-      const getResponse = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}&refresh=true`);
-      
-      if (getResponse.ok) {
-        const data = await getResponse.json();
-        if (data.custodialBalance !== undefined) {
-          const newBalance = parseFloat(data.custodialBalance) || 0;
-          console.log(`💰 Dashboard: Force refresh (GET): ${newBalance.toFixed(6)} SOL`);
-          setCustodialBalance(newBalance);
-          setLastUpdated(Date.now());
-        }
-      } else {
-        console.error('❌ Dashboard: Force refresh failed:', getResponse.status);
-      }
-      
-    } catch (error) {
-      console.error('❌ Dashboard: Force refresh error:', error);
-    } finally {
-      setLoading(false);
+    
+    // Clear any existing debounce
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
     }
-  }, [userId]);
+    
+    console.log(`🔄 Dashboard: Force refresh requested for ${userId}...`);
+    await updateCustodialBalance(true); // Skip debounce for manual refresh
+  }, [userId, updateCustodialBalance]);
   
-  // Polling setup
+  // 🚀 OPTIMIZED: Longer polling interval (60 seconds instead of 15)
   useEffect(() => {
     if (userId && userId !== lastUserIdRef.current) {
       console.log(`🎯 Dashboard: Setting up custodial balance polling for user: ${userId}`);
@@ -121,24 +100,27 @@ const useCustodialBalance = (userId: string) => {
       }
       
       // Initial fetch
-      updateCustodialBalance();
+      updateCustodialBalance(true);
       
-      // Set interval for periodic updates
+      // 🚀 OPTIMIZED: Set interval for periodic updates (60 seconds instead of 15)
       updateIntervalRef.current = setInterval(() => {
         if (!loading) {
           updateCustodialBalance();
         }
-      }, 15000); // 15 seconds
+      }, 60000); // 60 seconds - much less aggressive
       
       return () => {
         if (updateIntervalRef.current) {
           clearInterval(updateIntervalRef.current);
         }
+        if (debounceTimeoutRef.current) {
+          clearTimeout(debounceTimeoutRef.current);
+        }
       };
     }
-  }, [userId, updateCustodialBalance]);
+  }, [userId, updateCustodialBalance, loading]);
    
-  // 🚀 ENHANCED REAL-TIME SOCKET LISTENERS
+  // 🚀 OPTIMIZED: Debounced real-time socket listeners
   useEffect(() => {
     if (!userId || socketListenersRef.current) return;
     
@@ -147,44 +129,61 @@ const useCustodialBalance = (userId: string) => {
       console.log(`🔌 Dashboard: Setting up REAL-TIME custodial balance listeners for user: ${userId}`);
       socketListenersRef.current = true;
       
-      // Primary custodial balance update event
+      // 🚀 OPTIMIZED: Debounced balance update handler
       const handleCustodialBalanceUpdate = (data: any) => {
         if (data.userId === userId) {
           console.log(`💰 Dashboard REAL-TIME: Custodial balance update - ${data.custodialBalance?.toFixed(6)} SOL`);
-          setCustodialBalance(parseFloat(data.custodialBalance) || 0);
-          setLastUpdated(Date.now());
           
-          // Show toast for significant changes
-          if (data.updateType === 'deposit_processed') {
-            toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL`);
-          } else if (data.updateType === 'bet_placed') {
-            toast(`Bet placed: -${data.change?.toFixed(3)} SOL`, { icon: '🎯' });
-          } else if (data.updateType === 'cashout_processed') {
-            toast.success(`Cashout: +${data.change?.toFixed(3)} SOL`);
+          // Clear existing debounce
+          if (debounceTimeoutRef.current) {
+            clearTimeout(debounceTimeoutRef.current);
           }
+          
+          // Debounce rapid updates
+          debounceTimeoutRef.current = setTimeout(() => {
+            setCustodialBalance(parseFloat(data.custodialBalance) || 0);
+            setLastUpdated(Date.now());
+            
+            // Show toast for significant changes (less frequently)
+            if (data.updateType === 'deposit_processed') {
+              toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL`);
+            } else if (data.updateType === 'cashout_processed') {
+              toast.success(`Cashout: +${data.change?.toFixed(3)} SOL`);
+            }
+          }, 1000); // 1 second debounce
         }
       };
 
-      // User balance update event (broader scope)
+      // 🚀 OPTIMIZED: Less aggressive user balance update
       const handleUserBalanceUpdate = (data: any) => {
         if (data.userId === userId && data.balanceType === 'custodial') {
           console.log(`💰 Dashboard REAL-TIME: User balance update - ${data.newBalance?.toFixed(6)} SOL`);
-          setCustodialBalance(parseFloat(data.newBalance) || 0);
-          setLastUpdated(Date.now());
+          
+          // Debounce this update too
+          if (debounceTimeoutRef.current) {
+            clearTimeout(debounceTimeoutRef.current);
+          }
+          
+          debounceTimeoutRef.current = setTimeout(() => {
+            setCustodialBalance(parseFloat(data.newBalance) || 0);
+            setLastUpdated(Date.now());
+          }, 1000);
         }
       };
 
-      // Deposit confirmation event
+      // 🚀 OPTIMIZED: Deposit confirmation with controlled refresh
       const handleDepositConfirmation = (data: any) => {
         if (data.userId === userId) {
-          console.log(`💰 Dashboard REAL-TIME: Deposit confirmed for ${userId}, amount: ${data.depositAmount}`);
+          console.log(`💰 Dashboard REAL-TIME: Deposit confirmed for ${userId}`);
           
-          // Update balance immediately
+          // Update immediately for deposits (important)
           setCustodialBalance(prev => prev + (parseFloat(data.depositAmount) || 0));
           setLastUpdated(Date.now());
           
-          // Force refresh after short delay to ensure accuracy
-          setTimeout(forceRefresh, 1500);
+          // Force refresh after longer delay to ensure accuracy
+          setTimeout(() => {
+            updateCustodialBalance(true);
+          }, 3000); // 3 seconds instead of 1.5
           
           toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL!`);
         }
@@ -201,9 +200,13 @@ const useCustodialBalance = (userId: string) => {
         socket.off('userBalanceUpdate', handleUserBalanceUpdate);
         socket.off('depositConfirmed', handleDepositConfirmation);
         socketListenersRef.current = false;
+        
+        if (debounceTimeoutRef.current) {
+          clearTimeout(debounceTimeoutRef.current);
+        }
       };
     }
-  }, [userId, forceRefresh]);
+  }, [userId, updateCustodialBalance]);
 
   return { custodialBalance, loading, lastUpdated, updateCustodialBalance, forceRefresh };
 };
@@ -228,7 +231,7 @@ const Dashboard: FC = () => {
   // Validate wallet address
   const isValidWallet = isConnected && isValidSolanaAddress(walletAddress);
 
-  // 🚀 ENHANCED: Use custodial balance hook with real-time updates
+  // 🚀 OPTIMIZED: Use custodial balance hook with real-time updates
   const { 
     custodialBalance, 
     loading: custodialBalanceLoading, 
@@ -267,7 +270,7 @@ const Dashboard: FC = () => {
     lastUserId: ''
   });
 
-  // 🚀 ENHANCED: User initialization effect (from TradingControls)
+  // 🚀 OPTIMIZED: User initialization effect
   useEffect(() => {
     if (!authenticated || !walletAddress) {
       return;
@@ -375,14 +378,16 @@ const Dashboard: FC = () => {
     }
   }, [walletAddress]);
 
-  // Fetch wallet balance
+  // 🚀 OPTIMIZED: Wallet balance fetch with controlled timing
   useEffect(() => {
-    const fetchBalance = async () => {
-      if (!isValidWallet) {
-        setWalletBalance(0);
-        return;
-      }
+    if (!isValidWallet) {
+      setWalletBalance(0);
+      return;
+    }
 
+    let walletBalanceInterval: NodeJS.Timeout | null = null;
+
+    const fetchWalletBalance = async () => {
       try {
         setIsLoadingBalance(true);
         
@@ -409,20 +414,38 @@ const Dashboard: FC = () => {
         
         const lamports = await connection.getBalance(publicKey);
         const solBalance = lamports / LAMPORTS_PER_SOL;
-        setWalletBalance(solBalance);
+        
+        // Only update if balance actually changed to prevent unnecessary re-renders
+        setWalletBalance(prevBalance => {
+          if (Math.abs(prevBalance - solBalance) > 0.0001) { // Only update if significant change
+            console.log(`💼 Dashboard: Wallet balance updated: ${prevBalance.toFixed(6)} → ${solBalance.toFixed(6)} SOL`);
+            return solBalance;
+          }
+          return prevBalance;
+        });
         
       } catch (error) {
-        console.error('Failed to fetch balance:', error);
-        setWalletBalance(0);
+        console.error('Failed to fetch wallet balance:', error);
+        // Don't reset balance on error
       } finally {
         setIsLoadingBalance(false);
       }
     };
 
-    fetchBalance();
+    // Initial fetch
+    fetchWalletBalance();
+    
+    // 🚀 OPTIMIZED: Set up wallet balance polling every 2 minutes (less aggressive)
+    walletBalanceInterval = setInterval(fetchWalletBalance, 120000); // 2 minutes
+
+    return () => {
+      if (walletBalanceInterval) {
+        clearInterval(walletBalanceInterval);
+      }
+    };
   }, [isValidWallet, walletAddress]);
 
-  // 🚀 ENHANCED: Fetch user stats from Supabase using userId instead of walletAddress
+  // 🚀 OPTIMIZED: Fetch user stats from Supabase using userId instead of walletAddress
   useEffect(() => {
     const fetchUserStats = async () => {
       if (!userId) {
@@ -440,7 +463,7 @@ const Dashboard: FC = () => {
         setIsLoadingStats(true);
         console.log(`📊 Dashboard: Fetching user stats for userId: ${userId}`);
         
-        // 🚀 ENHANCED: Query player_bets table using userId instead of walletAddress
+        // Query player_bets table using userId instead of walletAddress
         const { data: bets, error } = await supabase
           .from('player_bets')
           .select('bet_amount, profit_loss, cashout_amount, cashout_multiplier, status, bet_type')
@@ -512,7 +535,7 @@ const Dashboard: FC = () => {
     fetchUserStats();
   }, [userId, supabase]); // Use userId instead of walletAddress
 
-  // 🚀 ENHANCED: Refresh data function using custodial methods
+  // 🚀 OPTIMIZED: Refresh data function using custodial methods
   const refreshData = useCallback(async () => {
     if (!isValidWallet || !userId) {
       console.log('🔄 Dashboard: Cannot refresh - wallet or user not ready');
@@ -599,130 +622,119 @@ const Dashboard: FC = () => {
     }
   }, [isValidWallet, userId, walletAddress, refreshCustodialBalance, supabase]);
 
-  // 🚀 ENHANCED: Real-time socket listeners for dashboard updates
+  // 🚀 OPTIMIZED: Real-time socket listeners with debounced stats refresh
   useEffect(() => {
     if (!userId || !walletAddress) return;
     
     const socket = (window as any).gameSocket;
     if (socket) {
-      console.log(`🔌 Dashboard: Setting up real-time listeners for user: ${userId}`);
+      console.log(`🔌 Dashboard: Setting up optimized real-time listeners for user: ${userId}`);
       
+      let statsRefreshTimeout: NodeJS.Timeout | null = null;
+      let walletRefreshTimeout: NodeJS.Timeout | null = null;
+      
+      // 🚀 OPTIMIZED: Debounced stats refresh function
+      const debouncedStatsRefresh = () => {
+        if (statsRefreshTimeout) {
+          clearTimeout(statsRefreshTimeout);
+        }
+        
+        statsRefreshTimeout = setTimeout(async () => {
+          console.log(`📊 Dashboard: Debounced stats refresh for ${userId}`);
+          setIsLoadingStats(true);
+          
+          try {
+            const { data: bets, error } = await supabase
+              .from('player_bets')
+              .select('bet_amount, profit_loss, cashout_amount, status, bet_type')
+              .eq('user_id', userId);
+
+            if (!error && bets) {
+              let totalWagered = 0, totalPayouts = 0, gamesPlayed = 0, profitLoss = 0;
+              
+              bets.forEach(bet => {
+                if (bet.bet_type === 'custodial' || !bet.bet_type) {
+                  gamesPlayed++;
+                  totalWagered += bet.bet_amount || 0;
+                  if (bet.status === 'cashed_out' && bet.cashout_amount) {
+                    totalPayouts += bet.cashout_amount;
+                  }
+                  profitLoss += bet.profit_loss || 0;
+                }
+              });
+
+              setUserStats({
+                totalWagered: Number(totalWagered.toFixed(6)),
+                totalPayouts: Number(totalPayouts.toFixed(6)),
+                gamesPlayed,
+                profitLoss: Number(profitLoss.toFixed(6))
+              });
+            }
+          } catch (error) {
+            console.error('❌ Dashboard: Failed to refresh stats:', error);
+          } finally {
+            setIsLoadingStats(false);
+          }
+        }, 2000); // 2 second debounce for stats
+      };
+
+      // 🚀 OPTIMIZED: Debounced wallet balance refresh
+      const debouncedWalletRefresh = () => {
+        if (walletRefreshTimeout) {
+          clearTimeout(walletRefreshTimeout);
+        }
+        
+        walletRefreshTimeout = setTimeout(async () => {
+          console.log(`💼 Dashboard: Debounced wallet refresh for ${walletAddress}`);
+          
+          try {
+            const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+            const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+            
+            if (rpcUrl) {
+              const connectionConfig: any = { commitment: 'confirmed' };
+              if (apiKey) connectionConfig.httpHeaders = { 'x-api-key': apiKey };
+              
+              const connection = new Connection(rpcUrl, connectionConfig);
+              const publicKey = safeCreatePublicKey(walletAddress);
+              
+              if (publicKey) {
+                const lamports = await connection.getBalance(publicKey);
+                const newBalance = lamports / LAMPORTS_PER_SOL;
+                
+                setWalletBalance(prevBalance => {
+                  if (Math.abs(prevBalance - newBalance) > 0.0001) {
+                    console.log(`💼 Dashboard: Wallet balance updated: ${newBalance.toFixed(6)} SOL`);
+                    return newBalance;
+                  }
+                  return prevBalance;
+                });
+              }
+            }
+          } catch (error) {
+            console.error('❌ Dashboard: Failed to refresh wallet balance:', error);
+          }
+        }, 3000); // 3 second debounce for wallet
+      };
+
       const handleCustodialBetPlaced = (data: any) => {
         if (data.userId === userId) {
-          console.log(`🎯 Dashboard REAL-TIME: Bet placed - refreshing stats`);
-          // Refresh stats after a bet is placed
-          setTimeout(() => {
-            setIsLoadingStats(true);
-            // Re-fetch stats
-            const refreshStats = async () => {
-              try {
-                const { data: bets, error } = await supabase
-                  .from('player_bets')
-                  .select('bet_amount, profit_loss, cashout_amount, status, bet_type')
-                  .eq('user_id', userId);
-
-                if (!error && bets) {
-                  let totalWagered = 0, totalPayouts = 0, gamesPlayed = 0, profitLoss = 0;
-                  
-                  bets.forEach(bet => {
-                    if (bet.bet_type === 'custodial' || !bet.bet_type) {
-                      gamesPlayed++;
-                      totalWagered += bet.bet_amount || 0;
-                      if (bet.status === 'cashed_out' && bet.cashout_amount) {
-                        totalPayouts += bet.cashout_amount;
-                      }
-                      profitLoss += bet.profit_loss || 0;
-                    }
-                  });
-
-                  setUserStats({
-                    totalWagered: Number(totalWagered.toFixed(6)),
-                    totalPayouts: Number(totalPayouts.toFixed(6)),
-                    gamesPlayed,
-                    profitLoss: Number(profitLoss.toFixed(6))
-                  });
-                }
-              } catch (error) {
-                console.error('❌ Dashboard: Failed to refresh stats after bet:', error);
-              } finally {
-                setIsLoadingStats(false);
-              }
-            };
-            refreshStats();
-          }, 1000);
+          console.log(`🎯 Dashboard REAL-TIME: Bet placed - scheduling stats refresh`);
+          debouncedStatsRefresh();
         }
       };
 
       const handleCustodialCashout = (data: any) => {
         if (data.userId === userId) {
-          console.log(`💸 Dashboard REAL-TIME: Cashout processed - refreshing stats`);
-          // Refresh stats after cashout
-          setTimeout(() => {
-            setIsLoadingStats(true);
-            const refreshStats = async () => {
-              try {
-                const { data: bets, error } = await supabase
-                  .from('player_bets')
-                  .select('bet_amount, profit_loss, cashout_amount, status, bet_type')
-                  .eq('user_id', userId);
-
-                if (!error && bets) {
-                  let totalWagered = 0, totalPayouts = 0, gamesPlayed = 0, profitLoss = 0;
-                  
-                  bets.forEach(bet => {
-                    if (bet.bet_type === 'custodial' || !bet.bet_type) {
-                      gamesPlayed++;
-                      totalWagered += bet.bet_amount || 0;
-                      if (bet.status === 'cashed_out' && bet.cashout_amount) {
-                        totalPayouts += bet.cashout_amount;
-                      }
-                      profitLoss += bet.profit_loss || 0;
-                    }
-                  });
-
-                  setUserStats({
-                    totalWagered: Number(totalWagered.toFixed(6)),
-                    totalPayouts: Number(totalPayouts.toFixed(6)),
-                    gamesPlayed,
-                    profitLoss: Number(profitLoss.toFixed(6))
-                  });
-                }
-              } catch (error) {
-                console.error('❌ Dashboard: Failed to refresh stats after cashout:', error);
-              } finally {
-                setIsLoadingStats(false);
-              }
-            };
-            refreshStats();
-          }, 1000);
+          console.log(`💸 Dashboard REAL-TIME: Cashout processed - scheduling stats refresh`);
+          debouncedStatsRefresh();
         }
       };
 
       const handleTransactionConfirmed = (data: any) => {
         if (data.userId === userId || data.walletAddress === walletAddress) {
-          console.log(`🔗 Dashboard REAL-TIME: Transaction confirmed - refreshing wallet balance`);
-          // Refresh embedded wallet balance after transaction
-          setTimeout(async () => {
-            try {
-              const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-              const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
-              
-              if (rpcUrl) {
-                const connectionConfig: any = { commitment: 'confirmed' };
-                if (apiKey) connectionConfig.httpHeaders = { 'x-api-key': apiKey };
-                
-                const connection = new Connection(rpcUrl, connectionConfig);
-                const publicKey = safeCreatePublicKey(walletAddress);
-                
-                if (publicKey) {
-                  const lamports = await connection.getBalance(publicKey);
-                  setWalletBalance(lamports / LAMPORTS_PER_SOL);
-                }
-              }
-            } catch (error) {
-              console.error('❌ Dashboard: Failed to refresh wallet balance:', error);
-            }
-          }, 2000);
+          console.log(`🔗 Dashboard REAL-TIME: Transaction confirmed - scheduling wallet refresh`);
+          debouncedWalletRefresh();
         }
       };
 
@@ -732,10 +744,14 @@ const Dashboard: FC = () => {
       socket.on('transactionConfirmed', handleTransactionConfirmed);
       
       return () => {
-        console.log(`🔌 Dashboard: Cleaning up real-time listeners for user: ${userId}`);
+        console.log(`🔌 Dashboard: Cleaning up optimized real-time listeners for user: ${userId}`);
         socket.off('custodialBetPlaced', handleCustodialBetPlaced);
         socket.off('custodialCashout', handleCustodialCashout);
         socket.off('transactionConfirmed', handleTransactionConfirmed);
+        
+        // Clear any pending timeouts
+        if (statsRefreshTimeout) clearTimeout(statsRefreshTimeout);
+        if (walletRefreshTimeout) clearTimeout(walletRefreshTimeout);
       };
     }
   }, [userId, walletAddress, supabase]);
@@ -832,7 +848,7 @@ const Dashboard: FC = () => {
                 <div className="text-green-400 text-sm mt-1">✓ Connected</div>
               </div>
               
-              {/* 🚀 ENHANCED: Primary balance is now custodial game balance */}
+              {/* Primary balance is now custodial game balance */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-gray-800 rounded-lg p-4">
                   <div className="text-green-400 mb-2 flex items-center">
@@ -893,7 +909,7 @@ const Dashboard: FC = () => {
           )}
         </div>
 
-        {/* 🚀 ENHANCED: Referral Section with real-time updates */}
+        {/* Referral Section with real-time updates */}
         {(isValidWallet && userId) && (
           <ReferralSection 
             userId={userId} 

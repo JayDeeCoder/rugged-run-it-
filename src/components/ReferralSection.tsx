@@ -28,10 +28,18 @@ const ReferralSection: FC<ReferralSectionProps> = ({
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastUserIdRef = useRef<string>('');
   const socketListenersRef = useRef<boolean>(false);
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch referral stats
-  const fetchReferralStats = useCallback(async () => {
+  // 🚀 OPTIMIZED: Fetch referral stats with debouncing
+  const fetchReferralStats = useCallback(async (skipDebounce = false) => {
     if (!userId || loading) return;
+    
+    // Skip if updated recently (unless forced)
+    const timeSinceLastUpdate = Date.now() - lastUpdated;
+    if (!skipDebounce && timeSinceLastUpdate < 10000) { // 10 second minimum between updates
+      console.log(`⏭️ ReferralSection: Skipping update, last updated ${timeSinceLastUpdate}ms ago`);
+      return;
+    }
     
     setLoading(true);
     try {
@@ -56,28 +64,21 @@ const ReferralSection: FC<ReferralSectionProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [userId, loading]);
+  }, [userId, loading, lastUpdated]);
 
   // Force refresh function
   const forceRefresh = useCallback(async () => {
     if (!userId) return;
     console.log(`🔄 ReferralSection: Force refreshing stats for ${userId}...`);
     
-    setLoading(true);
-    try {
-      const stats = await referralService.getReferralStats(userId);
-      if (stats) {
-        setReferralStats(stats);
-        setLastUpdated(Date.now());
-        toast.success('Referral data refreshed!');
-      }
-    } catch (error) {
-      console.error('❌ ReferralSection: Force refresh failed:', error);
-      toast.error('Failed to refresh referral data');
-    } finally {
-      setLoading(false);
+    // Clear any existing debounce
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
     }
-  }, [userId]);
+    
+    await fetchReferralStats(true); // Skip debounce for manual refresh
+    toast.success('Referral data refreshed!');
+  }, [userId, fetchReferralStats]);
 
   // Copy referral code to clipboard
   const copyReferralCode = useCallback(async () => {
@@ -163,38 +164,51 @@ const ReferralSection: FC<ReferralSectionProps> = ({
       // Initial fetch
       fetchReferralStats();
       
-      // Set up periodic updates every 30 seconds
+      // 🚀 OPTIMIZED: Set up periodic updates every 60 seconds (matching Dashboard)
       updateIntervalRef.current = setInterval(() => {
         if (!loading) {
           fetchReferralStats();
         }
-      }, 30000);
+      }, 60000); // 60 seconds - consistent with Dashboard
       
       return () => {
         if (updateIntervalRef.current) {
           clearInterval(updateIntervalRef.current);
         }
+        if (debounceTimeoutRef.current) {
+          clearTimeout(debounceTimeoutRef.current);
+        }
       };
     }
   }, [userId, fetchReferralStats]);
 
-  // 🚀 Real-time socket listeners for referral updates
+  // 🚀 OPTIMIZED: Real-time socket listeners with debouncing
   useEffect(() => {
     if (!userId || socketListenersRef.current) return;
     
     const socket = (window as any).gameSocket;
     if (socket) {
-      console.log(`🔌 ReferralSection: Setting up real-time listeners for user: ${userId}`);
+      console.log(`🔌 ReferralSection: Setting up optimized real-time listeners for user: ${userId}`);
       socketListenersRef.current = true;
+      
+      // 🚀 OPTIMIZED: Debounced refresh function
+      const debouncedRefresh = () => {
+        if (debounceTimeoutRef.current) {
+          clearTimeout(debounceTimeoutRef.current);
+        }
+        
+        debounceTimeoutRef.current = setTimeout(() => {
+          console.log(`🔄 ReferralSection: Debounced refresh triggered`);
+          fetchReferralStats(true);
+        }, 2000); // 2 second debounce
+      };
       
       const handleReferralUpdate = (data: any) => {
         if (data.userId === userId || data.referrerId === userId) {
           console.log(`💰 ReferralSection REAL-TIME: Referral update`, data);
           
-          // Refresh stats after referral activity
-          setTimeout(() => {
-            fetchReferralStats();
-          }, 1000);
+          // Debounced refresh instead of immediate
+          debouncedRefresh();
           
           // Show appropriate toast
           if (data.type === 'referral_activated' && data.referrerId === userId) {
@@ -209,10 +223,8 @@ const ReferralSection: FC<ReferralSectionProps> = ({
         if (data.userId === userId) {
           console.log(`💎 ReferralSection REAL-TIME: Reward update`, data);
           
-          // Refresh stats after reward update
-          setTimeout(() => {
-            fetchReferralStats();
-          }, 1000);
+          // Debounced refresh
+          debouncedRefresh();
           
           if (data.type === 'reward_added') {
             toast.success(`💰 New referral reward: +${data.amount?.toFixed(4)} SOL`);
@@ -225,10 +237,15 @@ const ReferralSection: FC<ReferralSectionProps> = ({
       socket.on('referralRewardUpdate', handleReferralRewardUpdate);
       
       return () => {
-        console.log(`🔌 ReferralSection: Cleaning up real-time listeners for user: ${userId}`);
+        console.log(`🔌 ReferralSection: Cleaning up optimized real-time listeners for user: ${userId}`);
         socket.off('referralUpdate', handleReferralUpdate);
         socket.off('referralRewardUpdate', handleReferralRewardUpdate);
         socketListenersRef.current = false;
+        
+        // Clear any pending debounce
+        if (debounceTimeoutRef.current) {
+          clearTimeout(debounceTimeoutRef.current);
+        }
       };
     }
   }, [userId, fetchReferralStats]);

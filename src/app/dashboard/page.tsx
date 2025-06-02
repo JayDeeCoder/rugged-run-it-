@@ -71,7 +71,8 @@ const useCustodialBalance = (userId: string) => {
       console.error('❌ Dashboard: Failed to fetch custodial balance:', error);
       // Don't reset balance on error, keep previous value
     } finally {
-      setLoading(false);
+      // 🚀 FIX: Always set loading to false with timeout protection
+      setTimeout(() => setLoading(false), 100);
     }
   }, [userId, loading, lastUpdated]);
 
@@ -256,6 +257,7 @@ const Dashboard: FC = () => {
     profitLoss: 0
   });
   const [isLoadingStats, setIsLoadingStats] = useState<boolean>(false);
+  const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false); // 🚀 FIX: Separate manual refresh state
   
   // Initialization ref for user setup
   const initializationRef = useRef<{ 
@@ -388,9 +390,15 @@ const Dashboard: FC = () => {
     let walletBalanceInterval: NodeJS.Timeout | null = null;
 
     const fetchWalletBalance = async () => {
+      setIsLoadingBalance(true);
+      
+      // 🚀 FIX: Add timeout protection for wallet balance loading
+      const balanceTimeout = setTimeout(() => {
+        console.log('⏰ Dashboard: Wallet balance loading timeout - forcing completion');
+        setIsLoadingBalance(false);
+      }, 10000); // 10 second timeout
+      
       try {
-        setIsLoadingBalance(true);
-        
         const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
         const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
         
@@ -428,7 +436,9 @@ const Dashboard: FC = () => {
         console.error('Failed to fetch wallet balance:', error);
         // Don't reset balance on error
       } finally {
-        setIsLoadingBalance(false);
+        clearTimeout(balanceTimeout);
+        // 🚀 FIX: Always set loading to false with small delay
+        setTimeout(() => setIsLoadingBalance(false), 100);
       }
     };
 
@@ -445,7 +455,7 @@ const Dashboard: FC = () => {
     };
   }, [isValidWallet, walletAddress]);
 
-  // 🚀 OPTIMIZED: Fetch user stats from Supabase using userId instead of walletAddress
+  // 🚀 OPTIMIZED: Fetch user stats from Supabase with timeout protection
   useEffect(() => {
     const fetchUserStats = async () => {
       if (!userId) {
@@ -459,14 +469,21 @@ const Dashboard: FC = () => {
         return;
       }
 
+      setIsLoadingStats(true);
+      
+      // 🚀 FIX: Add timeout protection for stats loading
+      const statsTimeout = setTimeout(() => {
+        console.log('⏰ Dashboard: Stats loading timeout - forcing completion');
+        setIsLoadingStats(false);
+      }, 10000); // 10 second timeout
+      
       try {
-        setIsLoadingStats(true);
         console.log(`📊 Dashboard: Fetching user stats for userId: ${userId}`);
         
-        // Query player_bets table using userId instead of walletAddress
+        // 🚀 FIX: Remove bet_type from query since it doesn't exist
         const { data: bets, error } = await supabase
           .from('player_bets')
-          .select('bet_amount, profit_loss, cashout_amount, cashout_multiplier, status, bet_type')
+          .select('bet_amount, profit_loss, cashout_amount, cashout_multiplier, status')
           .eq('user_id', userId); // Use user_id instead of wallet_address
 
         if (error) {
@@ -484,21 +501,19 @@ const Dashboard: FC = () => {
 
         if (bets && bets.length > 0) {
           bets.forEach(bet => {
-            // Count all custodial bets as games played
-            if (bet.bet_type === 'custodial' || !bet.bet_type) { // Include legacy bets without bet_type
-              gamesPlayed++;
-              
-              // Sum all bet amounts
-              totalWagered += bet.bet_amount || 0;
-              
-              // Sum payouts (only for cashed out bets)
-              if (bet.status === 'cashed_out' && bet.cashout_amount) {
-                totalPayouts += bet.cashout_amount;
-              }
-              
-              // Sum profit/loss (negative for losses, positive for wins)
-              profitLoss += bet.profit_loss || 0;
+            // 🚀 FIX: Count all bets since bet_type doesn't exist
+            gamesPlayed++;
+            
+            // Sum all bet amounts
+            totalWagered += bet.bet_amount || 0;
+            
+            // Sum payouts (only for cashed out bets)
+            if (bet.status === 'cashed_out' && bet.cashout_amount) {
+              totalPayouts += bet.cashout_amount;
             }
+            
+            // Sum profit/loss (negative for losses, positive for wins)
+            profitLoss += bet.profit_loss || 0;
           });
         }
 
@@ -528,14 +543,16 @@ const Dashboard: FC = () => {
           profitLoss: 0
         });
       } finally {
-        setIsLoadingStats(false);
+        clearTimeout(statsTimeout);
+        // 🚀 FIX: Always set loading to false with small delay
+        setTimeout(() => setIsLoadingStats(false), 100);
       }
     };
 
     fetchUserStats();
   }, [userId, supabase]); // Use userId instead of walletAddress
 
-  // 🚀 OPTIMIZED: Refresh data function using custodial methods
+  // 🚀 OPTIMIZED: Refresh data function with separate manual loading state
   const refreshData = useCallback(async () => {
     if (!isValidWallet || !userId) {
       console.log('🔄 Dashboard: Cannot refresh - wallet or user not ready');
@@ -543,8 +560,13 @@ const Dashboard: FC = () => {
     }
     
     console.log('🔄 Dashboard: Manual refresh triggered by user');
-    setIsLoadingBalance(true);
-    setIsLoadingStats(true);
+    setIsManualRefreshing(true); // 🚀 FIX: Use separate manual refresh state
+    
+    // 🚀 FIX: Add timeout protection for manual refresh
+    const refreshTimeout = setTimeout(() => {
+      console.log('⏰ Dashboard: Manual refresh timeout - forcing completion');
+      setIsManualRefreshing(false);
+    }, 10000); // 10 second timeout
     
     try {
       // Show loading toast
@@ -577,24 +599,23 @@ const Dashboard: FC = () => {
       
       // Refresh user stats
       try {
+        // 🚀 FIX: Remove bet_type from query since it doesn't exist
         const { data: bets, error } = await supabase
           .from('player_bets')
-          .select('bet_amount, profit_loss, cashout_amount, status, bet_type')
+          .select('bet_amount, profit_loss, cashout_amount, status')
           .eq('user_id', userId); // Use user_id instead of wallet_address
 
         if (!error && bets) {
           let totalWagered = 0, totalPayouts = 0, gamesPlayed = 0, profitLoss = 0;
           
           bets.forEach(bet => {
-            // Only count custodial bets
-            if (bet.bet_type === 'custodial' || !bet.bet_type) {
-              gamesPlayed++;
-              totalWagered += bet.bet_amount || 0;
-              if (bet.status === 'cashed_out' && bet.cashout_amount) {
-                totalPayouts += bet.cashout_amount;
-              }
-              profitLoss += bet.profit_loss || 0;
+            // 🚀 FIX: Count all bets since bet_type doesn't exist
+            gamesPlayed++;
+            totalWagered += bet.bet_amount || 0;
+            if (bet.status === 'cashed_out' && bet.cashout_amount) {
+              totalPayouts += bet.cashout_amount;
             }
+            profitLoss += bet.profit_loss || 0;
           });
 
           setUserStats({
@@ -617,12 +638,12 @@ const Dashboard: FC = () => {
       console.error('❌ Dashboard: Refresh failed:', error);
       toast.error('Failed to refresh dashboard data', { id: 'dashboard-refresh' });
     } finally {
-      setIsLoadingBalance(false);
-      setIsLoadingStats(false);
+      clearTimeout(refreshTimeout);
+      setIsManualRefreshing(false); // 🚀 FIX: Always clear manual refresh state
     }
   }, [isValidWallet, userId, walletAddress, refreshCustodialBalance, supabase]);
 
-  // 🚀 OPTIMIZED: Real-time socket listeners with debounced stats refresh
+  // 🚀 OPTIMIZED: Real-time socket listeners WITHOUT automatic stats refresh
   useEffect(() => {
     if (!userId || !walletAddress) return;
     
@@ -630,55 +651,9 @@ const Dashboard: FC = () => {
     if (socket) {
       console.log(`🔌 Dashboard: Setting up optimized real-time listeners for user: ${userId}`);
       
-      let statsRefreshTimeout: NodeJS.Timeout | null = null;
       let walletRefreshTimeout: NodeJS.Timeout | null = null;
       
-      // 🚀 OPTIMIZED: Debounced stats refresh function
-      const debouncedStatsRefresh = () => {
-        if (statsRefreshTimeout) {
-          clearTimeout(statsRefreshTimeout);
-        }
-        
-        statsRefreshTimeout = setTimeout(async () => {
-          console.log(`📊 Dashboard: Debounced stats refresh for ${userId}`);
-          setIsLoadingStats(true);
-          
-          try {
-            const { data: bets, error } = await supabase
-              .from('player_bets')
-              .select('bet_amount, profit_loss, cashout_amount, status, bet_type')
-              .eq('user_id', userId);
-
-            if (!error && bets) {
-              let totalWagered = 0, totalPayouts = 0, gamesPlayed = 0, profitLoss = 0;
-              
-              bets.forEach(bet => {
-                if (bet.bet_type === 'custodial' || !bet.bet_type) {
-                  gamesPlayed++;
-                  totalWagered += bet.bet_amount || 0;
-                  if (bet.status === 'cashed_out' && bet.cashout_amount) {
-                    totalPayouts += bet.cashout_amount;
-                  }
-                  profitLoss += bet.profit_loss || 0;
-                }
-              });
-
-              setUserStats({
-                totalWagered: Number(totalWagered.toFixed(6)),
-                totalPayouts: Number(totalPayouts.toFixed(6)),
-                gamesPlayed,
-                profitLoss: Number(profitLoss.toFixed(6))
-              });
-            }
-          } catch (error) {
-            console.error('❌ Dashboard: Failed to refresh stats:', error);
-          } finally {
-            setIsLoadingStats(false);
-          }
-        }, 2000); // 2 second debounce for stats
-      };
-
-      // 🚀 OPTIMIZED: Debounced wallet balance refresh
+      // 🚀 OPTIMIZED: Debounced wallet balance refresh (keep this)
       const debouncedWalletRefresh = () => {
         if (walletRefreshTimeout) {
           clearTimeout(walletRefreshTimeout);
@@ -717,17 +692,18 @@ const Dashboard: FC = () => {
         }, 3000); // 3 second debounce for wallet
       };
 
+      // 🚀 FIX: Remove automatic stats refresh - just log the events
       const handleCustodialBetPlaced = (data: any) => {
         if (data.userId === userId) {
-          console.log(`🎯 Dashboard REAL-TIME: Bet placed - scheduling stats refresh`);
-          debouncedStatsRefresh();
+          console.log(`🎯 Dashboard REAL-TIME: Bet placed for ${userId} - stats will update on next manual refresh`);
+          // Don't automatically refresh stats - user can manually refresh if needed
         }
       };
 
       const handleCustodialCashout = (data: any) => {
         if (data.userId === userId) {
-          console.log(`💸 Dashboard REAL-TIME: Cashout processed - scheduling stats refresh`);
-          debouncedStatsRefresh();
+          console.log(`💸 Dashboard REAL-TIME: Cashout processed for ${userId} - stats will update on next manual refresh`);
+          // Don't automatically refresh stats - user can manually refresh if needed
         }
       };
 
@@ -750,11 +726,10 @@ const Dashboard: FC = () => {
         socket.off('transactionConfirmed', handleTransactionConfirmed);
         
         // Clear any pending timeouts
-        if (statsRefreshTimeout) clearTimeout(statsRefreshTimeout);
         if (walletRefreshTimeout) clearTimeout(walletRefreshTimeout);
       };
     }
-  }, [userId, walletAddress, supabase]);
+  }, [userId, walletAddress]); // 🚀 FIX: Remove supabase from dependencies since we don't use automatic stats refresh
 
   // Loading state while Privy initializes
   if (!ready) {
@@ -779,9 +754,9 @@ const Dashboard: FC = () => {
             <button
               onClick={refreshData}
               className="flex items-center bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-md transition-colors"
-              disabled={isLoadingBalance || isLoadingStats || custodialBalanceLoading}
+              disabled={isManualRefreshing}
             >
-              <RefreshCw size={16} className={`mr-2 ${(isLoadingBalance || isLoadingStats || custodialBalanceLoading) ? 'animate-spin' : ''}`} />
+              <RefreshCw size={16} className={`mr-2 ${isManualRefreshing ? 'animate-spin' : ''}`} />
               Refresh
             </button>
           )}

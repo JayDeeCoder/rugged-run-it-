@@ -1,4 +1,4 @@
-// src/components/modals/WithdrawModal.tsx - ENHANCED VERSION WITH AUTO-SIGNED TRANSACTIONS
+// src/components/modals/WithdrawModal.tsx - ENHANCED VERSION WITH PROPER AUTO-SIGNED TRANSACTIONS
 import { FC, useState, useRef, useEffect, useCallback } from 'react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
@@ -53,7 +53,7 @@ interface WithdrawModalProps {
 
 type WithdrawStep = 'transfer' | 'withdraw';
 
-// Enhanced embedded wallet balance hook (matching the pattern from DepositModal)
+// Enhanced embedded wallet balance hook
 const useEmbeddedWalletBalance = (walletAddress: string) => {
   const [balance, setBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -166,7 +166,7 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
   return { balance, loading, lastUpdated, updateBalance, forceRefresh };
 };
 
-// Enhanced custodial balance hook (matching the pattern from DepositModal)
+// Enhanced custodial balance hook
 const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -344,7 +344,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     forceRefresh: refreshCustodialBalance 
   } = useCustodialBalance(effectiveUserId || '');
   
-  // Enhanced transfer hook (same as TradingControls and DepositModal)
+  // Enhanced transfer hook
   const { executeAutoTransfer, loading: transferLoading, error: transferError } = usePrivyAutoTransfer();
   
   // State management
@@ -405,7 +405,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     }
   }, [authenticated, actualEmbeddedWalletAddress, userId, internalUserId, fetchingUserId]);
 
-  // Step 1: Transfer from custodial to embedded using the same method as DepositModal
+  // Step 1: Transfer from custodial to embedded using existing API
   const handleTransferToEmbedded = useCallback(async () => {
     if (!embeddedWallet || !actualEmbeddedWalletAddress || !effectiveUserId) {
       toast.error('Wallet not ready for transfer');
@@ -429,8 +429,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     setTransferStatus('Preparing transfer...');
     
     try {
-      // This is actually a reverse transfer - from custodial TO embedded
-      // We need to use the custodial withdraw API to move funds to the embedded wallet
+      // Use the custodial withdraw-to-embedded API endpoint
       const response = await fetch('/api/custodial/withdraw-to-embedded', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -485,7 +484,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     refreshAllBalances
   ]);
 
-  // Step 2: Auto-signed withdrawal from embedded wallet to external address
+  // 🚀 UPDATED: Enhanced auto-signed withdrawal using proper API endpoint
   const handleEmbeddedWithdraw = useCallback(async () => {
     if (!embeddedWallet || !actualEmbeddedWalletAddress || !destinationAddress) {
       toast.error('Missing required information for withdrawal');
@@ -520,76 +519,123 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     const withdrawToastId = `withdraw-${Date.now()}`;
     
     try {
-      // Step 1: Prepare transaction
-      setWithdrawStatus('Preparing withdrawal...');
-      toast.loading('Preparing withdrawal transaction...', { id: withdrawToastId });
+      // 🚀 NEW: Use API endpoint for auto-signed withdrawal
+      setWithdrawStatus('Creating withdrawal transaction...');
+      toast.loading('Creating withdrawal transaction...', { id: withdrawToastId });
       
-      const connection = new Connection(
-        process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVzzNb_M2I0WQ0b85sYoNEYx'
-      );
-      
-      const fromPubkey = new PublicKey(actualEmbeddedWalletAddress);
-      const toPubkey = new PublicKey(destinationAddress);
-      const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
-      
-      // Check balance on blockchain
-      const actualBalance = await connection.getBalance(fromPubkey);
-      const actualSOL = actualBalance / LAMPORTS_PER_SOL;
-      
-      if (actualSOL < amount) {
-        throw new Error(`Insufficient balance on blockchain. Available: ${actualSOL.toFixed(6)} SOL`);
-      }
-      
-      // Step 2: Get latest blockhash
-      setWithdrawStatus('Getting network information...');
-      toast.loading('Getting network info...', { id: withdrawToastId });
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
-      
-      const transaction = new Transaction({
-        recentBlockhash: blockhash,
-        feePayer: fromPubkey
-      }).add(
-        SystemProgram.transfer({
-          fromPubkey,
-          toPubkey,
-          lamports
+      const response = await fetch('/api/embedded/auto-withdraw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: effectiveUserId,
+          walletAddress: actualEmbeddedWalletAddress,
+          amount: amount,
+          destinationAddress: destinationAddress
         })
-      );
-      
-      // Step 3: Auto-sign and send transaction
-      setWithdrawStatus('Signing and sending transaction...');
-      toast.loading('Signing and sending transaction...', { id: withdrawToastId });
-      const signature = await embeddedWallet.sendTransaction(transaction, connection);
-      console.log('✅ WithdrawModal: Transaction sent with signature:', signature);
-      
-      // Step 4: Wait for confirmation
-      setWithdrawStatus('Waiting for confirmation...');
-      toast.loading('Waiting for blockchain confirmation...', { id: withdrawToastId });
-      const confirmation = await connection.confirmTransaction({
-        signature,
-        blockhash,
-        lastValidBlockHeight
-      }, 'confirmed');
-      
-      if (confirmation.value.err) {
-        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Withdrawal request failed');
       }
-      
-      console.log('✅ WithdrawModal: Transaction confirmed on blockchain');
-      
-      // Step 5: Success!
-      setWithdrawStatus('Withdrawal completed!');
-      toast.success(`Successfully withdrew ${amount} SOL!`, { id: withdrawToastId });
-      
-      setSuccess(true);
-      setSuccessMessage(`Successfully withdrew ${amount} SOL to ${destinationAddress.slice(0, 8)}...${destinationAddress.slice(-8)}`);
-      
-      // Refresh embedded wallet balance
-      setTimeout(() => {
-        refreshEmbeddedBalance();
-      }, 2000);
-      
-      if (onSuccess) onSuccess();
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error(result.error || 'Withdrawal failed');
+      }
+
+      // If we get an unsigned transaction, we need to sign it with the embedded wallet
+      if (result.unsignedTransaction) {
+        setWithdrawStatus('Signing transaction with embedded wallet...');
+        toast.loading('Auto-signing transaction...', { id: withdrawToastId });
+        
+        try {
+          // Deserialize the transaction
+          const transactionBuffer = Buffer.from(result.unsignedTransaction, 'base64');
+          const transaction = Transaction.from(transactionBuffer);
+          
+          // Connect to Solana
+          const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://solana-mainnet.g.alchemy.com/v2/6CqgIf5nqVzzNb_M2I0WQ0b85sYoNEYx';
+          const connection = new Connection(rpcUrl, 'confirmed');
+          
+          // Auto-sign and send the transaction using Privy wallet
+          setWithdrawStatus('Broadcasting transaction...');
+          toast.loading('Broadcasting to blockchain...', { id: withdrawToastId });
+          
+          const signature = await embeddedWallet.sendTransaction(transaction, connection);
+          console.log('✅ WithdrawModal: Transaction sent with signature:', signature);
+          
+          // Wait for confirmation
+          setWithdrawStatus('Waiting for confirmation...');
+          toast.loading('Waiting for blockchain confirmation...', { id: withdrawToastId });
+          
+          // Get the latest blockhash for confirmation
+          const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+          
+          const confirmation = await connection.confirmTransaction({
+            signature,
+            blockhash,
+            lastValidBlockHeight
+          }, 'confirmed');
+          
+          if (confirmation.value.err) {
+            throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+          }
+          
+          console.log('✅ WithdrawModal: Transaction confirmed on blockchain');
+          
+          // Notify the API that the transaction was completed
+          try {
+            await fetch('/api/embedded/auto-withdraw/confirm', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId: effectiveUserId,
+                transactionId: signature,
+                amount: amount,
+                destinationAddress: destinationAddress
+              })
+            });
+          } catch (confirmError) {
+            console.warn('⚠️ Failed to confirm transaction with API:', confirmError);
+            // Non-critical error
+          }
+          
+          // Success!
+          setWithdrawStatus('Withdrawal completed!');
+          toast.success(`Successfully withdrew ${amount} SOL!`, { id: withdrawToastId });
+          
+          setSuccess(true);
+          setSuccessMessage(`Successfully withdrew ${amount} SOL to ${destinationAddress.slice(0, 8)}...${destinationAddress.slice(-8)}`);
+          
+          // Refresh embedded wallet balance
+          setTimeout(() => {
+            refreshEmbeddedBalance();
+          }, 2000);
+          
+          if (onSuccess) onSuccess();
+          
+        } catch (signingError) {
+          console.error('❌ WithdrawModal: Signing/Broadcasting error:', signingError);
+          throw signingError;
+        }
+      } else if (result.transactionId) {
+        // Transaction was processed server-side
+        console.log('✅ WithdrawModal: Server-side withdrawal completed:', result.transactionId);
+        
+        setWithdrawStatus('Withdrawal completed!');
+        toast.success(`Successfully withdrew ${amount} SOL!`, { id: withdrawToastId });
+        
+        setSuccess(true);
+        setSuccessMessage(`Successfully withdrew ${amount} SOL to ${destinationAddress.slice(0, 8)}...${destinationAddress.slice(-8)}`);
+        
+        setTimeout(() => {
+          refreshEmbeddedBalance();
+        }, 2000);
+        
+        if (onSuccess) onSuccess();
+      }
       
     } catch (error) {
       console.error('❌ WithdrawModal: Withdrawal error:', error);
@@ -604,6 +650,8 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           errorMessage = 'Blockchain transaction failed';
         } else if (error.message.includes('timeout')) {
           errorMessage = 'Withdrawal timed out - please try again';
+        } else if (error.message.includes('Daily withdrawal limit')) {
+          errorMessage = error.message;
         } else {
           errorMessage = `Withdrawal failed: ${error.message}`;
         }
@@ -621,6 +669,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     destinationAddress, 
     withdrawAmount, 
     embeddedBalance,
+    effectiveUserId,
     onSuccess,
     refreshEmbeddedBalance
   ]);
@@ -934,10 +983,10 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                     <div className="bg-gradient-to-r from-purple-900 to-orange-900 bg-opacity-30 border border-purple-700 text-purple-300 p-4 rounded-xl">
                       <div className="flex items-center mb-2">
                         <Send size={20} className="mr-2 text-orange-400" />
-                        <div className="font-medium">Step 2: Withdraw to External Wallet</div>
+                        <div className="font-medium">Step 2: Auto-Withdraw to External Wallet</div>
                       </div>
                       <div className="text-sm opacity-90">
-                        Send SOL from your embedded wallet to any external Solana address.
+                        Send SOL from your embedded wallet to any external Solana address. Transaction will be auto-signed.
                       </div>
                     </div>
 
@@ -1028,12 +1077,12 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                       {isWithdrawing ? (
                         <>
                           <Loader size={20} className="animate-spin mr-2" />
-                          <span>Processing Withdrawal...</span>
+                          <span>Processing Auto-Withdrawal...</span>
                         </>
                       ) : (
                         <>
                           <Send size={20} className="mr-2" />
-                          <span>Withdraw {withdrawAmount || '0'} SOL</span>
+                          <span>Auto-Withdraw {withdrawAmount || '0'} SOL</span>
                         </>
                       )}
                     </button>
@@ -1080,7 +1129,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
             <ArrowUpRight size={24} className="mr-3" />
             Withdraw {tokenSymbol}
             <span className="ml-3 text-xs bg-purple-600 text-white px-3 py-1 rounded-full">
-              {walletMode.toUpperCase()}
+              AUTO-SIGNED
             </span>
           </h2>
           <button
@@ -1099,7 +1148,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                 <Check size={40} className="text-green-500" />
               </div>
             </div>
-            <h3 className="text-2xl font-bold text-white mb-3">Withdrawal Successful!</h3>
+            <h3 className="text-2xl font-bold text-white mb-3">Auto-Withdrawal Successful!</h3>
             <p className="text-gray-400 mb-8">{successMessage}</p>
             <button
               onClick={onClose}
@@ -1156,7 +1205,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                       `${embeddedBalance.toFixed(6)} SOL`
                     )}
                   </div>
-                  <div className="text-xs text-gray-400 mt-1">Ready for withdrawal</div>
+                  <div className="text-xs text-gray-400 mt-1">Ready for auto-withdrawal</div>
                 </div>
               </div>
             </div>
@@ -1165,7 +1214,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
             <div className="bg-blue-900 bg-opacity-20 border border-blue-700 rounded-xl p-5 mb-6">
               <div className="flex items-center mb-3">
                 <TrendingUp size={20} className="mr-2 text-blue-400" />
-                <div className="font-medium text-blue-300 text-lg">Withdrawal Process</div>
+                <div className="font-medium text-blue-300 text-lg">Auto-Withdrawal Process</div>
               </div>
               <div className="flex items-center justify-between">
                 <div className={`flex items-center ${activeStep === 'transfer' ? 'text-blue-300 font-medium' : 'text-gray-400'}`}>
@@ -1188,7 +1237,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                   <span className="mr-2 text-lg">🌐</span>
                   <div>
                     <div className="text-sm">External Wallet</div>
-                    <div className="text-xs opacity-75">Your choice</div>
+                    <div className="text-xs opacity-75">Auto-signed</div>
                   </div>
                 </div>
               </div>
@@ -1294,14 +1343,14 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
               </div>
             ) : (
               <div className="space-y-6">
-                {/* Step 2 content for desktop - similar structure */}
+                {/* Step 2 content for desktop */}
                 <div className="bg-gradient-to-r from-purple-900 to-orange-900 bg-opacity-30 border border-purple-700 text-purple-300 p-5 rounded-xl">
                   <div className="flex items-center mb-3">
                     <Send size={24} className="mr-3 text-orange-400" />
-                    <div className="font-medium text-lg">Step 2: Withdraw to External Wallet</div>
+                    <div className="font-medium text-lg">Step 2: Auto-Withdraw to External Wallet</div>
                   </div>
                   <div className="text-sm opacity-90">
-                    Send SOL from your embedded wallet to any external Solana address. Transaction will be auto-signed.
+                    Send SOL from your embedded wallet to any external Solana address. Transaction will be automatically signed and sent.
                   </div>
                 </div>
 
@@ -1391,12 +1440,12 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                   {isWithdrawing ? (
                     <>
                       <Loader size={24} className="animate-spin mr-3" />
-                      <span>Processing Withdrawal...</span>
+                      <span>Processing Auto-Withdrawal...</span>
                     </>
                   ) : (
                     <>
                       <Send size={24} className="mr-3" />
-                      <span>Withdraw {withdrawAmount || '0'} SOL</span>
+                      <span>Auto-Withdraw {withdrawAmount || '0'} SOL</span>
                     </>
                   )}
                 </button>

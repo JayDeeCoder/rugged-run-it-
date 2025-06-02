@@ -1,4 +1,4 @@
-// src/components/trading/TradingControls.tsx - ENHANCED VERSION WITH REAL-TIME UPDATES
+// src/components/trading/TradingControls.tsx - ENHANCED VERSION WITH SHARED STATE
 import React, { FC, useState, useEffect, useContext, useCallback, useMemo, useRef } from 'react';
 import { Sparkles, Coins, ArrowUpRight, ArrowDownLeft, AlertCircle, CoinsIcon, Timer, Users, Settings, Wallet, TrendingUp } from 'lucide-react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
@@ -10,6 +10,14 @@ import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
+// 🚀 NEW: Import shared state hooks
+import { 
+  useSharedCustodialBalance, 
+  useSharedBetState, 
+  useSharedGameState,
+  ActiveBet 
+} from '../../hooks/useSharedState'; // Adjust path as needed
+
 // Import from barrel file instead of direct imports
 import { AirdropModal, DepositModal, WithdrawModal } from './index';
 
@@ -17,17 +25,6 @@ import { AirdropModal, DepositModal, WithdrawModal } from './index';
 export enum TokenType {
   SOL = 'SOL',      // Custodial game balance (primary)
   RUGGED = 'RUGGED' // SPL token (secondary)
-}
-
-// Enhanced bet tracking interface
-interface ActiveBet {
-  id: string;
-  amount: number;
-  entryMultiplier: number;
-  timestamp: number;
-  gameId: string;
-  transactionId?: string;
-  tokenType?: TokenType;
 }
 
 interface TradingControlsProps {
@@ -42,326 +39,6 @@ interface TradingControlsProps {
   isGameActive?: boolean;
   isMobile?: boolean;
 }
-
-// 🚀 ENHANCED: Custodial balance hook with real-time socket listeners and force refresh
-const useCustodialBalance = (userId: string) => {
-  const [custodialBalance, setCustodialBalance] = useState<number>(0);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [lastUpdated, setLastUpdated] = useState<number>(0);
-  const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const lastUserIdRef = useRef<string>('');
-  const socketListenersRef = useRef<boolean>(false);
-
-  // Create stable update function with useCallback
-  const updateCustodialBalance = useCallback(async () => {
-    if (!userId) return;
-    
-    // Prevent multiple simultaneous requests
-    if (loading) return;
-    
-    setLoading(true);
-    try {
-      console.log(`🔄 Fetching custodial balance for user ${userId}...`);
-      
-      const response = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}`);
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          console.log(`👤 User ${userId} not found - balance remains 0`);
-          setCustodialBalance(0);
-          return;
-        }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      
-      if (data.custodialBalance !== undefined) {
-        const newBalance = parseFloat(data.custodialBalance) || 0;
-        console.log(`💰 Custodial balance updated: ${newBalance.toFixed(6)} SOL`);
-        setCustodialBalance(newBalance);
-        setLastUpdated(Date.now());
-      } else {
-        console.warn('Invalid response format:', data);
-      }
-    } catch (error) {
-      console.error('❌ Failed to fetch custodial balance:', error);
-      // Don't reset balance on error, keep previous value
-    } finally {
-      setLoading(false);
-    }
-  }, [userId, loading]);
-
-  // Enhanced force refresh with cache busting
-  const forceRefresh = useCallback(async () => {
-    if (!userId) return;
-    console.log(`🔄 Force refreshing custodial balance for ${userId}...`);
-    setLoading(true);
-
-    try {
-      // Try POST with refresh action first
-      const postResponse = await fetch(`/api/custodial/balance/${userId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'refresh', timestamp: Date.now() })
-      });
-      
-      if (postResponse.ok) {
-        const data = await postResponse.json();
-        if (data.custodialBalance !== undefined) {
-          const newBalance = parseFloat(data.custodialBalance) || 0;
-          console.log(`💰 Force refresh (POST): ${newBalance.toFixed(6)} SOL`);
-          setCustodialBalance(newBalance);
-          setLastUpdated(Date.now());
-          return;
-        }
-      }
-      
-      // Fallback to GET with cache busting
-      const getResponse = await fetch(`/api/custodial/balance/${userId}?t=${Date.now()}&refresh=true`);
-      
-      if (getResponse.ok) {
-        const data = await getResponse.json();
-        if (data.custodialBalance !== undefined) {
-          const newBalance = parseFloat(data.custodialBalance) || 0;
-          console.log(`💰 Force refresh (GET): ${newBalance.toFixed(6)} SOL`);
-          setCustodialBalance(newBalance);
-          setLastUpdated(Date.now());
-        }
-      } else {
-        console.error('❌ Force refresh failed:', getResponse.status);
-      }
-      
-    } catch (error) {
-      console.error('❌ Force refresh error:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [userId]);
-  
-   
-  // Polling setup
-  useEffect(() => {
-    if (userId && userId !== lastUserIdRef.current) {
-      console.log(`🎯 Setting up custodial balance polling for user: ${userId}`);
-      lastUserIdRef.current = userId;
-      
-      // Clear existing interval
-      if (updateIntervalRef.current) {
-        clearInterval(updateIntervalRef.current);
-      }
-      
-      // Initial fetch
-      updateCustodialBalance();
-      
-      // Set interval for periodic updates
-      updateIntervalRef.current = setInterval(() => {
-        if (!loading) {
-          updateCustodialBalance();
-        }
-      }, 15000); // 15 seconds
-      
-      return () => {
-        if (updateIntervalRef.current) {
-          clearInterval(updateIntervalRef.current);
-        }
-      };
-    }
-  }, [userId, updateCustodialBalance]);
-   
-  
-  // 🚀 ENHANCED REAL-TIME SOCKET LISTENERS
-  useEffect(() => {
-    if (!userId || socketListenersRef.current) return;
-    
-    const socket = (window as any).gameSocket;
-    if (socket) {
-      console.log(`🔌 Setting up REAL-TIME custodial balance listeners for user: ${userId}`);
-      socketListenersRef.current = true;
-      
-      // Primary custodial balance update event
-      const handleCustodialBalanceUpdate = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`💰 REAL-TIME: Custodial balance update - ${data.custodialBalance?.toFixed(6)} SOL`);
-          setCustodialBalance(parseFloat(data.custodialBalance) || 0);
-          setLastUpdated(Date.now());
-          
-          // Show toast for significant changes
-          if (data.updateType === 'deposit_processed') {
-            toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL`);
-          } else if (data.updateType === 'bet_placed') {
-            toast(`Bet placed: -${data.change?.toFixed(3)} SOL`, { icon: '🎯' });
-          } else if (data.updateType === 'cashout_processed') {
-            toast.success(`Cashout: +${data.change?.toFixed(3)} SOL`);
-          }
-        }
-      };
-
-      // User balance update event (broader scope)
-      const handleUserBalanceUpdate = (data: any) => {
-        if (data.userId === userId && data.balanceType === 'custodial') {
-          console.log(`💰 REAL-TIME: User balance update - ${data.newBalance?.toFixed(6)} SOL`);
-          setCustodialBalance(parseFloat(data.newBalance) || 0);
-          setLastUpdated(Date.now());
-          
-          // Show toast for transaction types
-          if (data.transactionType === 'deposit') {
-            toast.success(`Deposit: +${data.change?.toFixed(3)} SOL`);
-          }
-        }
-      };
-
-      // Deposit confirmation event
-      const handleDepositConfirmation = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`💰 REAL-TIME: Deposit confirmed for ${userId}, amount: ${data.depositAmount}`);
-          
-          // Update balance immediately
-          setCustodialBalance(prev => prev + (parseFloat(data.depositAmount) || 0));
-          setLastUpdated(Date.now());
-          
-          // Force refresh after short delay to ensure accuracy
-          setTimeout(forceRefresh, 1500);
-          
-          toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL!`);
-        }
-      };
-
-      // Transaction confirmation event
-      const handleTransactionConfirmed = (data: any) => {
-        if (data.userId === userId || data.walletAddress === data.userWallet) {
-          console.log(`🔗 REAL-TIME: Transaction confirmed for ${userId}`);
-          
-          // Force refresh balance after transaction confirmation
-          setTimeout(forceRefresh, 2000);
-        }
-      };
-
-      // Custodial bet result event
-      const handleCustodialBetResult = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`🎯 REAL-TIME: Custodial bet result for ${userId}`);
-          
-          if (data.success && data.custodialBalance !== undefined) {
-            setCustodialBalance(parseFloat(data.custodialBalance) || 0);
-            setLastUpdated(Date.now());
-          } else {
-            // Refresh on failure to ensure accuracy
-            setTimeout(forceRefresh, 1000);
-          }
-        }
-      };
-
-      // Custodial cashout event
-      const handleCustodialCashoutResult = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`💸 REAL-TIME: Custodial cashout result for ${userId}`);
-          
-          if (data.success && data.custodialBalance !== undefined) {
-            setCustodialBalance(parseFloat(data.custodialBalance) || 0);
-            setLastUpdated(Date.now());
-            
-            if (data.payout) {
-              toast.success(`Cashout: +${data.payout?.toFixed(3)} SOL`);
-            }
-          } else {
-            // Refresh on failure
-            setTimeout(forceRefresh, 1000);
-          }
-        }
-      };
-
-      // Pending deposit resolved event
-      const handlePendingDepositResolved = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`✅ REAL-TIME: Pending deposit resolved for ${userId}`);
-          
-          // Force refresh to get latest balance
-          setTimeout(forceRefresh, 1000);
-          
-          toast.success(`Previous deposit credited: +${data.depositAmount?.toFixed(3)} SOL`);
-        }
-      };
-      
-      // ADD THESE NEW HANDLERS:
-      
-      // Enhanced force refresh handler for mobile
-// Enhanced force refresh handler for mobile
-const handleForceBalanceRefresh = (data: any) => {
-  if (data.userId === userId) {
-    console.log(`🔄 ENHANCED REAL-TIME: Force balance refresh for ${userId}`, data);
-    
-    if (data.newBalance !== undefined) {
-      // Trigger the hook's force refresh since we can't directly set state
-      setTimeout(() => {
-        forceRefresh(); // This is the correct function name from your hook
-      }, 100);
-      
-      if (data.reason) {
-        toast(`Balance updated: ${data.reason}`, { icon: '🔄' });
-      }
-    } else {
-      // Trigger manual refresh
-      setTimeout(() => {
-        forceRefresh(); // Use your existing function
-      }, 500);
-    }
-  }
-};
-
-// Mobile-specific balance sync
-const handleMobileBalanceSync = (data: any) => {
-  if (data.userId === userId) {
-    console.log(`📱 ENHANCED: Mobile balance sync for ${userId}`);
-    // Trigger refresh instead of directly setting state
-    setTimeout(() => {
-      forceRefresh();
-    }, 100);
-    toast.success('Mobile sync completed!');
-  }
-};
-
-// Balance refresh response for mobile requests
-const handleBalanceRefreshResponse = (data: any) => {
-  if (data.success && data.userId === userId) {
-    console.log(`📱 ENHANCED: Balance refresh response for ${userId}`);
-    // Trigger refresh instead of directly setting state
-    setTimeout(() => {
-      forceRefresh();
-    }, 100);
-  }
-};
-      // Register all event listeners
-      socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-      socket.on('userBalanceUpdate', handleUserBalanceUpdate);
-      socket.on('depositConfirmed', handleDepositConfirmation);
-      socket.on('transactionConfirmed', handleTransactionConfirmed);
-      socket.on('custodialBetResult', handleCustodialBetResult);
-      socket.on('custodialCashOutResult', handleCustodialCashoutResult);
-      socket.on('pendingDepositResolved', handlePendingDepositResolved);
-      // ADD these after your existing socket.on registrations:
-      
-      return () => {
-        console.log(`🔌 Cleaning up REAL-TIME custodial balance listeners for user: ${userId}`);
-        socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-        socket.off('userBalanceUpdate', handleUserBalanceUpdate);
-        socket.off('depositConfirmed', handleDepositConfirmation);
-        socket.off('transactionConfirmed', handleTransactionConfirmed);
-        socket.off('custodialBetResult', handleCustodialBetResult);
-        socket.off('custodialCashOutResult', handleCustodialCashoutResult);
-        socket.off('pendingDepositResolved', handlePendingDepositResolved);
-        // ADD these to your cleanup return statement:
-      socket.off('forceBalanceRefresh', handleForceBalanceRefresh);
-      socket.off('mobileBalanceSync', handleMobileBalanceSync);
-      socket.off('balanceRefreshResponse', handleBalanceRefreshResponse);
-        socketListenersRef.current = false;
-      };
-    }
-  }, [userId, forceRefresh]);
-
-  return { custodialBalance, loading, lastUpdated, updateCustodialBalance, forceRefresh };
-};
-
 
 // 🚀 ENHANCED: Wallet balance hook with real-time socket listeners
 const useWalletBalance = (walletAddress: string) => {
@@ -1299,7 +976,7 @@ const BettingSection: FC<{
   );
 });
 
-// 🚀 MAIN COMPONENT - Enhanced with real-time balance updates and proper variable ordering
+// 🚀 MAIN COMPONENT - Enhanced with shared state hooks
 const TradingControls: FC<TradingControlsProps> = ({ 
   onBuy, 
   onSell, 
@@ -1320,9 +997,33 @@ const TradingControls: FC<TradingControlsProps> = ({
   const HOUSE_WALLET = '7voNeLKTZvD1bUJU18kx9eCtEGGJYWZbPAHNwLSkoR56';
   const isWalletReady = authenticated && walletAddress !== '';
   
-  // All state declarations
+  // 🚀 IMPORTANT: Declare userId BEFORE using it in hooks
   const [userId, setUserId] = useState<string | null>(null);
-  const [activeBet, setActiveBet] = useState<ActiveBet | null>(null);
+  
+  // 🚀 NEW: Use shared state hooks (userId now properly declared above)
+  const { 
+    custodialBalance, 
+    loading: custodialBalanceLoading, 
+    updateCustodialBalance, 
+    forceRefresh: refreshCustodialBalance,
+    error: balanceError,
+    lastUpdated: custodialLastUpdated
+  } = useSharedCustodialBalance(userId || '');
+  
+  const { 
+    activeBet, 
+    isPlacingBet: sharedIsPlacingBet, 
+    isCashingOut: sharedIsCashingOut,
+    setActiveBet,
+    setIsPlacingBet,
+    setIsCashingOut,
+    clearActiveBet
+  } = useSharedBetState();
+
+  // Use shared state values instead of local state
+  const isPlacingBet = sharedIsPlacingBet || propIsPlacingBet;
+  const isCashingOut = sharedIsCashingOut || propIsCashingOut;
+  const hasActiveGame = !!activeBet || propHasActiveGame;
   const [currentToken, setCurrentToken] = useState<TokenType>(TokenType.SOL);
   const [savedAmount, setSavedAmount] = useLocalStorage<string>('default-bet-amount', '0.01');
   const [amount, setAmount] = useState<string>(savedAmount);
@@ -1332,8 +1033,6 @@ const TradingControls: FC<TradingControlsProps> = ({
   const [autoCashoutEnabled, setAutoCashoutEnabled] = useLocalStorage<boolean>('auto-cashout-enabled', true);
   const [autoCashoutValue, setAutoCashoutValue] = useLocalStorage<string>('auto-cashout-value', '2.0');
   const [showAutoCashout, setShowAutoCashout] = useState<boolean>(false);
-  const [isPlacingBet, setIsPlacingBet] = useState<boolean>(false);
-  const [isCashingOut, setIsCashingOut] = useState<boolean>(false);
   const [operationTimeouts, setOperationTimeouts] = useState<Set<string>>(new Set());
   const [showBalanceExpanded, setShowBalanceExpanded] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string>('');
@@ -1377,15 +1076,7 @@ const TradingControls: FC<TradingControlsProps> = ({
     loading: embeddedWalletLoading, 
     forceRefresh: refreshEmbeddedBalance 
   } = useWalletBalance(walletAddress);
-  
-  const { 
-    custodialBalance, 
-    loading: custodialBalanceLoading, 
-    updateCustodialBalance, 
-    forceRefresh: refreshCustodialBalance,
-    lastUpdated: custodialLastUpdated
-  } = useCustodialBalance(userId || '');
-  
+   
   const { 
     ruggedBalance, 
     loading: ruggedBalanceLoading, 
@@ -1394,7 +1085,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   } = useRuggedBalance(walletAddress);
 
   // Add this after your other hooks like useGameSocket, useCustodialBalance, etc.
-const { executeAutoTransfer, loading: transferLoading, error: transferError } = usePrivyAutoTransfer();
+  const { executeAutoTransfer, loading: transferLoading, error: transferError } = usePrivyAutoTransfer();
 
   // Memoized calculations
   const gameState = useMemo(() => {
@@ -1527,6 +1218,473 @@ const { executeAutoTransfer, loading: transferLoading, error: transferError } = 
     }
   }, [refreshEmbeddedBalance, refreshCustodialBalance, refreshRuggedBalance, debugLog]);
 
+  // Enhanced auto transfer function
+  const autoTransferToGameBalance = useCallback(async (amount: number) => {
+    if (!embeddedWallet || !walletAddress || !userId) {
+      toast.error('Wallet not ready for transfer');
+      return false;
+    }
+
+    if (amount <= 0 || amount > embeddedWalletBalance) {
+      toast.error(`Invalid amount. Available: ${embeddedWalletBalance.toFixed(3)} SOL`);
+      return false;
+    }
+
+    console.log('🚀 Starting transfer using updated API:', { amount, userId });
+    
+    try {
+      // 🔥 Use the updated hook that calls our fixed API endpoint
+      const result = await executeAutoTransfer(
+        userId, 
+        amount,
+        // This callback will refresh the custodial balance immediately
+        async () => {
+          console.log('🔄 Transfer completed, refreshing custodial balance...');
+          await refreshCustodialBalance();
+          
+          // Also trigger a delayed refresh for safety
+          setTimeout(() => {
+            refreshCustodialBalance();
+          }, 1500);
+        }
+      );
+
+      if (result.success) {
+        console.log('✅ Transfer completed successfully:', result);
+        
+        // Update transfer tracking
+        transferAttempts.current.push({
+          timestamp: Date.now(),
+          amount: amount,
+          signature: result.transactionId
+        });
+        
+        transferAttempts.current = transferAttempts.current.slice(-10);
+        
+        // Reset any balance issue flags
+        setBalanceIssueDetected(false);
+        
+        return true;
+      } else {
+        console.error('❌ Transfer failed:', result.error);
+        toast.error(result.error || 'Transfer failed');
+        return false;
+      }
+      
+    } catch (error) {
+      console.error('❌ Transfer error:', error);
+      toast.error(error instanceof Error ? error.message : 'Transfer failed');
+      return false;
+    }
+  }, [embeddedWallet, walletAddress, userId, embeddedWalletBalance, executeAutoTransfer, refreshCustodialBalance, setBalanceIssueDetected]);
+
+  // 🚀 UPDATED: Enhanced bet placement with shared state
+  const handleBuy = useCallback(async () => {
+    const amountNum = parseFloat(amount);
+    
+    if (isPlacingBet || operationTimeouts.has('bet')) {
+      console.log('⚠️ Bet placement already in progress');
+      return;
+    }
+    
+    setServerError('');
+    
+    // Enhanced validation
+    if (isNaN(amountNum) || amountNum <= 0) {
+      setServerError('Invalid amount');
+      toast.error('Invalid amount');
+      return;
+    }
+    
+    const minBetAmount = currentToken === TokenType.SOL ? 0.001 : 1;
+    const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
+    
+    if (amountNum < minBetAmount) {
+      setServerError(`Minimum bet: ${minBetAmount} ${currentToken}`);
+      toast.error(`Minimum bet: ${minBetAmount} ${currentToken}`);
+      return;
+    }
+    
+    if (amountNum > maxBetAmount) {
+      setServerError(`Maximum bet: ${maxBetAmount} ${currentToken}`);
+      toast.error(`Maximum bet: ${maxBetAmount} ${currentToken}`);
+      return;
+    }
+    
+    if (!isWalletReady || !isConnected) {
+      setServerError('Please login to play');
+      toast.error('Please login to play');
+      return;
+    }
+    
+    if (!gameState.activeIsGameActive) {
+      setServerError('Game is not available');
+      toast.error('Game is not available');
+      return;
+    }
+    
+    if (isWaitingPeriod && !effectiveCanBet) {
+      setServerError('Game starting now!');
+      toast.error('Game starting now!');
+      return;
+    }
+
+    if (amountNum > activeBalance) {
+      setServerError('Insufficient balance');
+      toast.error('Insufficient balance');
+      return;
+    }
+
+    console.log('✅ All validations passed, placing bet...');
+    
+    setIsPlacingBet(true); // Use shared state setter
+    setOperationTimeouts(prev => new Set(prev).add('bet'));
+    
+    const operationTimeout = setTimeout(() => {
+      console.log('⏰ Bet placement timeout reached');
+      setIsPlacingBet(false); // Use shared state setter
+      setOperationTimeouts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete('bet');
+        return newSet;
+      });
+      setServerError('Bet placement timed out');
+      toast.error('Bet placement timed out - please try again');
+    }, 15000);
+
+    try {
+      let success = false;
+      let entryMultiplier = gameState.gameStatus === 'waiting' ? 1.0 : gameState.activeCurrentMultiplier;
+
+      if (currentToken === TokenType.SOL) {
+        console.log('📡 Using placeCustodialBet hook method...');
+        
+        if (!userId) {
+          throw new Error('User ID not available');
+        }
+        
+        success = await placeCustodialBet(userId, amountNum);
+        
+        if (success) {
+          console.log('✅ Custodial bet placed successfully via hook');
+          
+          // 🚀 FIXED: Use shared ActiveBet interface and correct property names
+          const newBet: ActiveBet = {
+            id: `custodial_bet_${Date.now()}`,
+            amount: amountNum,
+            entryMultiplier,
+            timestamp: Date.now(),
+            gameId: gameState.activeCurrentGame?.id || 'unknown',
+            tokenType: 'SOL', // 🔧 FIXED: Changed from 'TokenType' to 'tokenType'
+            userId: userId
+          };
+          
+          setActiveBet(newBet); // Use shared state setter
+          console.log('✅ Active bet set:', newBet);
+          
+          try {
+            updateCustodialBalance();
+          } catch (error) {
+            console.warn('⚠️ Balance update failed:', error);
+          }
+        } else {
+          console.error('❌ Custodial bet failed');
+          setServerError('Failed to place custodial bet');
+          toast.error('Failed to place bet');
+        }
+      } else {
+        console.log('📡 Using RUGGED token betting system...');
+        success = await placeBet(walletAddress, amountNum, userId || undefined);
+        
+        if (success) {
+          const newBet: ActiveBet = {
+            id: `rugged_bet_${Date.now()}`,
+            amount: amountNum,
+            entryMultiplier,
+            timestamp: Date.now(),
+            gameId: gameState.activeCurrentGame?.id || 'unknown',
+            tokenType: 'RUGGED' // Use shared interface
+          };
+          
+          setActiveBet(newBet); // Use shared state setter
+          try {
+            updateRuggedBalance();
+          } catch (error) {
+            console.warn('⚠️ Balance update failed:', error);
+          }
+        }
+      }
+      
+      if (success) {
+        console.log('✅ Bet placed successfully - Entry:', entryMultiplier.toFixed(2) + 'x');
+        
+        const betType = gameState.gameStatus === 'waiting' ? 'Pre-game bet' : 'Bet';
+        const tokenDisplay = currentToken === TokenType.SOL ? 'SOL (game balance)' : 'RUGGED tokens';
+        toast.success(`${betType} placed: ${amountNum} ${tokenDisplay} (Entry: ${entryMultiplier.toFixed(2)}x)`);
+        
+        if (onBuy) onBuy(amountNum);
+      } else if (!serverError) {
+        const errorMsg = 'Failed to place buy - server returned false';
+        setServerError(errorMsg);
+        toast.error(errorMsg);
+      }
+    } catch (error) {
+      console.error('❌ Error placing bet:', error);
+      const errorMsg = `Failed to place buy: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      setServerError(errorMsg);
+      toast.error(errorMsg);
+    } finally {
+      clearTimeout(operationTimeout);
+      setIsPlacingBet(false); // Use shared state setter
+      setOperationTimeouts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete('bet');
+        return newSet;
+      });
+      
+      console.log('🏁 Bet placement process completed');
+    }
+  }, [
+    amount, 
+    currentToken, 
+    activeBalance, 
+    isWalletReady, 
+    isConnected, 
+    gameState,
+    isWaitingPeriod, 
+    effectiveCanBet, 
+    userId, 
+    walletAddress, 
+    placeBet,
+    placeCustodialBet,
+    onBuy,
+    isPlacingBet,
+    operationTimeouts,
+    serverError,
+    setIsPlacingBet, // Add shared state setter
+    setActiveBet,    // Add shared state setter
+    updateCustodialBalance,
+    updateRuggedBalance
+  ]);
+
+  // 🚀 UPDATED: Enhanced cashout with shared state
+  const handleCashout = useCallback(async () => {
+    if (!authenticated || !walletAddress || !isConnected || !activeBet) {
+      console.log('❌ Cannot cashout: missing requirements');
+      return;
+    }
+  
+    if (!userId) {
+      setServerError('User not initialized');
+      toast.error('User not initialized');
+      return;
+    }
+  
+    if (isCashingOut || operationTimeouts.has('cashout')) {
+      console.log('❌ Cashout already in progress');
+      return;
+    }
+  
+    setIsCashingOut(true); // Use shared state setter
+    setOperationTimeouts(prev => new Set(prev).add('cashout'));
+    
+    const operationTimeout = setTimeout(() => {
+      setIsCashingOut(false); // Use shared state setter
+      setOperationTimeouts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete('cashout');
+        return newSet;
+      });
+      setServerError('Cashout timed out');
+      toast.error('Cashout timed out - please try again');
+    }, 15000);
+  
+    try {
+      let success = false;
+      let payout = 0;
+  
+      if (activeBet.tokenType === 'SOL') {
+        console.log('💸 Using custodialCashOut hook method...');
+        
+        const result = await custodialCashOut(userId, walletAddress);
+        success = result.success;
+        payout = result.payout || 0;
+        
+        if (success) {
+          console.log('✅ Custodial cashout successful:', result);
+          
+          const winAmount = payout - activeBet.amount;
+          const currentMultiplier = gameState.activeCurrentMultiplier;
+          
+          toast.success(`Cashed out at ${currentMultiplier.toFixed(2)}x! Win: +${winAmount.toFixed(3)} SOL`);
+          
+          clearActiveBet(); // Use shared state setter
+          
+          setTimeout(() => {
+            updateCustodialBalance();
+          }, 100);
+          
+        } else {
+          console.error('❌ Custodial cashout failed:', result.reason);
+          setServerError(result.reason || 'Cashout failed');
+          toast.error(result.reason || 'Cashout failed');
+          clearActiveBet(); // Use shared state setter
+        }
+      } else {
+        try {
+          const cashoutResult = await Promise.race([
+            cashOut(walletAddress),
+            new Promise<never>((_, reject) => {
+              setTimeout(() => reject(new Error('timeout')), 10000);
+            })
+          ]);
+          
+          success = cashoutResult.success || false;
+          payout = cashoutResult.payout || 0;
+          
+          if (success) {
+            const winAmount = payout - activeBet.amount;
+            const currentMultiplier = gameState.activeCurrentMultiplier;
+            
+            toast.success(`Cashed out at ${currentMultiplier.toFixed(2)}x! Win: +${winAmount.toFixed(0)} RUGGED`);
+            
+            clearActiveBet(); // Use shared state setter
+            
+            setTimeout(() => {
+              updateRuggedBalance();
+            }, 100);
+          }
+        } catch (error) {
+          console.error('❌ RUGGED cashout error:', error);
+          success = false;
+          clearActiveBet(); // Use shared state setter
+        }
+      }
+  
+      if (!success && activeBet) {
+        console.log('⚠️ Cashout failed but clearing active bet to prevent stuck state');
+        clearActiveBet(); // Use shared state setter
+      }
+  
+      if (success && onSell) {
+        onSell(100);
+      }
+  
+    } catch (error) {
+      console.error('❌ Error cashing out:', error);
+      setServerError('Failed to RUG');
+      toast.error('Failed to RUG');
+      clearActiveBet(); // Use shared state setter
+    } finally {
+      clearTimeout(operationTimeout);
+      setIsCashingOut(false); // Use shared state setter
+      setOperationTimeouts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete('cashout');
+        return newSet;
+      });
+    }
+  }, [
+    authenticated, 
+    walletAddress, 
+    isConnected, 
+    activeBet, 
+    userId, 
+    isCashingOut, 
+    operationTimeouts, 
+    custodialCashOut, 
+    cashOut, 
+    gameState.activeCurrentMultiplier, 
+    onSell, 
+    updateCustodialBalance, 
+    updateRuggedBalance,
+    setIsCashingOut, // Add shared state setter
+    clearActiveBet   // Add shared state setter
+  ]);
+
+  // Handle token switch
+  const handleTokenChange = useCallback((token: TokenType) => {
+    setCurrentToken(token);
+  }, []);
+
+  // Handle amount change
+  const handleAmountChange = useCallback((value: string) => {
+    const pattern = currentToken === TokenType.SOL 
+      ? /^(\d+)?(\.\d{0,6})?$/ 
+      : /^\d*$/;
+    
+    if (pattern.test(value) || value === '') {
+      setAmount(value);
+      if (value !== '') {
+        setSavedAmount(value);
+      }
+    }
+  }, [currentToken, setSavedAmount]);
+
+  const setQuickAmount = useCallback((amt: number) => {
+    const amtStr = amt.toString();
+    setAmount(amtStr);
+    setSavedAmount(amtStr);
+  }, [setSavedAmount]);
+
+  const handleQuickTransfer = useCallback(async (amount: number) => {
+    transferAttempts.current.push({
+      timestamp: Date.now(),
+      amount: amount
+    });
+    
+    transferAttempts.current = transferAttempts.current.slice(-10);
+    
+    debugLog('Quick transfer initiated', { amount, transferAttempts: transferAttempts.current.length });
+    
+    const success = await autoTransferToGameBalance(amount);
+    if (success) {
+      debugLog(`Quick transfer of ${amount} SOL completed successfully`);
+      setBalanceIssueDetected(false);
+    } else {
+      debugLog(`Quick transfer of ${amount} SOL failed`);
+    }
+  }, [autoTransferToGameBalance, debugLog, setBalanceIssueDetected]);
+
+  const handleEmergencyBalanceSync = useCallback(async () => {
+    if (!userId) {
+      toast.error('User not available for sync');
+      return;
+    }
+    
+    toast.loading('Emergency sync...', { id: 'emergency-sync' });
+    
+    try {
+      // Use existing endpoint instead of the new admin endpoint
+      const response = await fetch(`/api/custodial/balance/${userId}?force=true&emergency=true&t=${Date.now()}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Trigger refresh to get the latest data
+        setTimeout(() => {
+          refreshCustodialBalance();
+        }, 500);
+        
+        // Also try to trigger updateCustodialBalance
+        setTimeout(() => {
+          updateCustodialBalance();
+        }, 1000);
+        
+        toast.success(`Emergency sync completed! Balance: ${(data.custodialBalance || 0).toFixed(3)} SOL`, { 
+          id: 'emergency-sync',
+          duration: 4000 
+        });
+      } else {
+        toast.error('Emergency sync failed - endpoint error', { id: 'emergency-sync' });
+      }
+      
+    } catch (error) {
+      console.error('Emergency sync error:', error);
+      toast.error('Emergency sync failed - connection error', { id: 'emergency-sync' });
+    }
+  }, [userId, refreshCustodialBalance, updateCustodialBalance]);
+
   // Now all useEffects after all variables are declared
 
   // Use localStorage to remember user's preferred amount
@@ -1631,459 +1789,6 @@ const { executeAutoTransfer, loading: transferLoading, error: transferError } = 
     return () => clearInterval(issueDetectionInterval);
   }, [userId, authenticated, custodialBalance, balanceIssueDetected, debugLog]);
 
-  // Enhanced auto transfer function
- // Replace the entire autoTransferToGameBalance function with this:
-const autoTransferToGameBalance = useCallback(async (amount: number) => {
-  if (!embeddedWallet || !walletAddress || !userId) {
-    toast.error('Wallet not ready for transfer');
-    return false;
-  }
-
-  if (amount <= 0 || amount > embeddedWalletBalance) {
-    toast.error(`Invalid amount. Available: ${embeddedWalletBalance.toFixed(3)} SOL`);
-    return false;
-  }
-
-  console.log('🚀 Starting transfer using updated API:', { amount, userId });
-  
-  try {
-    // 🔥 Use the updated hook that calls our fixed API endpoint
-    const result = await executeAutoTransfer(
-      userId, 
-      amount,
-      // This callback will refresh the custodial balance immediately
-      async () => {
-        console.log('🔄 Transfer completed, refreshing custodial balance...');
-        await refreshCustodialBalance();
-        
-        // Also trigger a delayed refresh for safety
-        setTimeout(() => {
-          refreshCustodialBalance();
-        }, 1500);
-      }
-    );
-
-    if (result.success) {
-      console.log('✅ Transfer completed successfully:', result);
-      
-      // Update transfer tracking
-      transferAttempts.current.push({
-        timestamp: Date.now(),
-        amount: amount,
-        signature: result.transactionId
-      });
-      
-      transferAttempts.current = transferAttempts.current.slice(-10);
-      
-      // Reset any balance issue flags
-      setBalanceIssueDetected(false);
-      
-      return true;
-    } else {
-      console.error('❌ Transfer failed:', result.error);
-      toast.error(result.error || 'Transfer failed');
-      return false;
-    }
-    
-  } catch (error) {
-    console.error('❌ Transfer error:', error);
-    toast.error(error instanceof Error ? error.message : 'Transfer failed');
-    return false;
-  }
-}, [embeddedWallet, walletAddress, userId, embeddedWalletBalance, executeAutoTransfer, refreshCustodialBalance, setBalanceIssueDetected]);
-
-  // Enhanced cashout with stable dependencies
-  const handleCashout = useCallback(async () => {
-    if (!authenticated || !walletAddress || !isConnected || !activeBet) {
-      console.log('❌ Cannot cashout: missing requirements');
-      return;
-    }
-  
-    if (!userId) {
-      setServerError('User not initialized');
-      toast.error('User not initialized');
-      return;
-    }
-  
-    if (isCashingOut || operationTimeouts.has('cashout')) {
-      console.log('❌ Cashout already in progress');
-      return;
-    }
-  
-    setIsCashingOut(true);
-    setOperationTimeouts(prev => new Set(prev).add('cashout'));
-    
-    const operationTimeout = setTimeout(() => {
-      setIsCashingOut(false);
-      setOperationTimeouts(prev => {
-        const newSet = new Set(prev);
-        newSet.delete('cashout');
-        return newSet;
-      });
-      setServerError('Cashout timed out');
-      toast.error('Cashout timed out - please try again');
-    }, 15000);
-  
-    try {
-      let success = false;
-      let payout = 0;
-  
-      if (activeBet.tokenType === TokenType.SOL) {
-        console.log('💸 Using custodialCashOut hook method...');
-        
-        const result = await custodialCashOut(userId, walletAddress);
-        success = result.success;
-        payout = result.payout || 0;
-        
-        if (success) {
-          console.log('✅ Custodial cashout successful:', result);
-          
-          const winAmount = payout - activeBet.amount;
-          const currentMultiplier = gameState.activeCurrentMultiplier;
-          
-          toast.success(`Cashed out at ${currentMultiplier.toFixed(2)}x! Win: +${winAmount.toFixed(3)} SOL`);
-          
-          setActiveBet(null);
-          
-          setTimeout(() => {
-            updateCustodialBalance();
-          }, 100);
-          
-        } else {
-          console.error('❌ Custodial cashout failed:', result.reason);
-          setServerError(result.reason || 'Cashout failed');
-          toast.error(result.reason || 'Cashout failed');
-          setActiveBet(null);
-        }
-      } else {
-        try {
-          const cashoutResult = await Promise.race([
-            cashOut(walletAddress),
-            new Promise<never>((_, reject) => {
-              setTimeout(() => reject(new Error('timeout')), 10000);
-            })
-          ]);
-          
-          success = cashoutResult.success || false;
-          payout = cashoutResult.payout || 0;
-          
-          if (success) {
-            const winAmount = payout - activeBet.amount;
-            const currentMultiplier = gameState.activeCurrentMultiplier;
-            
-            toast.success(`Cashed out at ${currentMultiplier.toFixed(2)}x! Win: +${winAmount.toFixed(0)} RUGGED`);
-            
-            setActiveBet(null);
-            
-            setTimeout(() => {
-              updateRuggedBalance();
-            }, 100);
-          }
-        } catch (error) {
-          console.error('❌ RUGGED cashout error:', error);
-          success = false;
-          setActiveBet(null);
-        }
-      }
-  
-      if (!success && activeBet) {
-        console.log('⚠️ Cashout failed but clearing active bet to prevent stuck state');
-        setActiveBet(null);
-      }
-  
-      if (success && onSell) {
-        onSell(100);
-      }
-  
-    } catch (error) {
-      console.error('❌ Error cashing out:', error);
-      setServerError('Failed to RUG');
-      toast.error('Failed to RUG');
-      setActiveBet(null);
-    } finally {
-      clearTimeout(operationTimeout);
-      setIsCashingOut(false);
-      setOperationTimeouts(prev => {
-        const newSet = new Set(prev);
-        newSet.delete('cashout');
-        return newSet;
-      });
-    }
-  }, [authenticated, walletAddress, isConnected, activeBet, userId, isCashingOut, operationTimeouts, custodialCashOut, cashOut, gameState.activeCurrentMultiplier, onSell, updateCustodialBalance, updateRuggedBalance]);
-
-  // Handle token switch
-  const handleTokenChange = useCallback((token: TokenType) => {
-    setCurrentToken(token);
-  }, []);
-
-  // Handle amount change
-  const handleAmountChange = useCallback((value: string) => {
-    const pattern = currentToken === TokenType.SOL 
-      ? /^(\d+)?(\.\d{0,6})?$/ 
-      : /^\d*$/;
-    
-    if (pattern.test(value) || value === '') {
-      setAmount(value);
-      if (value !== '') {
-        setSavedAmount(value);
-      }
-    }
-  }, [currentToken, setSavedAmount]);
-
-  const setQuickAmount = useCallback((amt: number) => {
-    const amtStr = amt.toString();
-    setAmount(amtStr);
-    setSavedAmount(amtStr);
-  }, [setSavedAmount]);
-
-  const handleQuickTransfer = useCallback(async (amount: number) => {
-    transferAttempts.current.push({
-      timestamp: Date.now(),
-      amount: amount
-    });
-    
-    transferAttempts.current = transferAttempts.current.slice(-10);
-    
-    debugLog('Quick transfer initiated', { amount, transferAttempts: transferAttempts.current.length });
-    
-    const success = await autoTransferToGameBalance(amount);
-    if (success) {
-      debugLog(`Quick transfer of ${amount} SOL completed successfully`);
-      setBalanceIssueDetected(false);
-    } else {
-      debugLog(`Quick transfer of ${amount} SOL failed`);
-    }
-  }, [autoTransferToGameBalance, debugLog, setBalanceIssueDetected]);
-  
-  // ADD THIS NEW FUNCTION:
-// CORRECTED EMERGENCY SYNC FUNCTION:
-// ADD THIS SIMPLER VERSION:
-// ADD THIS SIMPLE VERSION:
-// REPLACE your handleEmergencyBalanceSync function with this:
-const handleEmergencyBalanceSync = useCallback(async () => {
-  if (!userId) {
-    toast.error('User not available for sync');
-    return;
-  }
-  
-  toast.loading('Emergency sync...', { id: 'emergency-sync' });
-  
-  try {
-    // Use existing endpoint instead of the new admin endpoint
-    const response = await fetch(`/api/custodial/balance/${userId}?force=true&emergency=true&t=${Date.now()}`);
-    
-    if (response.ok) {
-      const data = await response.json();
-      
-      // Trigger refresh to get the latest data
-      setTimeout(() => {
-        refreshCustodialBalance();
-      }, 500);
-      
-      // Also try to trigger updateCustodialBalance
-      setTimeout(() => {
-        updateCustodialBalance();
-      }, 1000);
-      
-      toast.success(`Emergency sync completed! Balance: ${(data.custodialBalance || 0).toFixed(3)} SOL`, { 
-        id: 'emergency-sync',
-        duration: 4000 
-      });
-    } else {
-      toast.error('Emergency sync failed - endpoint error', { id: 'emergency-sync' });
-    }
-    
-  } catch (error) {
-    console.error('Emergency sync error:', error);
-    toast.error('Emergency sync failed - connection error', { id: 'emergency-sync' });
-  }
-}, [userId, refreshCustodialBalance, updateCustodialBalance]);
- // Use forceRefresh in dependencies
-
-  // Enhanced bet placement with stable dependencies
-  const handleBuy = useCallback(async () => {
-    const amountNum = parseFloat(amount);
-    
-    if (isPlacingBet || operationTimeouts.has('bet')) {
-      console.log('⚠️ Bet placement already in progress');
-      return;
-    }
-    
-    setServerError('');
-    
-    // Enhanced validation
-    if (isNaN(amountNum) || amountNum <= 0) {
-      setServerError('Invalid amount');
-      toast.error('Invalid amount');
-      return;
-    }
-    
-    const minBetAmount = currentToken === TokenType.SOL ? 0.001 : 1;
-    const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
-    
-    if (amountNum < minBetAmount) {
-      setServerError(`Minimum bet: ${minBetAmount} ${currentToken}`);
-      toast.error(`Minimum bet: ${minBetAmount} ${currentToken}`);
-      return;
-    }
-    
-    if (amountNum > maxBetAmount) {
-      setServerError(`Maximum bet: ${maxBetAmount} ${currentToken}`);
-      toast.error(`Maximum bet: ${maxBetAmount} ${currentToken}`);
-      return;
-    }
-    
-    if (!isWalletReady || !isConnected) {
-      setServerError('Please login to play');
-      toast.error('Please login to play');
-      return;
-    }
-    
-    if (!gameState.activeIsGameActive) {
-      setServerError('Game is not available');
-      toast.error('Game is not available');
-      return;
-    }
-    
-    if (isWaitingPeriod && !effectiveCanBet) {
-      setServerError('Game starting now!');
-      toast.error('Game starting now!');
-      return;
-    }
-
-    if (amountNum > activeBalance) {
-      setServerError('Insufficient balance');
-      toast.error('Insufficient balance');
-      return;
-    }
-
-    console.log('✅ All validations passed, placing bet...');
-    
-    setIsPlacingBet(true);
-    setOperationTimeouts(prev => new Set(prev).add('bet'));
-    
-    const operationTimeout = setTimeout(() => {
-      console.log('⏰ Bet placement timeout reached');
-      setIsPlacingBet(false);
-      setOperationTimeouts(prev => {
-        const newSet = new Set(prev);
-        newSet.delete('bet');
-        return newSet;
-      });
-      setServerError('Bet placement timed out');
-      toast.error('Bet placement timed out - please try again');
-    }, 15000);
-
-    try {
-      let success = false;
-      let entryMultiplier = gameState.gameStatus === 'waiting' ? 1.0 : gameState.activeCurrentMultiplier;
-
-      if (currentToken === TokenType.SOL) {
-        console.log('📡 Using placeCustodialBet hook method...');
-        
-        if (!userId) {
-          throw new Error('User ID not available');
-        }
-        
-        success = await placeCustodialBet(userId, amountNum);
-        
-        if (success) {
-          console.log('✅ Custodial bet placed successfully via hook');
-          
-          const newBet: ActiveBet = {
-            id: `custodial_bet_${Date.now()}`,
-            amount: amountNum,
-            entryMultiplier,
-            timestamp: Date.now(),
-            gameId: gameState.activeCurrentGame?.id || 'unknown',
-            tokenType: currentToken
-          };
-          
-          setActiveBet(newBet);
-          console.log('✅ Active bet set:', newBet);
-          
-          try {
-            updateCustodialBalance();
-          } catch (error) {
-            console.warn('⚠️ Balance update failed:', error);
-          }
-        } else {
-          console.error('❌ Custodial bet failed');
-          setServerError('Failed to place custodial bet');
-          toast.error('Failed to place bet');
-        }
-      } else {
-        console.log('📡 Using RUGGED token betting system...');
-        success = await placeBet(walletAddress, amountNum, userId || undefined);
-        
-        if (success) {
-          const newBet: ActiveBet = {
-            id: `rugged_bet_${Date.now()}`,
-            amount: amountNum,
-            entryMultiplier,
-            timestamp: Date.now(),
-            gameId: gameState.activeCurrentGame?.id || 'unknown',
-            tokenType: currentToken
-          };
-          
-          setActiveBet(newBet);
-          try {
-            updateRuggedBalance();
-          } catch (error) {
-            console.warn('⚠️ Balance update failed:', error);
-          }
-        }
-      }
-      
-      if (success) {
-        console.log('✅ Bet placed successfully - Entry:', entryMultiplier.toFixed(2) + 'x');
-        
-        const betType = gameState.gameStatus === 'waiting' ? 'Pre-game bet' : 'Bet';
-        const tokenDisplay = currentToken === TokenType.SOL ? 'SOL (game balance)' : 'RUGGED tokens';
-        toast.success(`${betType} placed: ${amountNum} ${tokenDisplay} (Entry: ${entryMultiplier.toFixed(2)}x)`);
-        
-        if (onBuy) onBuy(amountNum);
-      } else if (!serverError) {
-        const errorMsg = 'Failed to place buy - server returned false';
-        setServerError(errorMsg);
-        toast.error(errorMsg);
-      }
-    } catch (error) {
-      console.error('❌ Error placing bet:', error);
-      const errorMsg = `Failed to place buy: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      setServerError(errorMsg);
-      toast.error(errorMsg);
-    } finally {
-      clearTimeout(operationTimeout);
-      setIsPlacingBet(false);
-      setOperationTimeouts(prev => {
-        const newSet = new Set(prev);
-        newSet.delete('bet');
-        return newSet;
-      });
-      
-      console.log('🏁 Bet placement process completed');
-    }
-  }, [
-    amount, 
-    currentToken, 
-    activeBalance, 
-    isWalletReady, 
-    isConnected, 
-    gameState,
-    isWaitingPeriod, 
-    effectiveCanBet, 
-    userId, 
-    walletAddress, 
-    placeBet,
-    placeCustodialBet,
-    onBuy,
-    isPlacingBet,
-    operationTimeouts,
-    serverError
-  ]);
-
-  
   // User initialization effect
   useEffect(() => {
     if (!authenticated || !walletAddress) {
@@ -2183,7 +1888,7 @@ const handleEmergencyBalanceSync = useCallback(async () => {
     return () => {
       if (initTimeout) clearTimeout(initTimeout);
     };
-  }, [authenticated, walletAddress, userId]);
+  }, [authenticated, walletAddress, userId, updateCustodialBalance, updateRuggedBalance]);
 
   // Reset initialization tracking when wallet changes
   useEffect(() => {
@@ -2198,13 +1903,13 @@ const handleEmergencyBalanceSync = useCallback(async () => {
     }
   }, [walletAddress]);
 
-  // Enhanced socket listeners for trading controls
+  // 🚀 UPDATED: Enhanced socket listeners with shared state
   useEffect(() => {
     if (!userId || !walletAddress) return;
     
     const socket = (window as any).gameSocket;
     if (socket) {
-      console.log(`🔌 Setting up ENHANCED TradingControls real-time listeners for user: ${userId}`);
+      console.log(`🔌 Setting up SHARED TradingControls real-time listeners for user: ${userId}`);
       
       const handleCustodialBalanceUpdate = (data: any) => {
         if (data.userId === userId) {
@@ -2226,7 +1931,7 @@ const handleEmergencyBalanceSync = useCallback(async () => {
         if (data.userId === userId) {
           console.log(`💸 REAL-TIME: Enhanced custodial cashout - ${data.amount?.toFixed(6)} SOL`);
           
-          setActiveBet(null);
+          clearActiveBet(); // Use shared state setter
           updateCustodialBalance();
           
           if (data.payout && data.betAmount) {
@@ -2242,14 +1947,14 @@ const handleEmergencyBalanceSync = useCallback(async () => {
         
         if (activeBet) {
           console.log('🗑️ REAL-TIME: Clearing active bet due to game crash');
-          setActiveBet(null);
+          clearActiveBet(); // Use shared state setter
           
           toast.error(`💥 Game crashed at ${data.crashMultiplier?.toFixed(2)}x`, {
             duration: 3000,
             icon: '💥'
           });
           
-          if (activeBet.tokenType === TokenType.SOL) {
+          if (activeBet.tokenType === 'SOL') {
             updateCustodialBalance();
           } else {
             updateRuggedBalance();
@@ -2262,7 +1967,7 @@ const handleEmergencyBalanceSync = useCallback(async () => {
         
         if (activeBet) {
           console.log('🗑️ REAL-TIME: Clearing active bet - game ended, ready for new round');
-          setActiveBet(null);
+          clearActiveBet(); // Use shared state setter
         }
       };
 
@@ -2271,7 +1976,7 @@ const handleEmergencyBalanceSync = useCallback(async () => {
         
         if (activeBet) {
           console.log('🗑️ REAL-TIME: Clearing stuck active bet - new game starting');
-          setActiveBet(null);
+          clearActiveBet(); // Use shared state setter
         }
       };
 
@@ -2355,11 +2060,12 @@ const handleEmergencyBalanceSync = useCallback(async () => {
           console.log('🔄 REAL-TIME: Game state changed to waiting, clearing active bet if stale');
           
           if (activeBet.gameId !== data.gameId) {
-            setActiveBet(null);
+            clearActiveBet(); // Use shared state setter
           }
         }
       };
 
+      // Register listeners
       socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
       socket.on('custodialCashout', handleCustodialCashout);
       socket.on('gameCrashed', handleGameCrashed);
@@ -2375,7 +2081,7 @@ const handleEmergencyBalanceSync = useCallback(async () => {
       socket.on('gameState', handleGameStateChange);
 
       return () => {
-        console.log(`🔌 Cleaning up ENHANCED TradingControls real-time listeners for user: ${userId}`);
+        console.log(`🔌 Cleaning up SHARED TradingControls real-time listeners for user: ${userId}`);
         socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
         socket.off('custodialCashout', handleCustodialCashout);
         socket.off('gameCrashed', handleGameCrashed);
@@ -2391,7 +2097,7 @@ const handleEmergencyBalanceSync = useCallback(async () => {
         socket.off('gameState', handleGameStateChange);
       };
     }
-  }, [userId, walletAddress, activeBet, updateCustodialBalance, updateRuggedBalance, refreshAllBalances]);
+  }, [userId, walletAddress, activeBet, clearActiveBet, updateCustodialBalance, updateRuggedBalance, refreshAllBalances, refreshCustodialBalance]);
 
   // Auto cashout effect
   useEffect(() => {
@@ -2413,30 +2119,30 @@ const handleEmergencyBalanceSync = useCallback(async () => {
   useEffect(() => {
     if (activeBet && gameState.gameStatus !== 'active') {
       console.log(`🔄 Game status changed to ${gameState.gameStatus}, clearing active bet`);
-      setActiveBet(null);
+      clearActiveBet(); // Use shared state setter
     }
-  }, [gameState.gameStatus, activeBet]);
+  }, [gameState.gameStatus, activeBet, clearActiveBet]);
 
   // Clear stuck active bets after timeout
   useEffect(() => {
     if (activeBet) {
       const timeout = setTimeout(() => {
         console.log('⏰ Clearing stuck active bet after timeout');
-        setActiveBet(null);
+        clearActiveBet(); // Use shared state setter
       }, 5 * 60 * 1000);
   
       return () => clearTimeout(timeout);
     }
-  }, [activeBet]);
+  }, [activeBet, clearActiveBet]);
 
   // Better connection recovery
   useEffect(() => {
     if (!isConnected && isCashingOut) {
-      setIsCashingOut(false);
+      setIsCashingOut(false); // Use shared state setter
       setServerError('Connection lost during cashout');
       toast.error('Connection lost - please try cashing out again');
     }
-  }, [isConnected, isCashingOut]);
+  }, [isConnected, isCashingOut, setIsCashingOut]);
 
   // Quick transfer amounts
   const quickTransferAmounts = [0.001, 0.01, 0.05, 0.1];
@@ -2537,49 +2243,11 @@ const handleEmergencyBalanceSync = useCallback(async () => {
                 Refresh Balance
               </button>
               <button
-  onClick={handleEmergencyBalanceSync}
-  className="px-3 py-2 text-sm rounded transition-colors bg-red-600 hover:bg-red-700 text-white flex items-center justify-center"
->
-  <span className="mr-1">🚨</span>
-  Emergency
-</button>
-              <button
-                onClick={() => {
-                  console.log('🔄 User triggered emergency balance sync');
-                  const socket = (window as any).gameSocket;
-                  if (socket && userId) {
-                    socket.emit('emergencyBalanceSync', {
-                      userId: userId,
-                      walletAddress: walletAddress,
-                      timestamp: Date.now()
-                    });
-                    toast.loading('Syncing balance with server...', { id: 'emergency-sync' });
-                    
-                    setTimeout(async () => {
-                      try {
-                        const response = await fetch(`/api/custodial/balance/${userId}?emergency=true&t=${Date.now()}`);
-                        if (response.ok) {
-                          const data = await response.json();
-                          if (data.custodialBalance !== undefined) {
-                            refreshCustodialBalance();
-                            toast.success('Balance synced!', { id: 'emergency-sync' });
-                          }
-                        } else {
-                          toast.error('Sync failed - please contact support', { id: 'emergency-sync' });
-                        }
-                      } catch (error) {
-                        console.error('Emergency sync failed:', error);
-                        toast.error('Sync failed - please contact support', { id: 'emergency-sync' });
-                      }
-                    }, 2000);
-                  } else {
-                    toast.error('Connection required for sync');
-                  }
-                }}
-                className="px-3 py-2 text-sm rounded transition-colors bg-orange-600 hover:bg-orange-700 text-white flex items-center justify-center"
+                onClick={handleEmergencyBalanceSync}
+                className="px-3 py-2 text-sm rounded transition-colors bg-red-600 hover:bg-red-700 text-white flex items-center justify-center"
               >
                 <span className="mr-1">🚨</span>
-                Force Sync
+                Emergency
               </button>
             </div>
             
@@ -2708,40 +2376,7 @@ const handleEmergencyBalanceSync = useCallback(async () => {
               Refresh All Balances
             </button>
             <button
-              onClick={() => {
-                console.log('🔄 User triggered emergency balance sync (desktop)');
-                const socket = (window as any).gameSocket;
-                if (socket && userId) {
-                  socket.emit('emergencyBalanceSync', {
-                    userId: userId,
-                    walletAddress: walletAddress,
-                    timestamp: Date.now(),
-                    source: 'desktop_manual_sync'
-                  });
-                  toast.loading('Syncing balance with server...', { id: 'emergency-sync' });
-                  
-                  setTimeout(async () => {
-                    try {
-                      const response = await fetch(`/api/custodial/balance/${userId}?emergency=true&force=true&t=${Date.now()}`);
-                      if (response.ok) {
-                        const data = await response.json();
-                        console.log('Emergency sync response:', data);
-                        if (data.custodialBalance !== undefined) {
-                          refreshCustodialBalance();
-                          toast.success(`Balance synced: ${parseFloat(data.custodialBalance).toFixed(3)} SOL`, { id: 'emergency-sync' });
-                        }
-                      } else {
-                        toast.error('Sync failed - please contact support', { id: 'emergency-sync' });
-                      }
-                    } catch (error) {
-                      console.error('Emergency sync failed:', error);
-                      toast.error('Sync failed - please contact support', { id: 'emergency-sync' });
-                    }
-                  }, 2000);
-                } else {
-                  toast.error('Connection required for sync');
-                }
-              }}
+              onClick={handleEmergencyBalanceSync}
               className="px-4 py-2 text-sm rounded transition-colors bg-orange-600 hover:bg-orange-700 text-white flex items-center justify-center"
             >
               <span className="mr-2">🚨</span>

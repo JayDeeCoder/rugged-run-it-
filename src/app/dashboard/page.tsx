@@ -11,7 +11,7 @@ import { safeCreatePublicKey, isValidSolanaAddress } from '../../utils/walletUti
 import { Wallet, TrendingUp, GamepadIcon, RefreshCw } from 'lucide-react';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
-// import ReferralSection from '../components/ReferralSection'; // Commented out - component doesn't exist
+import ReferralSection from '../../components/ReferralSection';
 
 // 🚀 ENHANCED: Custodial balance hook with real-time socket listeners (from TradingControls)
 const useCustodialBalance = (userId: string) => {
@@ -893,14 +893,13 @@ const Dashboard: FC = () => {
           )}
         </div>
 
-        {/* Referral Section Placeholder - Add ReferralSection component when available */}
-        {isValidWallet && (
-          <div className="bg-gray-900 rounded-lg p-6 mb-8">
-            <h2 className="text-xl font-bold text-white mb-4">Referral Program</h2>
-            <div className="text-center py-6">
-              <p className="text-gray-400">Referral system coming soon!</p>
-            </div>
-          </div>
+        {/* 🚀 ENHANCED: Referral Section with real-time updates */}
+        {(isValidWallet && userId) && (
+          <ReferralSection 
+            userId={userId} 
+            walletAddress={walletAddress} 
+            isValidWallet={isValidWallet} 
+          />
         )}
 
         {/* Game Stats */}

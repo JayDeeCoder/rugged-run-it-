@@ -586,7 +586,7 @@ const CompactGameInfo: FC<{
           <div className="flex justify-between items-center text-xs text-gray-400">
             <span>#{game.gameNumber}</span>
             <div className="flex space-x-3">
-              <span>{game.totalPlayers || 0} RUGGERS</span>
+              <span>{getTotalPlayerCount(game.totalPlayers || 0)} RUGGERS</span>
               <span>{(game.totalBets || 0).toFixed(2)} LIQ</span>
             </div>
           </div>

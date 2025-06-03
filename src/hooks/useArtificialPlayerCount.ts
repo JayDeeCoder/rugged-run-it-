@@ -1,5 +1,5 @@
 // src/hooks/useArtificialPlayerCount.ts
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 interface ArtificialPlayerCountConfig {
   minCount?: number;
@@ -24,7 +24,7 @@ export const useArtificialPlayerCount = (config: ArtificialPlayerCountConfig = {
   const lastChangeRef = useRef<number>(Date.now());
 
   // Generate a new artificial count with smooth transitions
-  const generateNewCount = (currentCount: number): number => {
+  const generateNewCount = useCallback((currentCount: number): number => {
     // 70% chance of small change (-2 to +3), 30% chance of bigger change
     const isSmallChange = Math.random() < 0.7;
     
@@ -51,7 +51,19 @@ export const useArtificialPlayerCount = (config: ArtificialPlayerCountConfig = {
     }
     
     return newCount;
-  };
+  }, [minCount, maxCount]);
+
+  // Function to manually trigger a count change (for game events)
+  // 🚀 FIX: Wrap in useCallback to prevent re-creation on every render
+  const triggerCountChange = useCallback(() => {
+    if (!enabled) return;
+    
+    setArtificialCount(prev => {
+      const newCount = generateNewCount(prev);
+      lastChangeRef.current = Date.now();
+      return newCount;
+    });
+  }, [enabled, generateNewCount]);
 
   useEffect(() => {
     if (!enabled) {
@@ -78,38 +90,24 @@ export const useArtificialPlayerCount = (config: ArtificialPlayerCountConfig = {
     // Set up interval for regular updates
     intervalRef.current = setInterval(updateArtificialCount, changeIntervalMs);
 
-    // Also update on game events (optional enhancement)
-    // You could trigger updates when games start/end for more realism
-
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
     };
-  }, [enabled, changeIntervalMs, minCount, maxCount]);
+  }, [enabled, changeIntervalMs, generateNewCount]);
 
   // Function to calculate total player count
-  const getTotalPlayerCount = (actualPlayerCount: number = 0): number => {
+  const getTotalPlayerCount = useCallback((actualPlayerCount: number = 0): number => {
     if (!enabled) return actualPlayerCount;
     return artificialCount + actualPlayerCount;
-  };
+  }, [enabled, artificialCount]);
 
   // Function to get just the artificial count
-  const getArtificialCount = (): number => {
+  const getArtificialCount = useCallback((): number => {
     return enabled ? artificialCount : 0;
-  };
-
-  // Function to manually trigger a count change (for game events)
-  const triggerCountChange = () => {
-    if (!enabled) return;
-    
-    setArtificialCount(prev => {
-      const newCount = generateNewCount(prev);
-      lastChangeRef.current = Date.now();
-      return newCount;
-    });
-  };
+  }, [enabled, artificialCount]);
 
   return {
     artificialCount,

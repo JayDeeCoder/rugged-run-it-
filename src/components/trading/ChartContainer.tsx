@@ -211,7 +211,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       // 🎭 Trigger artificial player count change on crash (simulate players leaving/joining)
       setTimeout(() => triggerCountChange(), 2000);
     }
-  }, [currentGame, lastGameNumber, activeBet, resetBetState, setLastGameNumber, clearActiveBet, triggerCountChange]);
+  }, [currentGame, lastGameNumber, activeBet, resetBetState, setLastGameNumber, clearActiveBet,]);
 
   const handleEffectComplete = () => {
     if (isMountedRef.current) {

@@ -9,7 +9,7 @@ import { usePrivyAutoTransfer } from '../../hooks/usePrivyAutoTransfer';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
-
+import { useArtificialPlayerCount } from '../../hooks/useArtificialPlayerCount';
 // 🚀 NEW: Import shared state hooks
 import { 
   useSharedCustodialBalance, 
@@ -540,7 +540,9 @@ const CompactGameInfo: FC<{
   showCountdown: boolean;
   isConnected: boolean;
   isMobile: boolean;
-}> = React.memo(({ game, countdown, showCountdown, isConnected, isMobile }) => {
+  getTotalPlayerCount: (actualCount: number) => number; // Add this prop
+}> = React.memo(({ game, countdown, showCountdown, isConnected, isMobile, getTotalPlayerCount }) => {
+
   const getStatusDisplay = () => {
     if (!game) return { text: 'Connecting...', color: 'text-gray-400', bg: 'bg-gray-600' };
     switch (game.status) {
@@ -570,10 +572,14 @@ const CompactGameInfo: FC<{
             </span>
           </div>
           {game && (
-            <span className="text-yellow-400 font-bold text-lg">
-              {game.multiplier?.toFixed(2) || '1.00'}x
-            </span>
-          )}
+          <div className="flex justify-between items-center text-xs text-gray-400">
+            <span>#{game.gameNumber}</span>
+            <div className="flex space-x-3">
+              <span>{getTotalPlayerCount(game.totalPlayers || 0)} RUGGERS</span>
+              <span>{(game.totalBets || 0).toFixed(2)} LIQ</span>
+            </div>
+          </div>
+        )}
         </div>
 
         {game && (
@@ -621,7 +627,7 @@ const CompactGameInfo: FC<{
           </div>
           <div>
             <span className="block text-gray-500">RUGGERS</span>
-            <span className="text-white">{game.totalPlayers || 0}</span>
+            <span className="text-white">{getTotalPlayerCount(game.totalPlayers || 0)}</span>
           </div>
           <div>
             <span className="block text-gray-500">Total</span>
@@ -1121,6 +1127,12 @@ const TradingControls: FC<TradingControlsProps> = ({
     clearActiveBet
   } = useSharedBetState();
 
+  const { getTotalPlayerCount } = useArtificialPlayerCount({
+    minCount: 5,
+    maxCount: 25,
+    changeIntervalMs: 12000, // Same interval as ChartContainer for sync
+    enabled: true
+  });
   // Use shared state values instead of local state
   const isPlacingBet = sharedIsPlacingBet || propIsPlacingBet;
   const isCashingOut = sharedIsCashingOut || propIsCashingOut;
@@ -2264,12 +2276,13 @@ const TradingControls: FC<TradingControlsProps> = ({
     return (
       <div className={containerClasses}>
         <CompactGameInfo
-          game={gameState.activeCurrentGame}
-          countdown={countdown || 0}
-          showCountdown={gameState.showCountdown}
-          isConnected={isConnected}
-          isMobile={isMobile}
-        />
+  game={gameState.activeCurrentGame}
+  countdown={countdown || 0}
+  showCountdown={gameState.showCountdown}
+  isConnected={isConnected}
+  isMobile={isMobile}
+  getTotalPlayerCount={getTotalPlayerCount} // ADD THIS LINE
+/>
 
         {activeBet && (
           <div className="bg-blue-900 bg-opacity-30 p-3 rounded-lg mb-3">
@@ -2402,12 +2415,13 @@ const TradingControls: FC<TradingControlsProps> = ({
   return (
     <div className={containerClasses}>
       <CompactGameInfo
-        game={gameState.activeCurrentGame}
-        countdown={countdown || 0}
-        showCountdown={gameState.showCountdown}
-        isConnected={isConnected}
-        isMobile={isMobile}
-      />
+  game={gameState.activeCurrentGame}
+  countdown={countdown || 0}
+  showCountdown={gameState.showCountdown}
+  isConnected={isConnected}
+  isMobile={isMobile}
+  getTotalPlayerCount={getTotalPlayerCount} // ADD THIS LINE
+/>
 
       <BalanceDisplay
         currentToken={currentToken}

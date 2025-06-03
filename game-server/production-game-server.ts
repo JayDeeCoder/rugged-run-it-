@@ -128,12 +128,56 @@ interface GameState {
     status: 'waiting' | 'active' | 'crashed';
     totalBets: number;
     totalPlayers: number;
+    boostedPlayerCount: number; // ✅ Already exists
+    boostedTotalBets: number;   // 🔧 ADD THIS LINE
     crashMultiplier?: number;
     seed: string;
     chartData: ChartPoint[];
     activeBets: Map<string, PlayerBet>;
     houseBalance: number;
     maxPayoutCapacity: number;
+}
+interface BootstrapFomoSystem {
+    enabled: boolean;
+    
+    // Detection settings
+    noPlayersThreshold: number;        // Consider "empty" if total bets < this
+    minEmptyGamesBeforeFomo: number;   // How many empty games before starting FOMO
+    
+    // FOMO multiplier settings
+    fomoMultiplierRange: {
+        min: number;                   // Minimum FOMO multiplier (e.g., 5x)
+        max: number;                   // Maximum FOMO multiplier (e.g., 50x)
+    };
+    
+    fomoChance: number;                // Chance of FOMO run vs normal run (e.g., 0.7 = 70%)
+    
+    // Pattern control
+    consecutiveFomoLimit: number;      // Max consecutive FOMO runs
+    fomoBreakChance: number;           // Chance to break FOMO streak with low run
+    
+    // State tracking
+    currentEmptyStreak: number;        // Current streak of empty games
+    currentFomoStreak: number;         // Current streak of FOMO runs
+    lastFomoGameNumber: number;        // Last game that had FOMO
+    recentFomoHistory: Array<{
+        gameNumber: number;
+        multiplier: number;
+        wasEmpty: boolean;
+        timestamp: number;
+    }>;
+}
+
+
+interface ExtremeMultiplierConfig {
+    enabled: boolean;
+    lowBetThreshold: number;        // Max total bets to trigger (e.g., 2.0 SOL)
+    extremeChance: number;          // Probability (e.g., 0.02 = 2%)
+    minExtremeMultiplier: number;   // Minimum extreme multiplier (e.g., 50x)
+    maxExtremeMultiplier: number;   // Maximum extreme multiplier (e.g., 200x)
+    maxRiskAmount: number;          // Max total risk allowed (e.g., 5 SOL)
+    cooldownMinutes: number;        // Cooldown between events (e.g., 30 min)
+    lastExtremeTime: number;        // Timestamp of last extreme event
 }
 
 interface PlayerBet {
@@ -562,6 +606,216 @@ function updateFinancialAnalytics(period: string = 'hour'): void {
     }
 }
 
+// 🎭 DYNAMIC GAME-ROUND ARTIFICIAL LIQUIDITY SYSTEM
+let artificialPlayerCount = Math.floor(Math.random() * 21) + 5; // 5-25
+let artificialLiquidity = 0; // Will be set per game round
+let baseGameLiquidity = 0; // Starting liquidity for current game
+let liquidityGrowthRate = 0; // How fast liquidity grows this round
+let lastArtificialUpdate = Date.now();
+let lastLiquidityGrowth = Date.now();
+
+interface GameLiquidityProfile {
+    baseAmount: number;        // Starting artificial liquidity (2-8 SOL)
+    growthRate: number;        // SOL per second growth (0.01-0.05)
+    volatility: number;        // How much it fluctuates (0.1-0.4)
+    peakMultiplier: number;    // When growth peaks (1.5x-3.0x)
+    declineRate: number;       // Reduction after peak (0.8-0.95)
+}
+
+function generateGameLiquidityProfile(): GameLiquidityProfile {
+    const gameIntensity = Math.random(); // 0-1, determines how active this round feels
+    
+    return {
+        baseAmount: 2 + gameIntensity * 6,           // 2-8 SOL base
+        growthRate: 0.01 + gameIntensity * 0.04,     // 0.01-0.05 SOL/sec
+        volatility: 0.1 + gameIntensity * 0.3,       // 0.1-0.4 fluctuation
+        peakMultiplier: 1.5 + gameIntensity * 1.5,   // Peak at 1.5x-3.0x
+        declineRate: 0.8 + gameIntensity * 0.15      // 0.8-0.95 decline rate
+    };
+}
+
+let currentLiquidityProfile: GameLiquidityProfile = generateGameLiquidityProfile();
+
+function initializeGameLiquidity(): void {
+    // Generate new liquidity profile for this game round
+    currentLiquidityProfile = generateGameLiquidityProfile();
+    
+    // Set base artificial liquidity for this round
+    baseGameLiquidity = currentLiquidityProfile.baseAmount;
+    artificialLiquidity = baseGameLiquidity;
+    
+    // Reset growth tracking
+    lastLiquidityGrowth = Date.now();
+    
+    console.log(`🎭 New game liquidity profile:`);
+    console.log(`   Base: ${baseGameLiquidity.toFixed(3)} SOL`);
+    console.log(`   Growth rate: ${(currentLiquidityProfile.growthRate * 60).toFixed(2)} SOL/min`);
+    console.log(`   Peak at: ${currentLiquidityProfile.peakMultiplier.toFixed(1)}x multiplier`);
+    console.log(`   Volatility: ${(currentLiquidityProfile.volatility * 100).toFixed(0)}%`);
+}
+
+function updateGameLiquidity(): void {
+    if (!currentGame || currentGame.status !== 'active') return;
+    
+    const now = Date.now();
+    const timeSinceLastGrowth = (now - lastLiquidityGrowth) / 1000; // seconds
+    const currentMultiplier = currentGame.currentMultiplier;
+    
+    // Calculate growth based on game phase
+    let growthMultiplier = 1.0;
+    
+    if (currentMultiplier < currentLiquidityProfile.peakMultiplier) {
+        // Growing phase - accelerating growth as multiplier increases
+        growthMultiplier = 0.5 + (currentMultiplier / currentLiquidityProfile.peakMultiplier) * 1.5;
+    } else {
+        // Past peak - declining growth (simulate some players cashing out)
+        const declineProgress = Math.min((currentMultiplier - currentLiquidityProfile.peakMultiplier) / 2, 1);
+        growthMultiplier = currentLiquidityProfile.declineRate * (1 - declineProgress * 0.5);
+    }
+    
+    // Base growth for this time period
+    const baseGrowth = currentLiquidityProfile.growthRate * timeSinceLastGrowth * growthMultiplier;
+    
+    // Add volatility (random fluctuations)
+    const volatilityFactor = (Math.random() - 0.5) * currentLiquidityProfile.volatility;
+    const volatilityChange = baseGrowth * volatilityFactor;
+    
+    // Calculate total change
+    const totalChange = baseGrowth + volatilityChange;
+    
+    // Apply change with bounds
+    const newLiquidity = Math.max(baseGameLiquidity * 0.3, artificialLiquidity + totalChange);
+    const maxLiquidity = baseGameLiquidity * 4; // Don't exceed 4x base
+    
+    artificialLiquidity = Math.min(newLiquidity, maxLiquidity);
+    artificialLiquidity = Math.round(artificialLiquidity * 1000) / 1000; // Round to 3 decimals
+    
+    // Update game state
+    if (currentGame) {
+        currentGame.boostedTotalBets = currentGame.totalBets + artificialLiquidity;
+    }
+    
+    lastLiquidityGrowth = now;
+    
+    // Log significant changes
+    if (Math.abs(totalChange) > 0.05 || Math.random() < 0.1) {
+        console.log(`💰 Liquidity update: ${(artificialLiquidity - totalChange).toFixed(3)} → ${artificialLiquidity.toFixed(3)} SOL (${totalChange >= 0 ? '+' : ''}${totalChange.toFixed(3)}) @ ${currentMultiplier.toFixed(2)}x`);
+    }
+}
+
+function simulateBetActivity(realBetAmount: number): void {
+    // When real bets come in, simulate additional artificial activity
+    const activityBoost = realBetAmount * (0.5 + Math.random() * 1.5); // 0.5x to 2x the real bet
+    artificialLiquidity += activityBoost;
+    
+    // Also trigger player count boost for large bets
+    if (realBetAmount >= 0.1) {
+        const playerBoost = Math.floor(Math.random() * 3) + 1; // +1 to +3 players
+        artificialPlayerCount = Math.min(25, artificialPlayerCount + playerBoost);
+    }
+    
+    console.log(`🎯 Bet activity boost: +${activityBoost.toFixed(3)} SOL artificial liquidity, players: ${artificialPlayerCount}`);
+    
+    if (currentGame) {
+        currentGame.boostedPlayerCount = currentGame.totalPlayers + artificialPlayerCount;
+        currentGame.boostedTotalBets = currentGame.totalBets + artificialLiquidity;
+    }
+}
+
+function simulateCashoutActivity(cashoutAmount: number): void {
+    // When players cash out, simulate some artificial liquidity reduction
+    const liquidityReduction = cashoutAmount * (0.2 + Math.random() * 0.6); // 20%-80% of cashout
+    artificialLiquidity = Math.max(baseGameLiquidity * 0.2, artificialLiquidity - liquidityReduction);
+    
+    // Possible slight player reduction
+    if (Math.random() < 0.3) {
+        artificialPlayerCount = Math.max(5, artificialPlayerCount - 1);
+    }
+    
+    console.log(`💸 Cashout activity: -${liquidityReduction.toFixed(3)} SOL artificial liquidity, players: ${artificialPlayerCount}`);
+    
+    if (currentGame) {
+        currentGame.boostedPlayerCount = currentGame.totalPlayers + artificialPlayerCount;
+        currentGame.boostedTotalBets = currentGame.totalBets + artificialLiquidity;
+    }
+}
+
+function generateNewArtificialPlayerCount(currentCount: number): number {
+    // Same player count logic as before
+    const isSmallChange = Math.random() < 0.7;
+    
+    let newCount: number;
+    if (isSmallChange) {
+        const change = Math.floor(Math.random() * 6) - 2; // -2 to +3
+        newCount = currentCount + change;
+    } else {
+        const change = Math.floor(Math.random() * 8) - 3; // -3 to +4
+        newCount = currentCount + change;
+    }
+    
+    // Keep within bounds (5-25)
+    newCount = Math.max(5, Math.min(25, newCount));
+    
+    // Nudge away from bounds
+    if (newCount === 5 && Math.random() < 0.6) {
+        newCount += Math.floor(Math.random() * 3) + 1;
+    } else if (newCount === 25 && Math.random() < 0.6) {
+        newCount -= Math.floor(Math.random() * 3) + 1;
+    }
+    
+    return newCount;
+}
+
+function updateArtificialCounts(): void {
+    const newPlayerCount = generateNewArtificialPlayerCount(artificialPlayerCount);
+    
+    if (newPlayerCount !== artificialPlayerCount) {
+        console.log(`🎭 Player count update: ${artificialPlayerCount} → ${newPlayerCount}`);
+        artificialPlayerCount = newPlayerCount;
+        
+        if (currentGame) {
+            currentGame.boostedPlayerCount = currentGame.totalPlayers + artificialPlayerCount;
+        }
+    }
+    
+    lastArtificialUpdate = Date.now();
+}
+
+// 🎭 Trigger updates on game events
+function triggerArtificialUpdate(eventType: 'new_game' | 'crash' | 'big_bet' | 'waiting'): void {
+    console.log(`🎭 Triggering artificial update due to: ${eventType}`);
+    
+    switch (eventType) {
+        case 'new_game':
+            // Fresh start for new game
+            initializeGameLiquidity();
+            artificialPlayerCount = generateNewArtificialPlayerCount(artificialPlayerCount);
+            break;
+            
+        case 'crash':
+            // After crash, some players leave, liquidity resets
+            artificialPlayerCount = Math.max(5, artificialPlayerCount - Math.floor(Math.random() * 5));
+            // Keep some residual liquidity for next round
+            artificialLiquidity = Math.max(1, artificialLiquidity * 0.2);
+            break;
+            
+        case 'big_bet':
+            // Big bet attracts more activity
+            simulateBetActivity(0.5); // Simulate 0.5 SOL worth of additional activity
+            break;
+            
+        case 'waiting':
+            // Waiting period - moderate reset
+            artificialPlayerCount = generateNewArtificialPlayerCount(artificialPlayerCount);
+            artificialLiquidity = 1 + Math.random() * 3; // 1-4 SOL for waiting
+            break;
+    }
+    
+    if (currentGame) {
+        currentGame.boostedPlayerCount = currentGame.totalPlayers + artificialPlayerCount;
+        currentGame.boostedTotalBets = currentGame.totalBets + artificialLiquidity;
+    }
+}
 // ===== SYSTEM ANALYTICS FUNCTIONS =====
 
 function updateSystemAnalytics(): void {
@@ -1419,7 +1673,7 @@ const BOOTSTRAP_CONFIG = {
     COOLDOWN_AFTER_EXIT: 2 * 60 * 60 * 1000,
     
     EMERGENCY_SETTINGS: {
-        houseEdge: 0.70,
+        houseEdge: 0.15,  // 15% house edge (was 0.70)
         maxPayout: 0.5,
         maxBet: 1.0,
         rugPullMultiplier: 3.0,
@@ -1428,7 +1682,7 @@ const BOOTSTRAP_CONFIG = {
     },
     
     CRITICAL_SETTINGS: {
-        houseEdge: 0.60,
+        houseEdge: 0.10,  // 10% house edge (was 0.60)
         maxPayout: 1.5,
         maxBet: 2.5,
         rugPullMultiplier: 2.5,
@@ -1437,7 +1691,7 @@ const BOOTSTRAP_CONFIG = {
     },
     
     BOOTSTRAP_SETTINGS: {
-        houseEdge: 0.50,
+        houseEdge: 0.08,  // 8% house edge (was 0.50)
         maxPayout: 2.5,
         maxBet: 4.0,
         rugPullMultiplier: 2.0,
@@ -1446,13 +1700,47 @@ const BOOTSTRAP_CONFIG = {
     },
     
     NORMAL_SETTINGS: {
-        houseEdge: 0.40,
-        maxPayout: 5.0,
-        maxBet: 10.0,
-        rugPullMultiplier: 1.0,
+        houseEdge: 0.05,
+        maxPayout: 15.0,           
+        maxBet: 10.0,              
+        instantRugThreshold: 10.2, 
         maxMultiplier: 100.0,
-        instantRugThreshold: 10.0
+        rugPullMultiplier: 1.0
     }
+};
+
+const BOOTSTRAP_FOMO_SYSTEM: BootstrapFomoSystem = {
+    enabled: true,
+    
+    noPlayersThreshold: 0.05,          // < 0.05 SOL total bets = "empty"
+    minEmptyGamesBeforeFomo: 2,        // Start FOMO after 2 empty games
+    
+    fomoMultiplierRange: {
+        min: 3.0,                      // Minimum 3x for FOMO
+        max: 25.0                      // Maximum 25x for FOMO
+    },
+    
+    fomoChance: 0.75,                  // 75% chance of FOMO run when empty
+    
+    consecutiveFomoLimit: 4,           // Max 4 consecutive FOMO runs
+    fomoBreakChance: 0.3,              // 30% chance to break with low run
+    
+    // State
+    currentEmptyStreak: 0,
+    currentFomoStreak: 0,
+    lastFomoGameNumber: 0,
+    recentFomoHistory: []
+};
+
+const EXTREME_MULTIPLIER_CONFIG: ExtremeMultiplierConfig = {
+    enabled: true,
+    lowBetThreshold: 2.0,           // Only trigger if total bets ≤ 2 SOL
+    extremeChance: 0.03,            // 3% chance per game
+    minExtremeMultiplier: 50.0,     // Minimum 50x multiplier
+    maxExtremeMultiplier: 500.0,    // Maximum 500x multiplier  
+    maxRiskAmount: 10.0,            // Max 10 SOL total risk
+    cooldownMinutes: 20,            // 20 minute cooldown
+    lastExtremeTime: 0              // Initialize to 0
 };
 
 let bootstrapState = {
@@ -1517,6 +1805,197 @@ function canEnterBootstrap(targetMode: string): boolean {
     return true;
 }
 
+function isGameEffectivelyEmpty(): boolean {
+    if (!currentGame) return true;
+    
+    // Check total real bets (excluding artificial liquidity)
+    const realBets = currentGame.totalBets;
+    const isEmpty = realBets < BOOTSTRAP_FOMO_SYSTEM.noPlayersThreshold;
+    
+    console.log(`🔍 Empty Game Check: ${realBets.toFixed(4)} SOL real bets ${isEmpty ? '<' : '>='} ${BOOTSTRAP_FOMO_SYSTEM.noPlayersThreshold} threshold → ${isEmpty ? 'EMPTY' : 'HAS PLAYERS'}`);
+    
+    return isEmpty;
+}
+
+function shouldTriggerBootstrapFomo(gameNumber: number): {
+    trigger: boolean;
+    targetMultiplier?: number;
+    reason: string;
+    pattern?: string;
+} {
+    if (!BOOTSTRAP_FOMO_SYSTEM.enabled) {
+        return { trigger: false, reason: 'FOMO system disabled' };
+    }
+    
+    // Only during bootstrap mode
+    const config = getCurrentGameConfig();
+    if (!config._BOOTSTRAP_MODE) {
+        return { trigger: false, reason: 'Not in bootstrap mode' };
+    }
+    
+    const isEmpty = isGameEffectivelyEmpty();
+    
+    if (!isEmpty) {
+        // Reset empty streak if players are present
+        BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak = 0;
+        BOOTSTRAP_FOMO_SYSTEM.currentFomoStreak = 0;
+        return { trigger: false, reason: 'Players present - normal game rules apply' };
+    }
+    
+    // Increment empty streak
+    BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak++;
+    
+    // Need minimum empty games before starting FOMO
+    if (BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak < BOOTSTRAP_FOMO_SYSTEM.minEmptyGamesBeforeFomo) {
+        return { 
+            trigger: false, 
+            reason: `Empty streak too short: ${BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak}/${BOOTSTRAP_FOMO_SYSTEM.minEmptyGamesBeforeFomo}` 
+        };
+    }
+    
+    // Check consecutive FOMO limit
+    if (BOOTSTRAP_FOMO_SYSTEM.currentFomoStreak >= BOOTSTRAP_FOMO_SYSTEM.consecutiveFomoLimit) {
+        // Force a break with low multiplier
+        BOOTSTRAP_FOMO_SYSTEM.currentFomoStreak = 0;
+        
+        const breakMultiplier = 1.0 + Math.random() * 0.8; // 1.0x - 1.8x
+        console.log(`🛑 FOMO BREAK: Forced low run ${breakMultiplier.toFixed(2)}x after ${BOOTSTRAP_FOMO_SYSTEM.consecutiveFomoLimit} FOMO games`);
+        
+        return {
+            trigger: true,
+            targetMultiplier: breakMultiplier,
+            reason: 'Forced FOMO break - preventing pattern detection',
+            pattern: 'break'
+        };
+    }
+    
+    // Random chance to break FOMO streak early
+    if (BOOTSTRAP_FOMO_SYSTEM.currentFomoStreak > 0 && Math.random() < BOOTSTRAP_FOMO_SYSTEM.fomoBreakChance) {
+        BOOTSTRAP_FOMO_SYSTEM.currentFomoStreak = 0;
+        
+        const earlyBreakMultiplier = 1.0 + Math.random() * 1.2; // 1.0x - 2.2x
+        console.log(`🎲 FOMO EARLY BREAK: Random break ${earlyBreakMultiplier.toFixed(2)}x (${(BOOTSTRAP_FOMO_SYSTEM.fomoBreakChance * 100).toFixed(0)}% chance)`);
+        
+        return {
+            trigger: true,
+            targetMultiplier: earlyBreakMultiplier,
+            reason: 'Random FOMO break',
+            pattern: 'early_break'
+        };
+    }
+    
+    // Check FOMO chance
+    if (Math.random() > BOOTSTRAP_FOMO_SYSTEM.fomoChance) {
+        // Normal bootstrap behavior
+        return { 
+            trigger: false, 
+            reason: `FOMO chance failed (${(BOOTSTRAP_FOMO_SYSTEM.fomoChance * 100).toFixed(0)}% chance)` 
+        };
+    }
+    
+    // Generate FOMO multiplier
+    const range = BOOTSTRAP_FOMO_SYSTEM.fomoMultiplierRange.max - BOOTSTRAP_FOMO_SYSTEM.fomoMultiplierRange.min;
+    const rawMultiplier = BOOTSTRAP_FOMO_SYSTEM.fomoMultiplierRange.min + (Math.random() * range);
+    
+    // Add some variety in the pattern
+    let targetMultiplier = rawMultiplier;
+    let pattern = 'standard';
+    
+    // 20% chance for extra high FOMO
+    if (Math.random() < 0.2) {
+        targetMultiplier = rawMultiplier * (1.2 + Math.random() * 0.8); // 1.2x - 2x boost
+        targetMultiplier = Math.min(targetMultiplier, BOOTSTRAP_FOMO_SYSTEM.fomoMultiplierRange.max * 1.5);
+        pattern = 'extra_high';
+    }
+    
+    // 15% chance for moderate FOMO (to mix it up)
+    if (Math.random() < 0.15 && pattern === 'standard') {
+        targetMultiplier = BOOTSTRAP_FOMO_SYSTEM.fomoMultiplierRange.min + (range * 0.3); // Lower 30% of range
+        pattern = 'moderate';
+    }
+    
+    BOOTSTRAP_FOMO_SYSTEM.currentFomoStreak++;
+    BOOTSTRAP_FOMO_SYSTEM.lastFomoGameNumber = gameNumber;
+    
+    // Track FOMO event
+    BOOTSTRAP_FOMO_SYSTEM.recentFomoHistory.push({
+        gameNumber,
+        multiplier: targetMultiplier,
+        wasEmpty: true,
+        timestamp: Date.now()
+    });
+    
+    // Keep only last 20 FOMO events
+    if (BOOTSTRAP_FOMO_SYSTEM.recentFomoHistory.length > 20) {
+        BOOTSTRAP_FOMO_SYSTEM.recentFomoHistory.shift();
+    }
+    
+    console.log(`🚀 BOOTSTRAP FOMO TRIGGERED!`);
+    console.log(`   Target: ${targetMultiplier.toFixed(2)}x (${pattern})`);
+    console.log(`   Empty streak: ${BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak}`);
+    console.log(`   FOMO streak: ${BOOTSTRAP_FOMO_SYSTEM.currentFomoStreak}/${BOOTSTRAP_FOMO_SYSTEM.consecutiveFomoLimit}`);
+    console.log(`   Bootstrap level: ${config._BOOTSTRAP_LEVEL}`);
+    
+    return {
+        trigger: true,
+        targetMultiplier: Math.floor(targetMultiplier * 100) / 100, // Round to 2 decimals
+        reason: `Bootstrap FOMO: ${targetMultiplier.toFixed(2)}x ${pattern} run`,
+        pattern
+    };
+}
+
+function onPlayersJoinGame(): void {
+    if (BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak > 0) {
+        console.log(`👥 Players joined! Ending empty streak of ${BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak} games`);
+        
+        BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak = 0;
+        BOOTSTRAP_FOMO_SYSTEM.currentFomoStreak = 0;
+        
+        // Broadcast that FOMO period is ending
+        io.emit('bootstrapFomoEnded', {
+            reason: 'Players joined the game',
+            previousEmptyStreak: BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak,
+            message: '👥 Players detected - switching to normal game rules',
+            timestamp: Date.now()
+        });
+    }
+}
+
+// Add this function around line 1850, after onPlayersJoinGame
+function trackExtremeOutcome(gameNumber: number, targetMultiplier: number, actualMultiplier: number): void {
+    try {
+        const wasSuccessful = actualMultiplier >= targetMultiplier * 0.95; // Within 5% of target
+        
+        console.log(`🎆 EXTREME GAME OUTCOME: Game ${gameNumber}`);
+        console.log(`   Target: ${targetMultiplier}x | Actual: ${actualMultiplier}x`);
+        console.log(`   Success: ${wasSuccessful ? 'YES' : 'NO'} (${((actualMultiplier/targetMultiplier)*100).toFixed(1)}% of target)`);
+        
+        // Update extreme multiplier cooldown based on outcome
+        if (wasSuccessful) {
+            // Successful extreme run - normal cooldown
+            EXTREME_MULTIPLIER_CONFIG.lastExtremeTime = Date.now();
+        } else {
+            // Failed extreme run - reduced cooldown for retry
+            EXTREME_MULTIPLIER_CONFIG.lastExtremeTime = Date.now() - (EXTREME_MULTIPLIER_CONFIG.cooldownMinutes * 60 * 1000 * 0.5);
+        }
+        
+        // Broadcast extreme outcome
+        io.emit('extremeGameOutcome', {
+            gameNumber,
+            targetMultiplier,
+            actualMultiplier,
+            wasSuccessful,
+            achievementPercentage: (actualMultiplier / targetMultiplier) * 100,
+            message: wasSuccessful ? 
+                `🎆 EXTREME SUCCESS! ${actualMultiplier}x achieved!` : 
+                `💥 Stopped at ${actualMultiplier}x (target was ${targetMultiplier}x)`,
+            timestamp: Date.now()
+        });
+        
+    } catch (error) {
+        console.error('❌ Error tracking extreme outcome:', error);
+    }
+}
 function getBootstrapStatus(houseBalance: number): { 
     active: boolean; 
     mode: string; 
@@ -1586,7 +2065,7 @@ function getCurrentGameConfig() {
             MAX_GAME_DURATION: 180000,
             HOUSE_EDGE: settings.houseEdge,
             UPDATE_INTERVAL: 100,
-            MIN_BET: 0.001,
+            MIN_BET: 0.002,
             MAX_BET: settings.maxBet,
             MAX_MULTIPLIER: settings.maxMultiplier,
             HIGH_BET_THRESHOLD: Math.min(2.0, settings.maxBet * 0.8),
@@ -1607,9 +2086,9 @@ function getCurrentGameConfig() {
         return {
             MIN_GAME_DURATION: 5000,
             MAX_GAME_DURATION: 180000,
-            HOUSE_EDGE: 0.40,
+            HOUSE_EDGE: 0.05,
             UPDATE_INTERVAL: 100,
-            MIN_BET: 0.001,
+            MIN_BET: 0.002,
             MAX_BET: 10.0,
             MAX_MULTIPLIER: 100.0,
             HIGH_BET_THRESHOLD: 5.0,
@@ -1651,7 +2130,7 @@ const BET_VALIDATION = {
     MIN_HOLD_TIME: 2000,
     MAX_PAYOUT_MULTIPLIER: 100.0,
     LATE_BET_PENALTY: 0.0,
-    HOUSE_EDGE: 0.40
+    HOUSE_EDGE: 0.05
 };
 
 // Game state
@@ -1831,13 +2310,15 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                         
                         // Use the enhanced balance update system
                         const { data: balanceResult, error: balanceError } = await supabaseService
-                            .rpc('update_user_balance', {
+                            .rpc('update_user_balance_with_audit', {  // ✅ Change function name
                                 p_user_id: userId,
                                 p_custodial_change: amount,
                                 p_privy_change: 0,
                                 p_transaction_type: 'external_deposit',
-                                p_is_deposit: true,
-                                p_deposit_amount: amount
+                                p_transaction_id: 'external_deposit',
+                                p_game_id: currentGame?.id,
+                                p_is_deposit: true,  // or true for deposits
+                                p_deposit_amount: amount   // or actual deposit amount
                             });
 
                         if (balanceError) {
@@ -2325,15 +2806,17 @@ async function resolvePendingDepositsForUser(walletAddress: string): Promise<voi
                 
                 // Use the RPC function to update balance
                 const { data: balanceResult, error: balanceError } = await supabaseService
-                    .rpc('update_user_balance', {
+            
+                    .rpc('update_user_balance_with_audit', {  // ✅ Change function name
                         p_user_id: userId,
                         p_custodial_change: depositAmount,
                         p_privy_change: 0,
                         p_transaction_type: 'pending_deposit_resolved',
-                        p_is_deposit: true,
-                        p_deposit_amount: depositAmount
+                        p_transaction_id: 'pending_deposit_resolved',
+                        p_game_id: currentGame?.id,
+                        p_is_deposit: true,  // or true for deposits
+                        p_deposit_amount: depositAmount   // or actual deposit amount
                     });
-
                 if (!balanceError && balanceResult) {
                     // FIXED: Get all the required variables from the RPC response
                     const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
@@ -2703,13 +3186,18 @@ async function placeBetFromCustodialBalance(
             
             // 🔧 NEW: Use atomic balance update function
             const { data: balanceResult, error: balanceError } = await supabaseService
-                .rpc('update_user_balance', {
+            
+        
+                .rpc('update_user_balance_with_audit', {  // ✅ Change function name
                     p_user_id: userId,
                     p_custodial_change: -betAmount,
                     p_privy_change: 0,
-                    p_transaction_type: 'instant_rug_bet'
+                    p_transaction_type: 'instant_rug_bet',
+                    p_transaction_id: 'instant_rug_bet',
+                    p_game_id: currentGame?.id,
+                    p_is_deposit: false,  // or true for deposits
+                    p_deposit_amount: 0   // or actual deposit amount
                 });
-
             if (balanceError || !balanceResult || balanceResult.length === 0) {
                 console.error(`❌ Failed to update balance for instant rug bet ${userId}:`, balanceError);
                 return { success: false, reason: 'Failed to process bet' };
@@ -2734,8 +3222,17 @@ async function placeBetFromCustodialBalance(
 
             currentGame.activeBets.set(userProfile.externalWalletAddress, bet);
             currentGame.totalBets += betAmount;
+currentGame.boostedTotalBets = currentGame.totalBets + artificialLiquidity;
+
+// 🎭 Simulate additional betting activity
+simulateBetActivity(betAmount);
+console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFixed(3)} SOL artificial = ${currentGame.boostedTotalBets.toFixed(3)} SOL total display`);
             currentGame.totalPlayers = currentGame.activeBets.size;
-            
+            currentGame.boostedTotalBets = currentGame.totalBets + artificialLiquidity;
+
+            simulateBetActivity(betAmount);
+
+console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFixed(3)} SOL artificial = ${currentGame.boostedTotalBets.toFixed(3)} SOL total display`);
             // Update game stats in unified table
             await supabaseService.rpc('update_user_game_stats', {
                 p_user_id: userId,
@@ -2746,6 +3243,11 @@ async function placeBetFromCustodialBalance(
             });
             
             // Crash game immediately
+            // 🎭 Update artificial count after crash (simulate players leaving/joining)
+setTimeout(() => {
+    updateArtificialCounts();
+
+}, 2000);
             setTimeout(() => {
                 if (currentGame) crashGame();
             }, 1000);
@@ -2763,13 +3265,17 @@ async function placeBetFromCustodialBalance(
         
         // 🔧 NEW: Use atomic balance update function for normal bet
         const { data: balanceResult, error: balanceError } = await supabaseService
-            .rpc('update_user_balance', {
+            
+            .rpc('update_user_balance_with_audit', {  // ✅ Change function name
                 p_user_id: userId,
                 p_custodial_change: -betAmount,
                 p_privy_change: 0,
-                p_transaction_type: 'custodial_bet'
+                p_transaction_type: 'custodial_bet',
+                p_transaction_id: 'custodial_bet',
+                p_game_id: currentGame?.id,
+                p_is_deposit: true,  // or true for deposits
+                p_deposit_amount: 0   // or actual deposit amount
             });
-
         if (balanceError || !balanceResult || balanceResult.length === 0) {
             console.error(`❌ Failed to update balance for bet ${userId}:`, balanceError);
             return { success: false, reason: 'Failed to process bet' };
@@ -2794,7 +3300,14 @@ async function placeBetFromCustodialBalance(
 
         currentGame.activeBets.set(userProfile.externalWalletAddress, bet);
         currentGame.totalBets += betAmount;
-        currentGame.totalPlayers = currentGame.activeBets.size;
+        // After: currentGame.totalBets += betAmount;
+currentGame.boostedTotalBets = currentGame.totalBets + artificialLiquidity;
+
+// 🎭 Simulate additional betting activity
+simulateBetActivity(betAmount);
+
+console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFixed(3)} SOL artificial = ${currentGame.boostedTotalBets.toFixed(3)} SOL total display`);
+
 
         // Update trading state
         tradingState.totalBetsSinceStart += betAmount;
@@ -2921,11 +3434,16 @@ async function cashOutToCustodialBalance(
 
         // 🔧 NEW: Use atomic balance update for payout
         const { data: balanceResult, error: balanceError } = await supabaseService
-            .rpc('update_user_balance', {
+        
+            .rpc('update_user_balance_with_audit', {  // ✅ Change function name
                 p_user_id: userId,
                 p_custodial_change: safePayout,
                 p_privy_change: 0,
-                p_transaction_type: 'custodial_cashout'
+                p_transaction_type: 'custodial_cashout',
+                p_transaction_id: 'custodial_cashout',
+                p_game_id: currentGame?.id,
+                p_is_deposit: true,  // or true for deposits
+                p_deposit_amount: 0   // or actual deposit amount
             });
 
         if (balanceError || !balanceResult || balanceResult.length === 0) {
@@ -2941,6 +3459,10 @@ async function cashOutToCustodialBalance(
         bet.cashoutAmount = safePayout;
         bet.cashoutTime = Date.now();
         bet.payoutProcessed = true;
+
+        // 🎭 Simulate liquidity reduction from cashout
+simulateCashoutActivity(safePayout);
+console.log(`💸 Cashout: ${safePayout.toFixed(3)} SOL - Artificial liquidity now: ${artificialLiquidity.toFixed(3)} SOL`);
 
         const profit = safePayout - bet.betAmount;
         const isLoss = cashoutMultiplier < bet.entryMultiplier;
@@ -2958,6 +3480,10 @@ async function cashOutToCustodialBalance(
    Payout: ${safePayout.toFixed(3)} SOL
    Profit: ${profit >= 0 ? '+' : ''}${profit.toFixed(3)} SOL
    New balance: ${newCustodialBalance.toFixed(3)} SOL`);
+
+   // 🎭 Simulate liquidity reduction from cashout
+simulateCashoutActivity(safePayout);
+console.log(`💸 Cashout: ${safePayout.toFixed(3)} SOL - Artificial liquidity now: ${artificialLiquidity.toFixed(3)} SOL`);
 
         // Save cashout to database
         try {
@@ -3271,14 +3797,64 @@ function getCurrentMaxSafe(): number {
 }
 
 // Enhanced crash point calculation
+
+// Modify calculateControlledCrashPoint function to include FOMO check
+// Replace the existing calculateControlledCrashPoint function (around line 1750)
 function calculateControlledCrashPoint(seed: string, gameNumber: number): number {
     const config = getCurrentGameConfig();
+    
+    // Check for extreme multiplier event FIRST (existing system)
+    const extremeCheck = shouldTriggerExtremeMultiplier(gameNumber);
+    if (extremeCheck.trigger && extremeCheck.targetMultiplier) {
+        console.log(`🎆 EXTREME EVENT: Game ${gameNumber} targeting ${extremeCheck.targetMultiplier}x!`);
+        
+        io.emit('extremeMultiplierEvent', {
+            gameId: currentGame?.id,
+            gameNumber,
+            targetMultiplier: extremeCheck.targetMultiplier,
+            totalBets: currentGame?.totalBets || 0,
+            message: `🚀 EXTREME RUN INCOMING! Target: ${extremeCheck.targetMultiplier}x`,
+            timestamp: Date.now(),
+            rarity: 'LEGENDARY'
+        });
+
+        return extremeCheck.targetMultiplier;
+    }
+    
+    // NEW: Check for bootstrap FOMO event
+    if (config._BOOTSTRAP_MODE) {
+        const fomoCheck = shouldTriggerBootstrapFomo(gameNumber);
+        if (fomoCheck.trigger && fomoCheck.targetMultiplier) {
+            console.log(`📈 BOOTSTRAP FOMO: Game ${gameNumber} targeting ${fomoCheck.targetMultiplier}x (${fomoCheck.pattern})`);
+            
+            // Broadcast FOMO event
+            io.emit('bootstrapFomoEvent', {
+                gameId: currentGame?.id,
+                gameNumber,
+                targetMultiplier: fomoCheck.targetMultiplier,
+                pattern: fomoCheck.pattern,
+                emptyStreak: BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak,
+                fomoStreak: BOOTSTRAP_FOMO_SYSTEM.currentFomoStreak,
+                bootstrapLevel: config._BOOTSTRAP_LEVEL,
+                message: fomoCheck.pattern === 'break' || fomoCheck.pattern === 'early_break' 
+                    ? `🛑 Quick run: ${fomoCheck.targetMultiplier}x` 
+                    : `📈 Green run: ${fomoCheck.targetMultiplier}x - Jump in!`,
+                timestamp: Date.now(),
+                rarity: fomoCheck.pattern === 'extra_high' ? 'RARE' : 'COMMON'
+            });
+
+            return fomoCheck.targetMultiplier;
+        }
+    }
+    
+    // Regular crash point calculation (existing logic unchanged)
     const hash = crypto.createHash('sha256').update(seed + gameNumber).digest('hex');
     const hashInt = parseInt(hash.substring(0, 8), 16);
     
     let baseCrashPoint = Math.max(1.0, (hashInt / 0xFFFFFFFF) * config.MAX_MULTIPLIER);
     
     if (config._BOOTSTRAP_MODE) {
+        // Original bootstrap mode logic for when players ARE present
         if (config._BOOTSTRAP_LEVEL === 'emergency' && Math.random() < 0.5) {
             baseCrashPoint = Math.min(baseCrashPoint, 1.5);
         } else if (config._BOOTSTRAP_LEVEL === 'critical' && Math.random() < 0.35) {
@@ -3290,13 +3866,87 @@ function calculateControlledCrashPoint(seed: string, gameNumber: number): number
         baseCrashPoint = Math.min(baseCrashPoint, config.MAX_MULTIPLIER);
         
         if (baseCrashPoint <= 2.0) {
-            console.log(`🔽 ${config._BOOTSTRAP_LEVEL} bootstrap low crash: ${baseCrashPoint.toFixed(2)}x (Game ${gameNumber})`);
+            console.log(`🔽 ${config._BOOTSTRAP_LEVEL} bootstrap normal crash: ${baseCrashPoint.toFixed(2)}x (Game ${gameNumber}) - Players present`);
         }
     } else {
         baseCrashPoint = applyMultiplierControl(baseCrashPoint, gameNumber);
     }
     
     return Math.floor(baseCrashPoint * 100) / 100;
+}
+
+function shouldTriggerExtremeMultiplier(gameNumber: number): { 
+    trigger: boolean; 
+    targetMultiplier?: number; 
+    reason?: string 
+} {
+    if (!EXTREME_MULTIPLIER_CONFIG.enabled) {
+        return { trigger: false, reason: 'Extreme multipliers disabled' };
+    }
+
+    if (!currentGame) {
+        return { trigger: false, reason: 'No active game' };
+    }
+
+    // Check cooldown
+    const now = Date.now();
+    const timeSinceLastExtreme = now - EXTREME_MULTIPLIER_CONFIG.lastExtremeTime;
+    const cooldownMs = EXTREME_MULTIPLIER_CONFIG.cooldownMinutes * 60 * 1000;
+    
+    if (timeSinceLastExtreme < cooldownMs) {
+        const minutesLeft = Math.ceil((cooldownMs - timeSinceLastExtreme) / 60000);
+        return { trigger: false, reason: `Cooldown: ${minutesLeft}m remaining` };
+    }
+
+    // Check if total bets are low enough
+    if (currentGame.totalBets > EXTREME_MULTIPLIER_CONFIG.lowBetThreshold) {
+        return { 
+            trigger: false, 
+            reason: `Bets too high: ${currentGame.totalBets.toFixed(3)} > ${EXTREME_MULTIPLIER_CONFIG.lowBetThreshold}` 
+        };
+    }
+
+    // Calculate total risk if game went to extreme multiplier
+    let totalRisk = 0;
+    const testMultiplier = EXTREME_MULTIPLIER_CONFIG.minExtremeMultiplier;
+    
+    for (const [_, bet] of currentGame.activeBets) {
+        if (!bet.cashedOut) {
+            const potentialPayout = bet.betAmount * (testMultiplier / bet.entryMultiplier) * 0.95; // With house edge
+            totalRisk += Math.min(potentialPayout, 15.0); // Cap at max payout
+        }
+    }
+
+    if (totalRisk > EXTREME_MULTIPLIER_CONFIG.maxRiskAmount) {
+        return { 
+            trigger: false, 
+            reason: `Risk too high: ${totalRisk.toFixed(3)} > ${EXTREME_MULTIPLIER_CONFIG.maxRiskAmount}` 
+        };
+    }
+
+    // Random chance check
+    if (Math.random() > EXTREME_MULTIPLIER_CONFIG.extremeChance) {
+        return { trigger: false, reason: 'Random chance failed' };
+    }
+
+    // Generate extreme multiplier
+    const range = EXTREME_MULTIPLIER_CONFIG.maxExtremeMultiplier - EXTREME_MULTIPLIER_CONFIG.minExtremeMultiplier;
+    const targetMultiplier = EXTREME_MULTIPLIER_CONFIG.minExtremeMultiplier + (Math.random() * range);
+
+    console.log(`🚀 EXTREME MULTIPLIER TRIGGERED!`);
+    console.log(`   Target: ${targetMultiplier.toFixed(1)}x`);
+    console.log(`   Total bets: ${currentGame.totalBets.toFixed(3)} SOL`);
+    console.log(`   Total risk: ${totalRisk.toFixed(3)} SOL`);
+    console.log(`   Game: ${gameNumber}`);
+
+    // Update last extreme time
+    EXTREME_MULTIPLIER_CONFIG.lastExtremeTime = now;
+
+    return { 
+        trigger: true, 
+        targetMultiplier: Math.floor(targetMultiplier * 10) / 10, // Round to 1 decimal
+        reason: `Extreme event: ${targetMultiplier.toFixed(1)}x target`
+    };
 }
 
 function applyMultiplierControl(baseCrashPoint: number, gameNumber: number): number {
@@ -3654,6 +4304,11 @@ async function placeBet(walletAddress: string, betAmount: number, userId?: strin
                 currentGame.activeBets.set(walletAddress, bet);
                 currentGame.totalBets += betAmount;
                 currentGame.totalPlayers = currentGame.activeBets.size;
+                currentGame.boostedTotalBets = currentGame.totalBets + artificialLiquidity;
+
+// 🎭 Simulate additional betting activity
+simulateBetActivity(betAmount);
+console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFixed(3)} SOL artificial = ${currentGame.boostedTotalBets.toFixed(3)} SOL total display`);
             }
             
             setTimeout(() => {
@@ -3727,6 +4382,23 @@ async function placeBet(walletAddress: string, betAmount: number, userId?: strin
         }
 
         console.log('✅ SERVER: Bet collection successful:', collection.transactionId);
+
+        // Add this function around line 4389 or replace existing notifyPlayerActivity call
+function notifyPlayerActivity(): void {
+    if (!currentGame) return;
+    
+    const wasEmpty = isGameEffectivelyEmpty();
+    
+    // Call this after bet is placed to detect transition from empty to active
+    setTimeout(() => {
+        const isEmptyNow = isGameEffectivelyEmpty();
+        if (wasEmpty && !isEmptyNow) {
+            onPlayersJoinGame();
+        }
+    }, 100);
+}
+        
+        
 
         const entryMultiplier = currentGame.status === 'waiting' ? 1.0 : currentGame.currentMultiplier;
         
@@ -3863,6 +4535,14 @@ async function cashOut(walletAddress: string): Promise<{ success: boolean; payou
             setTimeout(() => {
                 if (currentGame) crashGame();
             }, 500);
+
+            // After the crash processing, add:
+
+// 🎭 Simulate liquidity drain after crash
+setTimeout(() => {
+    triggerArtificialUpdate('crash');
+    console.log(`💥 Post-crash liquidity reset: ${artificialLiquidity.toFixed(3)} SOL artificial remaining`);
+}, 1000);
             
             return { success: false, reason: 'Payout temporarily unavailable' };
         }
@@ -3943,7 +4623,8 @@ async function cashOut(walletAddress: string): Promise<{ success: boolean; payou
     }
 }
 
-// Enhanced game loop
+// Enhanced game loop with integrated extreme multiplier and bootstrap FOMO systems
+// Replace the existing runGameLoop function (around line 4870)
 async function runGameLoop(duration: number): Promise<void> {
     if (!currentGame) return;
 
@@ -3952,8 +4633,23 @@ async function runGameLoop(duration: number): Promise<void> {
     let lastChartUpdate = startTime;
     let lastLogTime = startTime;
 
-    console.log(`🎮 Starting AGGRESSIVE trader game loop for Game ${currentGame.gameNumber} - Duration: ${duration}ms`);
-    console.log(`🎯 Initial state: Trend=${tradingState.trend}, Momentum=${tradingState.momentum.toFixed(2)}, Volatility=${(tradingState.volatility*100).toFixed(1)}%`);
+    // 🔧 NEW: Detect special game types
+    const isExtremeGame = currentGame.maxMultiplier >= 50.0; // Extreme multiplier threshold
+    const isBootstrapMode = getCurrentGameConfig()._BOOTSTRAP_MODE;
+    const isFomoGame = isBootstrapMode && currentGame.maxMultiplier >= BOOTSTRAP_FOMO_SYSTEM.fomoMultiplierRange.min;
+    const gameIsEmpty = isGameEffectivelyEmpty();
+
+    // 🔧 NEW: Enhanced game type detection and logging
+    let gameTypeLabel = 'NORMAL';
+    if (isExtremeGame) {
+        gameTypeLabel = 'EXTREME';
+    } else if (isFomoGame && gameIsEmpty) {
+        gameTypeLabel = 'BOOTSTRAP FOMO';
+    } else if (isBootstrapMode) {
+        gameTypeLabel = `BOOTSTRAP ${getCurrentGameConfig()._BOOTSTRAP_LEVEL.toUpperCase()}`;
+    }
+
+    console.log(`🎮 Starting ${gameTypeLabel} game loop for Game ${currentGame.gameNumber} - Duration: ${duration}ms`);
 
     const gameLoop = setInterval(() => {
         if (!currentGame || currentGame.status !== 'active') {
@@ -3965,22 +4661,49 @@ async function runGameLoop(duration: number): Promise<void> {
         const elapsed = now - startTime;
         const progress = Math.min(elapsed / duration, 1);
 
-        if (shouldInstantRugPull()) {
-            console.log('💥 INSTANT RUG PULL TRIGGERED');
-            crashGame();
-            clearInterval(gameLoop);
-            return;
+        // Enhanced rug pull logic based on game type
+        if (isExtremeGame) {
+            // For extreme games, only rug if risk becomes dangerously high
+            let currentRisk = 0;
+            for (const [_, bet] of currentGame.activeBets) {
+                if (!bet.cashedOut) {
+                    const potentialPayout = bet.betAmount * (currentGame.currentMultiplier / bet.entryMultiplier) * 0.95;
+                    currentRisk += Math.min(potentialPayout, 15.0);
+                }
+            }
+            
+            if (currentRisk > 30.0) {
+                console.log(`🚨 EXTREME GAME EMERGENCY RUG: Risk ${currentRisk.toFixed(3)} SOL too high`);
+                crashGame();
+                clearInterval(gameLoop);
+                return;
+            }
+        } else if (isFomoGame && gameIsEmpty) {
+            // For FOMO games with no real players, no rug pulls needed
+            console.log(`📈 FOMO display game - no rug protection needed (empty game)`);
+        } else {
+            // Normal rug pull logic for regular games
+            if (shouldInstantRugPull()) {
+                console.log('💥 INSTANT RUG PULL TRIGGERED');
+                crashGame();
+                clearInterval(gameLoop);
+                return;
+            }
+
+            if (shouldRugPull()) {
+                console.log('💥 PROBABILITY RUG PULL TRIGGERED');
+                crashGame();
+                clearInterval(gameLoop);
+                return;
+            }
         }
 
-        if (shouldRugPull()) {
-            console.log('💥 PROBABILITY RUG PULL TRIGGERED');
-            crashGame();
-            clearInterval(gameLoop);
-            return;
-        }
-
+        // Natural game duration ending
         if (progress >= 1 || now >= endTime) {
-            console.log('⏰ Game duration reached, crashing naturally');
+            const endReason = isExtremeGame ? 'EXTREME TARGET REACHED' : 
+                            isFomoGame ? 'FOMO DISPLAY COMPLETE' : 
+                            'naturally';
+            console.log(`⏰ Game duration reached, crashing ${endReason}`);
             crashGame();
             clearInterval(gameLoop);
             return;
@@ -3990,33 +4713,67 @@ async function runGameLoop(duration: number): Promise<void> {
         const newMultiplier = calculateTraderMultiplier(elapsed, duration);
         currentGame.currentMultiplier = Math.round(newMultiplier * 100) / 100;
 
-        if (now - lastLogTime >= 2000) {
-            const change = ((currentGame.currentMultiplier - oldMultiplier) / oldMultiplier) * 100;
-            console.log(`📊 Trading: ${oldMultiplier.toFixed(3)}x → ${currentGame.currentMultiplier.toFixed(3)}x (${change >= 0 ? '+' : ''}${change.toFixed(2)}%) | ${tradingState.trend} trend | ${tradingState.consecutiveRises} rises`);
-            lastLogTime = now;
+        // Update artificial liquidity every update cycle
+        updateGameLiquidity();
+
+        // Enhanced multiplier updates with game type context and null checks
+        if (currentGame) {
+            io.emit('multiplierUpdate', {
+                gameId: currentGame.id,
+                gameNumber: currentGame.gameNumber,
+                multiplier: currentGame.currentMultiplier,
+                timestamp: now,
+                serverTime: now,
+                progress: progress,
+                trend: tradingState.trend,
+                rugPullRisk: isExtremeGame ? 0.001 : isFomoGame && gameIsEmpty ? 0.000 : tradingState.rugPullProbability,
+                houseBalance: currentGame.houseBalance,
+                maxPayoutCapacity: currentGame.maxPayoutCapacity,
+                totalBets: currentGame.totalBets,
+                boostedTotalBets: currentGame.boostedTotalBets,
+                liquidityGrowth: (artificialLiquidity - baseGameLiquidity).toFixed(3),
+                
+                // Game type indicators
+                gameType: gameTypeLabel,
+                isExtremeGame: isExtremeGame,
+                isFomoGame: isFomoGame && gameIsEmpty,
+                isBootstrapMode: isBootstrapMode,
+                bootstrapLevel: isBootstrapMode ? getCurrentGameConfig()._BOOTSTRAP_LEVEL : null,
+                targetMultiplier: isExtremeGame || isFomoGame ? currentGame.maxMultiplier : undefined,
+                
+                // Player engagement data
+                gameIsEmpty: gameIsEmpty,
+                emptyStreak: isBootstrapMode ? BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak : 0,
+                fomoStreak: isBootstrapMode ? BOOTSTRAP_FOMO_SYSTEM.currentFomoStreak : 0,
+                
+                // Risk and safety indicators
+                riskLevel: isExtremeGame ? 'HIGH' : isFomoGame && gameIsEmpty ? 'NONE' : isBootstrapMode ? 'MEDIUM' : 'NORMAL',
+                safetyMode: getCurrentGameConfig()._BOOTSTRAP_MODE ? 'BOOTSTRAP' : 'NORMAL'
+            });
         }
 
-        io.emit('multiplierUpdate', {
-            gameId: currentGame.id,
-            gameNumber: currentGame.gameNumber,
-            multiplier: currentGame.currentMultiplier,
-            timestamp: now,
-            serverTime: now,
-            progress: progress,
-            trend: tradingState.trend,
-            rugPullRisk: tradingState.rugPullProbability,
-            houseBalance: currentGame.houseBalance,
-            maxPayoutCapacity: currentGame.maxPayoutCapacity
-        });
-
-        if (now - lastChartUpdate >= 1000) {
+        // Chart updates with enhanced volatility for special games and null checks
+        if (currentGame && now - lastChartUpdate >= 1000) {
+            // Adjust volatility based on game type
+            let chartVolatility = tradingState.volatility;
+            if (isExtremeGame) {
+                chartVolatility *= 1.5; // More dramatic for extreme games
+            } else if (isFomoGame && gameIsEmpty) {
+                chartVolatility *= 0.8; // Smoother for FOMO display
+            }
+            
             const chartPoint = {
                 timestamp: now,
                 open: currentGame.chartData.length > 0 ? currentGame.chartData[currentGame.chartData.length - 1].close : 1.0,
-                high: currentGame.currentMultiplier * (1 + Math.random() * tradingState.volatility),
-                low: currentGame.currentMultiplier * (1 - Math.random() * tradingState.volatility),
+                high: currentGame.currentMultiplier * (1 + Math.random() * chartVolatility),
+                low: currentGame.currentMultiplier * (1 - Math.random() * chartVolatility),
                 close: currentGame.currentMultiplier,
-                volume: currentGame.totalBets
+                volume: currentGame.totalBets,
+                
+                // Chart metadata for enhanced UI
+                gameType: gameTypeLabel,
+                isSpecialEvent: isExtremeGame || (isFomoGame && gameIsEmpty),
+                intensity: isExtremeGame ? 'extreme' : isFomoGame ? 'fomo' : 'normal'
             };
 
             currentGame.chartData.push(chartPoint);
@@ -4024,6 +4781,47 @@ async function runGameLoop(duration: number): Promise<void> {
         }
 
     }, getCurrentGameConfig().UPDATE_INTERVAL);
+
+    // FIXED: Proper cleanup without reassigning clearInterval
+    const cleanupGameLoop = () => {
+        clearInterval(gameLoop);
+        
+        // Track special game outcomes with null checks
+        if (currentGame) {
+            const isExtremeGameFinal = currentGame.maxMultiplier >= 50.0;
+            const isFomoGameFinal = getCurrentGameConfig()._BOOTSTRAP_MODE && 
+                               currentGame.maxMultiplier >= BOOTSTRAP_FOMO_SYSTEM.fomoMultiplierRange.min;
+            const gameIsEmptyFinal = isGameEffectivelyEmpty();
+            
+            if (isExtremeGameFinal) {
+                trackExtremeOutcome(
+                    currentGame.gameNumber, 
+                    currentGame.maxMultiplier, 
+                    currentGame.currentMultiplier
+                );
+            }
+            
+            if (isFomoGameFinal && gameIsEmptyFinal) {
+                // Track FOMO display outcome
+                console.log(`📈 FOMO Display Complete: Game ${currentGame.gameNumber} - Target: ${currentGame.maxMultiplier}x | Actual: ${currentGame.currentMultiplier}x`);
+            }
+        }
+    };
+    
+    // Return cleanup function to be called when game ends
+    return new Promise<void>((resolve) => {
+        const originalInterval = gameLoop;
+        
+        // Monitor for game end
+        const endChecker = setInterval(() => {
+            if (!currentGame || currentGame.status !== 'active') {
+                clearInterval(originalInterval);
+                clearInterval(endChecker);
+                cleanupGameLoop();
+                resolve();
+            }
+        }, 100);
+    });
 }
 
 async function startWaitingPeriod(): Promise<void> {
@@ -4041,21 +4839,27 @@ async function startWaitingPeriod(): Promise<void> {
         // Create a temporary waiting game state
         const waitingGameId = `waiting-${Date.now()}`;
         
-        currentGame = {
-            id: waitingGameId,
-            gameNumber: globalGameCounter + 1, // Next game number
-            startTime: Date.now(),
-            currentMultiplier: 1.0,
-            maxMultiplier: 0,
-            status: 'waiting',
-            totalBets: 0,
-            totalPlayers: 0,
-            seed: '',
-            chartData: [],
-            activeBets: new Map(),
-            houseBalance: houseBalance,
-            maxPayoutCapacity: calculateMaxPayoutCapacity()
-        };
+        // 🎭 Initialize waiting period with minimal liquidity
+triggerArtificialUpdate('waiting');
+
+currentGame = {
+    id: waitingGameId,
+    gameNumber: globalGameCounter + 1,
+    startTime: Date.now(),
+    currentMultiplier: 1.0,
+    maxMultiplier: 0,
+    status: 'waiting',
+    totalBets: 0,
+    totalPlayers: 0,
+    boostedPlayerCount: artificialPlayerCount,
+    boostedTotalBets: artificialLiquidity, // Small amount during waiting
+    seed: '',
+    chartData: [],
+    activeBets: new Map(),
+    houseBalance: houseBalance,
+    maxPayoutCapacity: calculateMaxPayoutCapacity()
+};
+        // 🎭 Initialize waiting period with minimal liquidity
 
         // Emit initial waiting state
         io.emit('gameWaiting', {
@@ -4068,6 +4872,7 @@ async function startWaitingPeriod(): Promise<void> {
             countdown: 10000 // 10 seconds in milliseconds
         });
 
+        
         // Start countdown - FIXED: Initialize properly
         countdownTimeRemaining = 10; // 10 seconds countdown
         console.log(`⏰ Starting countdown: ${countdownTimeRemaining} seconds`);
@@ -4188,27 +4993,39 @@ async function startNewGame(): Promise<void> {
                 gameId = gameData.id;
                 console.log(`✅ Game ${gameNumber} saved to database successfully`);
             }
+            console.log(`✅ Game ${gameNumber} created:`);
         } catch (dbError) {
             console.warn(`⚠️ Database save failed for game ${gameNumber}, running in memory mode:`, dbError);
         }
 
         // 🔧 CRITICAL: Create completely fresh game object with empty activeBets
-        currentGame = {
-            id: gameId,
-            gameNumber,
-            startTime: Date.now(),
-            currentMultiplier: 1.0,
-            maxMultiplier: crashPoint,
-            status: 'active',
-            totalBets: existingTotalBets,
-            totalPlayers: existingTotalPlayers,
-            crashMultiplier: crashPoint,
-            seed,
-            chartData: [],
-            activeBets: new Map(), // 🔧 FRESH EMPTY MAP - this is critical!
-            houseBalance: houseBalance,
-            maxPayoutCapacity: calculateMaxPayoutCapacity()
-        };
+ // 🎭 Initialize fresh liquidity profile for new game
+// 🎭 Initialize fresh liquidity profile for new game
+triggerArtificialUpdate('new_game');
+
+currentGame = {
+    id: gameId,
+    gameNumber,
+    startTime: Date.now(),
+    currentMultiplier: 1.0,
+    maxMultiplier: crashPoint,
+    status: 'active',
+    totalBets: existingTotalBets,
+    totalPlayers: existingTotalPlayers,
+    boostedPlayerCount: existingTotalPlayers + artificialPlayerCount,
+    boostedTotalBets: existingTotalBets + artificialLiquidity, // Fresh artificial liquidity
+    crashMultiplier: crashPoint,
+    seed,
+    chartData: [],
+    activeBets: new Map(),
+    houseBalance: houseBalance,
+    maxPayoutCapacity: calculateMaxPayoutCapacity()
+};
+
+console.log(`🎮 Game ${gameNumber} liquidity initialized:`);
+console.log(`   Real bets: ${existingTotalBets.toFixed(3)} SOL`);
+console.log(`   Artificial: ${artificialLiquidity.toFixed(3)} SOL`);
+console.log(`   Total display: ${(existingTotalBets + artificialLiquidity).toFixed(3)} SOL`);
 
         // 🔧 TRANSFER: Only transfer valid bets from previous game
         let transferredBets = 0;
@@ -4245,6 +5062,7 @@ async function startNewGame(): Promise<void> {
             maxMultiplier: crashPoint,
             preGameBets: existingTotalBets,
             preGamePlayers: existingTotalPlayers,
+            boostedPlayerCount: currentGame.boostedPlayerCount, // 🎭 ADD THIS LINE
             totalBets: currentGame.totalBets,
             totalPlayers: currentGame.totalPlayers,
             houseBalance: currentGame.houseBalance,
@@ -4365,13 +5183,18 @@ async function crashGame(): Promise<void> {
     });
 
     // Save game to history and clear current game
-    gameHistory.push({ ...currentGame });
-    if (gameHistory.length > 100) {
-        gameHistory = gameHistory.slice(-100);
-    }
+    // Save game to history and clear current game
+gameHistory.push({ ...currentGame });
+if (gameHistory.length > 100) {
+    gameHistory = gameHistory.slice(-100);
+}
 
-    console.log(`✅ Game ${currentGame.gameNumber} completed and cleaned up`);
-    currentGame = null;
+// 🎭 Simulate liquidity drain after crash
+triggerArtificialUpdate('crash');
+console.log(`💥 Post-crash liquidity reset: ${artificialLiquidity.toFixed(3)} SOL artificial remaining`);
+
+console.log(`✅ Game ${currentGame.gameNumber} completed and cleaned up`);
+currentGame = null;
     
     // Start waiting period for next game
     setTimeout(() => {
@@ -4429,6 +5252,17 @@ async function monitorTransactionStatus(signature: string): Promise<{
 }
 
 // Socket.io event handlers
+io.use((socket, next) => {
+    if (isShuttingDown) {
+        socket.emit('serverMaintenance', {
+            message: 'Server is under maintenance. Please reconnect in a few minutes.',
+            estimatedDowntime: '2-5 minutes'
+        });
+        socket.disconnect(true);
+        return;
+    }
+    next();
+});
 io.on('connection', (socket: Socket) => {
     console.log('Client connected:', socket.id);
 
@@ -4442,6 +5276,8 @@ io.on('connection', (socket: Socket) => {
             status: currentGame.status,
             totalBets: currentGame.totalBets,
             totalPlayers: currentGame.totalPlayers,
+            boostedPlayerCount: currentGame.boostedPlayerCount, 
+            boostedTotalBets: currentGame.boostedTotalBets,
             startTime: currentGame.startTime,
             maxMultiplier: currentGame.maxMultiplier,
             serverTime: currentServerTime,
@@ -4769,6 +5605,7 @@ setInterval(() => {
             status: currentGame.status,
             totalBets: currentGame.totalBets,
             totalPlayers: currentGame.totalPlayers,
+            boostedPlayerCount: currentGame.boostedPlayerCount, // 🎭 ADD THIS LINE
             houseBalance: currentGame.houseBalance,
             maxPayoutCapacity: currentGame.maxPayoutCapacity,
             tradingState: {
@@ -4935,6 +5772,15 @@ app.get('/api/health', async (req, res): Promise<void> => {
             status: currentGame.status,
             startTime: currentGame.startTime,
             totalPlayers: currentGame.totalPlayers,
+            boostedPlayerCount: currentGame.boostedPlayerCount, // 🎭 ADD THIS LINE
+            liquidityBreakdown: {
+                realBets: currentGame.totalBets,
+                artificialLiquidity: artificialLiquidity,
+                baseGameLiquidity: baseGameLiquidity,
+                liquidityGrowth: artificialLiquidity - baseGameLiquidity,
+                growthRate: currentLiquidityProfile.growthRate
+            },
+    artificialPlayerCount: artificialPlayerCount, // 🎭 ADD THIS LINE
             totalBets: currentGame.totalBets,
             houseBalance: currentGame.houseBalance,
             maxPayoutCapacity: currentGame.maxPayoutCapacity,
@@ -4965,6 +5811,40 @@ app.get('/api/health', async (req, res): Promise<void> => {
                 maxMultiplier: config.MAX_MULTIPLIER
             }
         } : { active: false }
+    });
+});
+
+// Add this API endpoint to check FOMO status
+app.get('/api/bootstrap/fomo-status', (req, res): void => {
+    const config = getCurrentGameConfig();
+    const recentFomo = BOOTSTRAP_FOMO_SYSTEM.recentFomoHistory.slice(-10);
+    
+    res.json({
+        system: 'bootstrap_fomo',
+        enabled: BOOTSTRAP_FOMO_SYSTEM.enabled,
+        bootstrapMode: config._BOOTSTRAP_MODE,
+        bootstrapLevel: config._BOOTSTRAP_LEVEL,
+        currentState: {
+            emptyStreak: BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak,
+            fomoStreak: BOOTSTRAP_FOMO_SYSTEM.currentFomoStreak,
+            gameIsEmpty: isGameEffectivelyEmpty(),
+            realBets: currentGame?.totalBets || 0,
+            emptyThreshold: BOOTSTRAP_FOMO_SYSTEM.noPlayersThreshold
+        },
+        configuration: {
+            fomoChance: BOOTSTRAP_FOMO_SYSTEM.fomoChance,
+            multiplierRange: BOOTSTRAP_FOMO_SYSTEM.fomoMultiplierRange,
+            consecutiveLimit: BOOTSTRAP_FOMO_SYSTEM.consecutiveFomoLimit,
+            breakChance: BOOTSTRAP_FOMO_SYSTEM.fomoBreakChance
+        },
+        recentFomoEvents: recentFomo.map(event => ({
+            gameNumber: event.gameNumber,
+            multiplier: event.multiplier,
+            minutesAgo: (Date.now() - event.timestamp) / 60000,
+            wasEmpty: event.wasEmpty
+        })),
+        nextFomoEligible: BOOTSTRAP_FOMO_SYSTEM.currentEmptyStreak >= BOOTSTRAP_FOMO_SYSTEM.minEmptyGamesBeforeFomo,
+        timestamp: Date.now()
     });
 });
 
@@ -5083,6 +5963,17 @@ app.get('/api/admin/house-balance', async (req, res): Promise<void> => {
 });
 
 // FIXED: Error handling middleware with explicit return
+app.use((req, res, next) => {
+    if (isShuttingDown) {
+        res.status(503).json({
+            error: 'Server is shutting down for maintenance',
+            message: 'Please try again in a few minutes',
+            estimatedDowntime: '2-5 minutes'
+        });
+        return;
+    }
+    next();
+});
 app.use((error: Error, req: express.Request, res: express.Response, next: express.NextFunction): void => {
     console.error('Unhandled error:', error);
     res.status(500).json({ 
@@ -5092,18 +5983,669 @@ app.use((error: Error, req: express.Request, res: express.Response, next: expres
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('SIGTERM received, shutting down gracefully');
+// Enhanced graceful shutdown handler - Add this to your server code
+
+let isShuttingDown = false;
+let shutdownInProgress = false;
+
+async function gracefulShutdown(signal: string): Promise<void> {
+    if (shutdownInProgress) {
+        console.log('⚠️ Shutdown already in progress...');
+        return;
+    }
+    
+    shutdownInProgress = true;
+    console.log(`🛑 ${signal} received - Starting graceful shutdown...`);
+    
+    try {
+        // 1. STOP ACCEPTING NEW CONNECTIONS
+        console.log('📡 Stopping new connections...');
+        isShuttingDown = true;
+        
+        // Stop accepting new bets
+        io.emit('serverShutdown', {
+            message: 'Server is shutting down for updates. Please wait before placing new bets.',
+            estimatedDowntime: '2-5 minutes',
+            timestamp: Date.now()
+        });
+        
+        // 2. SAVE ACTIVE GAME STATE
+        if (currentGame) {
+            console.log(`🎮 Saving active game ${currentGame.gameNumber} state...`);
+            await saveActiveGameState();
+        }
+        
+        // 3. RESOLVE ALL PENDING TRANSACTIONS
+        console.log('💰 Resolving pending transactions...');
+        await resolvePendingTransactions();
+        
+        // 4. SYNC ALL USER BALANCES
+        console.log('🔄 Syncing all user balances...');
+        await syncAllUserBalances();
+        
+        // 5. SAVE CRITICAL SYSTEM STATE
+        console.log('💾 Saving system state...');
+        await saveSystemState();
+        
+        // 6. FINAL TRANSACTION MONITORING SWEEP
+        console.log('🔍 Final transaction monitoring sweep...');
+        await monitorAndUpdateDatabase();
+        await resolvePendingDeposits();
+        
+        console.log('✅ Graceful shutdown complete');
+        
+    } catch (error) {
+        console.error('❌ Error during graceful shutdown:', error);
+    }
+    
+    // Close server
     server.close(() => {
-        console.log('Process terminated');
+        console.log('🚪 Server closed successfully');
+        process.exit(0);
     });
+    
+    // Force exit after 30 seconds
+    setTimeout(() => {
+        console.log('⏰ Forced shutdown after timeout');
+        process.exit(1);
+    }, 30000);
+}
+
+// Enhanced save active game state function
+async function saveActiveGameState(): Promise<void> {
+    // Add early return if no current game
+    if (!currentGame) {
+        console.log('ℹ️ No current game to save');
+        return;
+    }
+    
+    // Create a local constant to help TypeScript understand it's not null
+    const gameToSave = currentGame;
+    
+    try {
+        console.log(`💾 Saving active game ${gameToSave.gameNumber} with ${gameToSave.activeBets.size} active bets...`);
+        
+        // Save game state to database
+        const gameStateData = {
+            game_id: gameToSave.id,
+            game_number: gameToSave.gameNumber,
+            current_multiplier: gameToSave.currentMultiplier,
+            max_multiplier: gameToSave.maxMultiplier,
+            status: gameToSave.status,
+            total_bets: gameToSave.totalBets,
+            total_players: gameToSave.totalPlayers,
+            start_time: new Date(gameToSave.startTime).toISOString(),
+            seed: gameToSave.seed,
+            house_balance: gameToSave.houseBalance,
+            shutdown_saved: true,
+            saved_at: new Date().toISOString()
+        };
+        
+        await supabaseService
+            .from('game_state_snapshots')
+            .upsert(gameStateData);
+        
+        // Save all active bets - using local constant
+        if (gameToSave.activeBets && gameToSave.activeBets.size > 0) {
+            const activeBetsData = Array.from(gameToSave.activeBets.entries()).map(([walletAddress, bet]) => ({
+                game_id: gameToSave.id,
+                wallet_address: walletAddress,
+                user_id: bet.userId,
+                bet_amount: bet.betAmount,
+                entry_multiplier: bet.entryMultiplier,
+                placed_at: new Date(bet.placedAt).toISOString(),
+                is_valid: bet.isValid,
+                bet_collected: bet.betCollected,
+                cashed_out: bet.cashedOut,
+                cashout_multiplier: bet.cashoutMultiplier,
+                cashout_amount: bet.cashoutAmount,
+                transaction_id: bet.transactionId,
+                shutdown_saved: true
+            }));
+            
+            await supabaseService
+                .from('active_bets_snapshots')
+                .upsert(activeBetsData);
+                
+            console.log(`✅ Saved ${activeBetsData.length} active bets to database`);
+        } else {
+            console.log('ℹ️ No active bets to save');
+        }
+        
+        // Save artificial liquidity state - using local constant
+        await supabaseService
+            .from('system_state')
+            .upsert({
+                id: 'artificial_liquidity',
+                data: {
+                    artificialLiquidity,
+                    baseGameLiquidity,
+                    artificialPlayerCount,
+                    currentLiquidityProfile,
+                    gameCounter: globalGameCounter,
+                    savedAt: Date.now()
+                },
+                updated_at: new Date().toISOString()
+            });
+        
+    } catch (error) {
+        console.error('❌ Failed to save active game state:', error);
+        throw error;
+    }
+}
+
+// Resolve all pending transactions
+async function resolvePendingTransactions(): Promise<void> {
+    try {
+        console.log('🔄 Checking for pending transactions...');
+        
+        // Check all active transfers
+        for (const [transferId, transfer] of activeTransfers) {
+            if (transfer.status === 'pending' || transfer.status === 'processing') {
+                console.log(`⏳ Resolving pending transfer: ${transferId}`);
+                
+                if (transfer.transactionId) {
+                    // Check transaction status
+                    const status = await monitorTransactionStatus(transfer.transactionId);
+                    
+                    if (status.confirmed) {
+                        transfer.status = 'completed';
+                        transfer.completedAt = Date.now();
+                        await saveTransferToDatabase(transfer);
+                        console.log(`✅ Transfer ${transferId} confirmed`);
+                    } else {
+                        console.warn(`⚠️ Transfer ${transferId} not confirmed: ${status.error}`);
+                    }
+                }
+            }
+        }
+        
+        // Final transaction monitoring sweep
+        await monitorAndUpdateDatabase();
+        
+    } catch (error) {
+        console.error('❌ Error resolving pending transactions:', error);
+    }
+}
+
+// Sync all user balances
+async function syncAllUserBalances(): Promise<void> {
+    try {
+        console.log('🔄 Syncing all user balances...');
+        let syncedCount = 0;
+        
+        // Sync all hybrid wallet users
+        for (const [userId, wallet] of hybridUserWallets) {
+            try {
+                // Get fresh balance from database
+                const { data: freshBalance } = await supabaseService
+                    .from('user_profiles')
+                    .select('custodial_balance, privy_balance, total_balance')
+                    .eq('user_id', userId)
+                    .single();
+                
+                if (freshBalance) {
+                    // Update in-memory state with database state
+                    wallet.custodialBalance = parseFloat(freshBalance.custodial_balance) || 0;
+                    wallet.embeddedBalance = parseFloat(freshBalance.privy_balance) || 0;
+                    syncedCount++;
+                }
+                
+            } catch (error) {
+                console.warn(`⚠️ Failed to sync balance for user ${userId}:`, error);
+            }
+        }
+        
+        // Sync Privy wallet balances
+        for (const [userId] of privyIntegrationManager.privyWallets) {
+            try {
+                await updatePrivyWalletBalance(userId);
+            } catch (error) {
+                console.warn(`⚠️ Failed to sync Privy balance for user ${userId}:`, error);
+            }
+        }
+        
+        console.log(`✅ Synced ${syncedCount} user balances`);
+        
+    } catch (error) {
+        console.error('❌ Error syncing user balances:', error);
+    }
+}
+
+// Save critical system state
+async function saveSystemState(): Promise<void> {
+    try {
+        console.log('💾 Saving critical system state...');
+        
+        const systemState = {
+            houseBalance,
+            lastHouseBalanceUpdate,
+            globalGameCounter,
+            bootstrapState,
+            multiplierControl: {
+                recentGames: multiplierControl.recentGames,
+                consecutiveHighCount: multiplierControl.consecutiveHighCount,
+                cooldownUntil: multiplierControl.cooldownUntil
+            },
+            hybridSystemStats,
+            privyIntegrationStats: {
+                totalPrivyWallets: privyIntegrationManager.totalPrivyWallets,
+                connectedPrivyWallets: privyIntegrationManager.connectedPrivyWallets,
+                totalPrivyBalance: privyIntegrationManager.totalPrivyBalance
+            },
+            tradingState,
+            shutdownTimestamp: Date.now()
+        };
+        
+        await supabaseService
+            .from('system_state')
+            .upsert({
+                id: 'server_shutdown_state',
+                data: systemState,
+                updated_at: new Date().toISOString()
+            });
+        
+        console.log('✅ System state saved successfully');
+        
+    } catch (error) {
+        console.error('❌ Failed to save system state:', error);
+    }
+}
+
+// Startup Recovery Handler - Add this to your server initialization
+
+async function recoverFromShutdown(): Promise<void> {
+    try {
+        console.log('🔄 Checking for shutdown recovery data...');
+        
+        // 1. RECOVER SYSTEM STATE
+        await recoverSystemState();
+        
+        // 2. RECOVER ACTIVE GAME
+        await recoverActiveGame();
+        
+        // 3. VERIFY USER BALANCES
+        await verifyUserBalances();
+        
+        // 4. CLEAN UP RECOVERY DATA
+        await cleanupRecoveryData();
+        
+        console.log('✅ Shutdown recovery complete');
+        
+    } catch (error) {
+        console.error('❌ Error during shutdown recovery:', error);
+        // Continue with normal startup even if recovery fails
+    }
+}
+
+async function recoverSystemState(): Promise<void> {
+    try {
+        console.log('🔄 Recovering system state...');
+        
+        const { data: systemStateData } = await supabaseService
+            .from('system_state')
+            .select('*')
+            .eq('id', 'server_shutdown_state')
+            .single();
+        
+        if (systemStateData && systemStateData.data) {
+            const state = systemStateData.data;
+            
+            // Recover critical counters
+            if (state.globalGameCounter) {
+                globalGameCounter = state.globalGameCounter;
+                console.log(`✅ Recovered game counter: ${globalGameCounter}`);
+            }
+            
+            // Recover bootstrap state
+            if (state.bootstrapState) {
+                bootstrapState = { ...bootstrapState, ...state.bootstrapState };
+                console.log(`✅ Recovered bootstrap state`);
+            }
+            
+            // Recover multiplier control
+            if (state.multiplierControl) {
+                multiplierControl.recentGames = state.multiplierControl.recentGames || [];
+                multiplierControl.consecutiveHighCount = state.multiplierControl.consecutiveHighCount || 0;
+                multiplierControl.cooldownUntil = state.multiplierControl.cooldownUntil || 0;
+                console.log(`✅ Recovered multiplier control with ${multiplierControl.recentGames.length} recent games`);
+            }
+            
+            // Recover trading state
+            if (state.tradingState) {
+                tradingState = { ...tradingState, ...state.tradingState };
+                console.log(`✅ Recovered trading state: ${tradingState.trend}`);
+            }
+            
+            // Recover artificial liquidity state
+            const { data: liquidityState } = await supabaseService
+                .from('system_state')
+                .select('*')
+                .eq('id', 'artificial_liquidity')
+                .single();
+            
+            if (liquidityState && liquidityState.data) {
+                const liquidity = liquidityState.data;
+                artificialLiquidity = liquidity.artificialLiquidity || 2.0;
+                baseGameLiquidity = liquidity.baseGameLiquidity || 2.0;
+                artificialPlayerCount = liquidity.artificialPlayerCount || 15;
+                currentLiquidityProfile = liquidity.currentLiquidityProfile || generateGameLiquidityProfile();
+                console.log(`✅ Recovered artificial liquidity: ${artificialLiquidity.toFixed(3)} SOL`);
+            }
+        }
+        
+    } catch (error) {
+        console.warn('⚠️ No system state to recover or recovery failed:', error);
+    }
+}
+
+async function recoverActiveGame(): Promise<void> {
+    try {
+        console.log('🎮 Checking for active game to recover...');
+        
+        // Check for saved game state
+        const { data: gameSnapshot } = await supabaseService
+            .from('game_state_snapshots')
+            .select('*')
+            .eq('shutdown_saved', true)
+            .order('saved_at', { ascending: false })
+            .limit(1)
+            .single();
+        
+        if (!gameSnapshot) {
+            console.log('ℹ️ No active game to recover');
+            return;
+        }
+        
+        console.log(`🔄 Recovering game ${gameSnapshot.game_number}...`);
+        
+        // Check if the game was active and should continue
+        const timeSinceShutdown = Date.now() - new Date(gameSnapshot.saved_at).getTime();
+        
+        if (timeSinceShutdown > 300000) { // 5 minutes
+            console.log(`⏰ Game ${gameSnapshot.game_number} too old (${Math.round(timeSinceShutdown/1000)}s), treating as crashed`);
+            await handleAbandonedGame(gameSnapshot);
+            return;
+        }
+        
+        // Recover active bets
+        const { data: activeBetsSnapshot } = await supabaseService
+            .from('active_bets_snapshots')
+            .select('*')
+            .eq('game_id', gameSnapshot.game_id)
+            .eq('shutdown_saved', true);
+        
+        // Determine recovery strategy based on game status
+        if (gameSnapshot.status === 'active') {
+            await recoverActiveGameInProgress(gameSnapshot, activeBetsSnapshot || []);
+        } else if (gameSnapshot.status === 'waiting') {
+            await recoverWaitingGame(gameSnapshot, activeBetsSnapshot || []);
+        }
+        
+    } catch (error) {
+        console.error('❌ Error recovering active game:', error);
+    }
+}
+
+async function recoverActiveGameInProgress(gameSnapshot: any, activeBets: any[]): Promise<void> {
+    try {
+        console.log(`🎮 Recovering active game ${gameSnapshot.game_number} with ${activeBets.length} active bets...`);
+        
+        // IMPORTANT DECISION: For user safety, crash any active game from before shutdown
+        // This ensures no bets are left hanging and all users get clear resolution
+        
+        console.log(`💥 Auto-crashing game ${gameSnapshot.game_number} due to server restart (user protection)`);
+        
+        // Process all active bets as losses (house keeps the money)
+        let totalLostBets = 0;
+        
+        for (const bet of activeBets) {
+            if (!bet.cashed_out) {
+                totalLostBets += parseFloat(bet.bet_amount);
+                
+                // Mark bet as lost in database
+                await supabaseService
+                    .from('player_bets')
+                    .update({
+                        profit_loss: -parseFloat(bet.bet_amount),
+                        status: 'lost_server_restart',
+                        crash_multiplier: gameSnapshot.current_multiplier,
+                        resolved_at: new Date().toISOString(),
+                        resolution_reason: 'Server restart - game auto-crashed for user protection'
+                    })
+                    .eq('game_id', gameSnapshot.game_id)
+                    .eq('wallet_address', bet.wallet_address);
+                
+                console.log(`📉 Bet lost (server restart): ${bet.bet_amount} SOL from ${bet.wallet_address}`);
+            }
+        }
+        
+        // Update game record
+        await supabaseService
+            .from('games')
+            .update({
+                status: 'crashed',
+                crash_multiplier: gameSnapshot.current_multiplier,
+                ended_at: new Date().toISOString(),
+                resolution_reason: 'Server restart auto-crash',
+                total_lost_bets: totalLostBets
+            })
+            .eq('id', gameSnapshot.game_id);
+        
+        console.log(`✅ Game ${gameSnapshot.game_number} auto-crashed: ${totalLostBets.toFixed(3)} SOL lost bets resolved`);
+        
+        // Broadcast notification to all users when they reconnect
+        setTimeout(() => {
+            io.emit('gameRecoveryNotification', {
+                type: 'auto_crash',
+                gameNumber: gameSnapshot.game_number,
+                crashMultiplier: gameSnapshot.current_multiplier,
+                message: `Game ${gameSnapshot.game_number} was auto-crashed due to server restart. All active bets have been resolved.`,
+                totalLostBets,
+                timestamp: Date.now()
+            });
+        }, 5000);
+        
+    } catch (error) {
+        console.error(`❌ Error recovering active game ${gameSnapshot.game_number}:`, error);
+    }
+}
+
+async function recoverWaitingGame(gameSnapshot: any, activeBets: any[]): Promise<void> {
+    try {
+        console.log(`⏰ Recovering waiting game ${gameSnapshot.game_number}...`);
+        
+        // If there were bets placed during waiting period, transfer them to next game
+        if (activeBets.length > 0) {
+            console.log(`🔄 ${activeBets.length} bets will be transferred to next game`);
+            
+            // These bets will be automatically picked up by the next game
+            // No special action needed as the bet transfer logic handles this
+        }
+        
+        console.log(`✅ Waiting game recovery complete`);
+        
+    } catch (error) {
+        console.error(`❌ Error recovering waiting game:`, error);
+    }
+}
+
+async function handleAbandonedGame(gameSnapshot: any): Promise<void> {
+    try {
+        console.log(`🗑️ Handling abandoned game ${gameSnapshot.game_number}...`);
+        
+        // Mark as crashed and resolve all bets
+        await supabaseService
+            .from('games')
+            .update({
+                status: 'crashed',
+                crash_multiplier: gameSnapshot.current_multiplier || 1.0,
+                ended_at: new Date().toISOString(),
+                resolution_reason: 'Abandoned due to long server downtime'
+            })
+            .eq('id', gameSnapshot.game_id);
+        
+        // Resolve any remaining active bets
+        await supabaseService
+            .from('player_bets')
+            .update({
+                status: 'lost_abandoned',
+                resolved_at: new Date().toISOString(),
+                resolution_reason: 'Game abandoned due to server downtime'
+            })
+            .eq('game_id', gameSnapshot.game_id)
+            .eq('status', 'active');
+        
+        console.log(`✅ Abandoned game ${gameSnapshot.game_number} resolved`);
+        
+    } catch (error) {
+        console.error(`❌ Error handling abandoned game:`, error);
+    }
+}
+
+async function verifyUserBalances(): Promise<void> {
+    try {
+        console.log('🔍 Verifying user balance integrity...');
+        
+        let verifiedCount = 0;
+        let errorCount = 0;
+        
+        // Check custodial balances against database
+        for (const [userId, wallet] of hybridUserWallets) {
+            try {
+                const { data: dbBalance } = await supabaseService
+                    .from('user_profiles')
+                    .select('custodial_balance, privy_balance')
+                    .eq('user_id', userId)
+                    .single();
+                
+                if (dbBalance) {
+                    const dbCustodialBalance = parseFloat(dbBalance.custodial_balance) || 0;
+                    const memoryBalance = wallet.custodialBalance;
+                    
+                    if (Math.abs(dbCustodialBalance - memoryBalance) > 0.001) {
+                        console.warn(`⚠️ Balance mismatch for ${userId}: DB=${dbCustodialBalance}, Memory=${memoryBalance}`);
+                        // Use database as source of truth
+                        wallet.custodialBalance = dbCustodialBalance;
+                    }
+                    
+                    verifiedCount++;
+                }
+                
+            } catch (error) {
+                console.error(`❌ Error verifying balance for ${userId}:`, error);
+                errorCount++;
+            }
+        }
+        
+        console.log(`✅ Balance verification complete: ${verifiedCount} verified, ${errorCount} errors`);
+        
+    } catch (error) {
+        console.error('❌ Error during balance verification:', error);
+    }
+}
+
+async function cleanupRecoveryData(): Promise<void> {
+    try {
+        console.log('🧹 Cleaning up recovery data...');
+        
+        // Clean up game snapshots older than 1 hour
+        const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
+        
+        await supabaseService
+            .from('game_state_snapshots')
+            .delete()
+            .lt('saved_at', oneHourAgo);
+        
+        await supabaseService
+            .from('active_bets_snapshots')
+            .delete()
+            .lt('saved_at', oneHourAgo);
+        
+        // Remove the shutdown state marker
+        await supabaseService
+            .from('system_state')
+            .delete()
+            .eq('id', 'server_shutdown_state');
+        
+        console.log('✅ Recovery data cleanup complete');
+        
+    } catch (error) {
+        console.warn('⚠️ Error cleaning up recovery data:', error);
+    }
+}
+
+// Add this to your enhanced server startup sequence
+// Replace the existing startup sequence with this:
+
+server.listen(PORT, async () => {
+    console.log('🚀 Starting enhanced game server with recovery...');
+    
+    try {
+        // Initialize basic systems first
+        await initializeHybridSystem();
+        await initializePrivyIntegration();
+        await initializeGameCounter();
+        await initializeAnalyticsSystem();
+        
+        // RECOVERY PHASE
+        await recoverFromShutdown();
+        
+        // Continue with normal startup
+        await updateHouseBalance();
+        const config = getCurrentGameConfig();
+        
+        console.log(`🎮 Enhanced hybrid game server running on port ${PORT}`);
+        console.log(`🏛️ House wallet: ${housePublicKey.toString()}`);
+        console.log(`💰 House balance: ${houseBalance.toFixed(3)} SOL`);
+        console.log(`🔄 Hybrid system: ${hybridSystemStats.totalUsers} users loaded`);
+        
+        // Start monitoring and game loop
+        monitorAndUpdateDatabase();
+        resolvePendingDeposits();
+        
+        // Start fresh waiting period
+        setTimeout(() => {
+            console.log('⏰ Starting fresh game after recovery...');
+            startWaitingPeriod();
+        }, 3000);
+        
+        console.log('✅ Server startup with recovery complete');
+        
+    } catch (error) {
+        console.error('❌ Server initialization failed:', error);
+        process.exit(1);
+    }
 });
 
-process.on('SIGINT', () => {
-    console.log('SIGINT received, shutting down gracefully');
-    server.close(() => {
-        console.log('Process terminated');
-    });
+// Replace existing signal handlers with this:
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Add middleware to reject new operations during shutdown
+app.use((req, res, next) => {
+    if (isShuttingDown) {
+        res.status(503).json({
+            error: 'Server is shutting down for maintenance',
+            message: 'Please try again in a few minutes',
+            estimatedDowntime: '2-5 minutes'
+        });
+        return;
+    }
+    next();
+});
+
+// Enhanced socket middleware for shutdown
+io.use((socket, next) => {
+    if (isShuttingDown) {
+        socket.emit('serverMaintenance', {
+            message: 'Server is under maintenance. Please reconnect in a few minutes.',
+            estimatedDowntime: '2-5 minutes'
+        });
+        socket.disconnect(true);
+        return;
+    }
+    next();
 });
 
 // Resolve all pending deposits
@@ -5154,15 +6696,17 @@ app.post('/api/admin/resolve-all-pending', async (req, res): Promise<void> => {
                     
                     // Update balance using RPC
                     const { data: balanceResult, error: balanceError } = await supabaseService
-                        .rpc('update_user_balance', {
+                        
+                        .rpc('update_user_balance_with_audit', {  // ✅ Change function name
                             p_user_id: userId,
                             p_custodial_change: depositAmount,
                             p_privy_change: 0,
                             p_transaction_type: 'manual_pending_resolved',
-                            p_is_deposit: true,
-                            p_deposit_amount: depositAmount
+                            p_transaction_id: 'manual_pending_resolved',
+                            p_game_id: currentGame?.id,
+                            p_is_deposit: true,  // or true for deposits
+                            p_deposit_amount: depositAmount   // or actual deposit amount
                         });
-
                     if (!balanceError && balanceResult) {
                         const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
                         
@@ -5272,77 +6816,6 @@ app.get('/api/admin/pending-deposits', async (req, res): Promise<void> => {
 });
 
 // FIXED: Enhanced server startup sequence
-server.listen(PORT, async () => {
-    console.log('🚀 Starting game server initialization...');
-    
-    try {
-        // Initialize systems in order
-        await initializeHybridSystem();      // Custodial wallets
-        await initializePrivyIntegration();  // Privy wallets  
-        await initializeGameCounter();       // Game counter
-        await initializeAnalyticsSystem();   // Analytics system
-        
-        await updateHouseBalance();
-        const config = getCurrentGameConfig();
-        
-        console.log(`🎮 Enhanced hybrid game server running on port ${PORT}`);
-        console.log(`🏛️ House wallet: ${housePublicKey.toString()}`);
-        console.log(`💰 House balance: ${houseBalance.toFixed(3)} SOL`);
-        console.log(`🔄 Hybrid system: ${hybridSystemStats.totalUsers} users loaded`);
-        console.log(`💎 Custodial balance: ${hybridSystemStats.totalCustodialBalance.toFixed(3)} SOL`);
-        console.log(`🔗 Privy integration: ${privyIntegrationManager.totalPrivyWallets} wallets, ${privyIntegrationManager.connectedPrivyWallets} connected`);
-        console.log(`💼 Embedded wallet balance: ${privyIntegrationManager.totalPrivyBalance.toFixed(3)} SOL`);
-        console.log(`🔐 Direct blockchain integration: ENABLED`);
-        console.log(`🎲 Game counter: ${globalGameCounter} (cycles 1-100)`);
-        console.log(`🌍 Environment: ${NODE_ENV}`);
-        
-        if (config._BOOTSTRAP_MODE) {
-            console.log(`🚀 BOOTSTRAP MODE ACTIVE: ${config._BOOTSTRAP_LEVEL.toUpperCase()}`);
-            console.log(`   House edge: ${(config.HOUSE_EDGE * 100).toFixed(0)}%`);
-            console.log(`   Max payout: ${config.MAX_SINGLE_PAYOUT} SOL`);
-            console.log(`   Max bet: ${config.MAX_BET} SOL`);
-            console.log(`   Target balance: ${BOOTSTRAP_CONFIG.EXIT_BOOTSTRAP_THRESHOLD} SOL`);
-            console.log(`   Progress: ${((houseBalance / BOOTSTRAP_CONFIG.EXIT_BOOTSTRAP_THRESHOLD) * 100).toFixed(1)}%`);
-        } else {
-            console.log(`✅ NORMAL MODE ACTIVE`);
-            console.log(`   House edge: ${(config.HOUSE_EDGE * 100).toFixed(0)}%`);
-            console.log(`   Max payout: ${config.MAX_SINGLE_PAYOUT} SOL`);
-            console.log(`   Max bet: ${config.MAX_BET} SOL`);
-        }
-        
-        console.log(`📡 Solana RPC: ${SOLANA_RPC_URL}`);
-        console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-        console.log(`🔧 Transaction monitor: http://localhost:${PORT}/api/admin/trigger-monitor`);
-        
-        // FIXED: Clear any existing game state and start fresh
-        gameStartLock = false;
-        currentGame = null;
-        clearGameCountdown();
-        
-        console.log(`🚀 Starting game loop with countdown...`);
-        
-        // Start transaction monitoring
-        console.log('🔍 Starting enhanced database-driven transaction monitoring...');
-        
-        // Run initial scan
-        monitorAndUpdateDatabase();
-        
-        // Check for pending deposits immediately
-        resolvePendingDeposits();
-        
-        console.log('✅ Enhanced transaction monitoring active - will update database with real-time balance updates');
-        
-        // FIXED: Start the waiting period with a small delay to ensure everything is ready
-        setTimeout(() => {
-            console.log('⏰ Initiating first waiting period...');
-            startWaitingPeriod();
-        }, 2000); // 2 second delay to ensure all systems are ready
-        
-    } catch (error) {
-        console.error('❌ Server initialization failed:', error);
-        process.exit(1);
-    }
-});
 
 // FIXED: Add process handlers to ensure clean shutdown
 process.on('SIGTERM', () => {
@@ -5398,5 +6871,42 @@ setInterval(() => {
             console.warn(`⚠️ Game ${currentGame.gameNumber} running for ${Math.round(gameAge/1000)}s, may be stuck`);
         }
     }
+    // 🎭 Update artificial player count every 12-15 seconds
+// 🎭 Enhanced artificial system updates
+setInterval(() => {
+    const now = Date.now();
     
+    // Update liquidity continuously during active games
+    if (currentGame && currentGame.status === 'active') {
+        updateGameLiquidity();
+    }
+    
+    // Update player counts every 15-20 seconds
+    const timeSinceLastUpdate = now - lastArtificialUpdate;
+    const updateInterval = 15000 + Math.random() * 5000; // 15-20 seconds
+    
+    if (timeSinceLastUpdate >= updateInterval) {
+        updateArtificialCounts();
+        
+        // Broadcast enhanced update
+        if (currentGame) {
+            io.emit('artificialBoostUpdate', {
+                gameId: currentGame.id,
+                gamePhase: currentGame.status,
+                currentMultiplier: currentGame.currentMultiplier,
+                totalPlayers: currentGame.totalPlayers,
+                totalBets: currentGame.totalBets,
+                boostedPlayerCount: currentGame.boostedPlayerCount,
+                boostedTotalBets: currentGame.boostedTotalBets,
+                liquidityProfile: {
+                    base: baseGameLiquidity,
+                    current: artificialLiquidity,
+                    growth: artificialLiquidity - baseGameLiquidity,
+                    growthRate: currentLiquidityProfile.growthRate
+                },
+                timestamp: Date.now()
+            });
+        }
+    }
+}, 2000); // Check every 2 seconds for smoother liquidity updates
 }, 30000); // Check every 30 seconds

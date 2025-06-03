@@ -5,6 +5,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 // Enhanced GameState interface
+// Enhanced GameState interface - UPDATED VERSION
 interface GameState {
   id: string;
   gameNumber: number;
@@ -12,13 +13,15 @@ interface GameState {
   status: 'waiting' | 'active' | 'crashed';
   totalBets: number;
   totalPlayers: number;
+  boostedPlayerCount: number;    // ✅ ADD THIS
+  boostedTotalBets: number;      // ✅ ADD THIS
   startTime: number;
   maxMultiplier?: number;
   serverTime?: number;
-  countdown?: number;        // Countdown in milliseconds for waiting period
-  canBet?: boolean;         // Whether betting is currently allowed
-  preGameBets?: number;     // Pre-game bet totals
-  preGamePlayers?: number;  // Pre-game player count
+  countdown?: number;
+  canBet?: boolean;
+  preGameBets?: number;
+  preGamePlayers?: number;
 }
 
 // Enhanced bet result interface
@@ -198,6 +201,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         status: gameState.status || 'waiting',
         totalBets: gameState.totalBets || 0,
         totalPlayers: gameState.totalPlayers || 0,
+        boostedPlayerCount: gameState.boostedPlayerCount || gameState.totalPlayers || 0, // ✅ ADD THIS
+        boostedTotalBets: gameState.boostedTotalBets || gameState.totalBets || 0,         // ✅ ADD THIS
         startTime: gameState.startTime || Date.now(),
         maxMultiplier: gameState.maxMultiplier,
         serverTime: gameState.serverTime,
@@ -206,6 +211,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         preGameBets: gameState.preGameBets,
         preGamePlayers: gameState.preGamePlayers
       };
+      
       
       // Update countdown state
       if (gameState.countdown !== undefined) {
@@ -367,6 +373,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         status: 'active',
         totalBets: data.totalBets || data.preGameBets || 0,
         totalPlayers: data.totalPlayers || data.preGamePlayers || 0,
+        boostedPlayerCount: data.boostedPlayerCount || data.totalPlayers || 0, // ✅ ADD THIS
+        boostedTotalBets: data.boostedTotalBets || data.totalBets || 0,         // ✅ ADD THIS
         startTime: data.startTime || Date.now(),
         maxMultiplier: data.maxMultiplier,
         serverTime: data.serverTime,
@@ -378,30 +386,32 @@ export function useGameSocket(walletAddress: string, userId?: string) {
       setCurrentGame(newGameState);
       gameStateRef.current = newGameState;
     });
-
     // Enhanced game crashed handler
-    newSocket.on('gameCrashed', (data: any) => {
-      console.log('💥 Game crashed:', data);
-      
-      // Reset countdown and betting state
-      setCountdown(0);
-      setIsWaitingPeriod(false);
-      setCanBet(false);
-      
-      if (gameStateRef.current && gameStateRef.current.gameNumber === data.gameNumber) {
-        const crashedGame: GameState = {
-          ...gameStateRef.current,
-          status: 'crashed',
-          multiplier: data.crashMultiplier || data.finalMultiplier || gameStateRef.current.multiplier,
-          canBet: false
-        };
-        
-        setCurrentGame(crashedGame);
-        gameStateRef.current = null; // Clear current game
-        
-        setGameHistory(prev => [...prev.slice(-49), crashedGame]);
-      }
-    });
+    // Enhanced game crashed handler
+newSocket.on('gameCrashed', (data: any) => {
+  console.log('💥 Game crashed:', data);
+  
+  // Reset countdown and betting state
+  setCountdown(0);
+  setIsWaitingPeriod(false);
+  setCanBet(false);
+  
+  if (gameStateRef.current && gameStateRef.current.gameNumber === data.gameNumber) {
+    const crashedGame: GameState = {
+      ...gameStateRef.current,
+      status: 'crashed',
+      multiplier: data.crashMultiplier || data.finalMultiplier || gameStateRef.current.multiplier,
+      boostedPlayerCount: gameStateRef.current.boostedPlayerCount, // ✅ PRESERVE THIS
+      boostedTotalBets: gameStateRef.current.boostedTotalBets,     // ✅ PRESERVE THIS
+      canBet: false
+    };
+    
+    setCurrentGame(crashedGame);
+    gameStateRef.current = null; // Clear current game
+    
+    setGameHistory(prev => [...prev.slice(-49), crashedGame]);
+  }
+});
 
     // Handle game sync responses
     newSocket.on('gameSync', (data: any) => {
@@ -419,6 +429,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           status: data.status,
           totalBets: data.totalBets || 0,
           totalPlayers: data.totalPlayers || 0,
+          boostedPlayerCount: data.boostedPlayerCount || data.totalPlayers || 0, // ✅ ADD THIS
+          boostedTotalBets: data.boostedTotalBets || data.totalBets || 0,         // ✅ ADD THIS
           startTime: data.startTime || 0,
           serverTime: data.serverTime,
           countdown: data.countdown,
@@ -436,34 +448,41 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     });
 
     // Handle game history
-    newSocket.on('gameHistory', (history: any[]) => {
-      const mappedHistory: GameState[] = history.map(game => ({
-        id: game.id || '',
-        gameNumber: game.gameNumber || 0,
-        multiplier: game.currentMultiplier || game.multiplier || 1.0,
-        status: game.status || 'crashed',
-        totalBets: game.totalBets || 0,
-        totalPlayers: game.totalPlayers || 0,
-        startTime: game.startTime || 0,
-        maxMultiplier: game.maxMultiplier,
-        serverTime: game.serverTime
-      }));
-      setGameHistory(mappedHistory);
-    });
+    // Handle game history
+newSocket.on('gameHistory', (history: any[]) => {
+  const mappedHistory: GameState[] = history.map(game => ({
+    id: game.id || '',
+    gameNumber: game.gameNumber || 0,
+    multiplier: game.currentMultiplier || game.multiplier || 1.0,
+    status: game.status || 'crashed',
+    totalBets: game.totalBets || 0,
+    totalPlayers: game.totalPlayers || 0,
+    boostedPlayerCount: game.boostedPlayerCount || game.totalPlayers || 0, // ✅ ADD THIS
+    boostedTotalBets: game.boostedTotalBets || game.totalBets || 0,         // ✅ ADD THIS
+    startTime: game.startTime || 0,
+    maxMultiplier: game.maxMultiplier,
+    serverTime: game.serverTime
+  }));
+  setGameHistory(mappedHistory);
+});
+    
 
     // Enhanced bet placed handler
-    newSocket.on('betPlaced', (data: any) => {
-      if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
-        const updatedGame: GameState = {
-          ...gameStateRef.current,
-          totalBets: data.totalBets || gameStateRef.current.totalBets,
-          totalPlayers: data.totalPlayers || gameStateRef.current.totalPlayers,
-          countdown: data.countdown || gameStateRef.current.countdown
-        };
-        setCurrentGame(updatedGame);
-        gameStateRef.current = updatedGame;
-      }
-    });
+    // Enhanced bet placed handler
+newSocket.on('betPlaced', (data: any) => {
+  if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
+    const updatedGame: GameState = {
+      ...gameStateRef.current,
+      totalBets: data.totalBets || gameStateRef.current.totalBets,
+      totalPlayers: data.totalPlayers || gameStateRef.current.totalPlayers,
+      boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount, // ✅ ADD THIS
+      boostedTotalBets: data.boostedTotalBets || gameStateRef.current.boostedTotalBets,       // ✅ ADD THIS
+      countdown: data.countdown || gameStateRef.current.countdown
+    };
+    setCurrentGame(updatedGame);
+    gameStateRef.current = updatedGame;
+  }
+});
 
     setSocket(newSocket);
 
@@ -582,44 +601,46 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
   // Add these three methods to your useGameSocket hook:
 
-const placeCustodialBet = useCallback(async (
-  userId: string, 
-  betAmount: number
-): Promise<boolean> => {
-  return new Promise((resolve) => {
-    if (!socket || !isConnected) {
-      console.log('❌ Cannot place custodial bet: not connected');
-      resolve(false);
-      return;
-    }
-
-    console.log('🎯 Placing custodial bet:', { userId, betAmount });
-
-    const timeout = setTimeout(() => {
-      console.error('❌ Custodial bet timeout');
-      resolve(false);
-    }, 30000);
-
-    socket.once('custodialBetResult', (data: any) => {
-      clearTimeout(timeout);
-      console.log('🎯 Custodial bet result:', data);
-      
-      if (data.success && data.gameState && gameStateRef.current) {
-        const updatedGame: GameState = {
-          ...gameStateRef.current,
-          totalBets: data.gameState.totalBets || gameStateRef.current.totalBets,
-          totalPlayers: data.gameState.totalPlayers || gameStateRef.current.totalPlayers,
-        };
-        setCurrentGame(updatedGame);
-        gameStateRef.current = updatedGame;
+  const placeCustodialBet = useCallback(async (
+    userId: string, 
+    betAmount: number
+  ): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (!socket || !isConnected) {
+        console.log('❌ Cannot place custodial bet: not connected');
+        resolve(false);
+        return;
       }
-      
-      resolve(data.success);
+  
+      console.log('🎯 Placing custodial bet:', { userId, betAmount });
+  
+      const timeout = setTimeout(() => {
+        console.error('❌ Custodial bet timeout');
+        resolve(false);
+      }, 30000);
+  
+      socket.once('custodialBetResult', (data: any) => {
+        clearTimeout(timeout);
+        console.log('🎯 Custodial bet result:', data);
+        
+        if (data.success && data.gameState && gameStateRef.current) {
+          const updatedGame: GameState = {
+            ...gameStateRef.current,
+            totalBets: data.gameState.totalBets || gameStateRef.current.totalBets,
+            totalPlayers: data.gameState.totalPlayers || gameStateRef.current.totalPlayers,
+            boostedPlayerCount: data.gameState.boostedPlayerCount || gameStateRef.current.boostedPlayerCount, // ✅ ADD THIS
+            boostedTotalBets: data.gameState.boostedTotalBets || gameStateRef.current.boostedTotalBets,       // ✅ ADD THIS
+          };
+          setCurrentGame(updatedGame);
+          gameStateRef.current = updatedGame;
+        }
+        
+        resolve(data.success);
+      });
+  
+      socket.emit('custodialBet', { userId, betAmount });
     });
-
-    socket.emit('custodialBet', { userId, betAmount });
-  });
-}, [socket, isConnected]);
+  }, [socket, isConnected]);
 
 const custodialCashOut = useCallback(async (
   userId: string, 

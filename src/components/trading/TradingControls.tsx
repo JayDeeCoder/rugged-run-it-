@@ -288,7 +288,7 @@ const useRuggedBalance = (walletAddress: string) => {
 };
 
 // 🚀 ENHANCED: BalanceDisplay component with manual refresh capability
-// 🚀 ENHANCED: BalanceDisplay component with toggle button and improved refresh
+// 🚀 ENHANCED: BalanceDisplay component with refresh button inside balance display
 const BalanceDisplay: FC<{
   currentToken: TokenType;
   custodialBalance: number;
@@ -349,20 +349,6 @@ const BalanceDisplay: FC<{
             </div>
           </div>
           <div className="flex items-center space-x-2">
-            {/* 🚀 Improved refresh button */}
-            {onRefresh && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRefresh();
-                }}
-                className="text-gray-400 hover:text-blue-400 transition-colors p-1 rounded hover:bg-gray-700"
-                disabled={isLoading}
-                title="Refresh all balances"
-              >
-                <span className={`text-base ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
-              </button>
-            )}
             <span className="text-gray-400 text-sm">{showExpanded ? '▲' : '▼'}</span>
           </div>
         </div>
@@ -371,8 +357,23 @@ const BalanceDisplay: FC<{
           <div className="bg-gray-800 rounded-lg p-2 mt-1">
             {/* Always show the main balance breakdown for SOL */}
             {currentToken === TokenType.SOL && (
-              <div className="mb-3 p-2 bg-gray-900 rounded-md">
-                <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="mb-3 p-2 bg-gray-900 rounded-md relative">
+                {/* 🚀 NEW: Refresh button in top right of balance display */}
+                {onRefresh && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRefresh();
+                    }}
+                    className="absolute top-1 right-1 text-gray-400 hover:text-blue-400 transition-colors p-1 rounded hover:bg-gray-700"
+                    disabled={isLoading}
+                    title="Refresh all balances"
+                  >
+                    <span className={`text-sm ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
+                  </button>
+                )}
+                
+                <div className="grid grid-cols-2 gap-3 text-sm pr-6">
                   <div>
                     <div className="text-green-400 text-xs mb-1">🎮 Game Balance</div>
                     <div className="text-white font-bold">{custodialBalance.toFixed(3)} SOL</div>
@@ -389,8 +390,23 @@ const BalanceDisplay: FC<{
 
             {/* Show RUGGED balance when in RUGGED mode */}
             {currentToken === TokenType.RUGGED && (
-              <div className="mb-3 p-2 bg-gray-900 rounded-md">
-                <div className="text-center">
+              <div className="mb-3 p-2 bg-gray-900 rounded-md relative">
+                {/* 🚀 NEW: Refresh button for RUGGED mode too */}
+                {onRefresh && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRefresh();
+                    }}
+                    className="absolute top-1 right-1 text-gray-400 hover:text-blue-400 transition-colors p-1 rounded hover:bg-gray-700"
+                    disabled={isLoading}
+                    title="Refresh all balances"
+                  >
+                    <span className={`text-sm ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
+                  </button>
+                )}
+                
+                <div className="text-center pr-6">
                   <div className="text-green-400 text-xs mb-1">💎 RUGGED Balance</div>
                   <div className="text-white font-bold text-lg">{ruggedBalance.toFixed(0)} RUGGED</div>
                   <div className="text-xs text-gray-500">Gaming tokens</div>
@@ -431,27 +447,25 @@ const BalanceDisplay: FC<{
     );
   }
 
-  // Desktop version with improved layout
+  // Desktop version with refresh button inside balance display
   return (
     <div className="bg-gray-800 rounded-lg p-3 mb-3">
-      <div className="flex justify-end mb-3">
-        {/* 🚀 Improved refresh button for desktop */}
-        {onRefresh && (
-          <button
-            onClick={onRefresh}
-            className="text-gray-400 hover:text-blue-400 transition-colors p-2 rounded hover:bg-gray-700"
-            disabled={isLoading}
-            title="Refresh all balances"
-          >
-            <span className={`text-lg ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
-          </button>
-        )}
-      </div>
-
       {/* Always show the main balance breakdown for SOL */}
       {currentToken === TokenType.SOL && (
-        <div className="mb-3 p-2 bg-gray-900 rounded-md">
-          <div className="grid grid-cols-2 gap-3 text-sm">
+        <div className="mb-3 p-2 bg-gray-900 rounded-md relative">
+          {/* 🚀 NEW: Refresh button in top right of balance display */}
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              className="absolute top-2 right-2 text-gray-400 hover:text-blue-400 transition-colors p-1 rounded hover:bg-gray-700"
+              disabled={isLoading}
+              title="Refresh all balances"
+            >
+              <span className={`text-base ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
+            </button>
+          )}
+          
+          <div className="grid grid-cols-2 gap-3 text-sm pr-8">
             <div>
               <div className="text-green-400 text-xs mb-1">🎮 Game Balance</div>
               <div className="text-white font-bold">{custodialBalance.toFixed(3)} SOL</div>
@@ -468,8 +482,20 @@ const BalanceDisplay: FC<{
 
       {/* Show RUGGED balance when in RUGGED mode */}
       {currentToken === TokenType.RUGGED && (
-        <div className="mb-3 p-2 bg-gray-900 rounded-md">
-          <div className="text-center">
+        <div className="mb-3 p-2 bg-gray-900 rounded-md relative">
+          {/* 🚀 NEW: Refresh button for RUGGED mode too */}
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              className="absolute top-2 right-2 text-gray-400 hover:text-blue-400 transition-colors p-1 rounded hover:bg-gray-700"
+              disabled={isLoading}
+              title="Refresh all balances"
+            >
+              <span className={`text-base ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
+            </button>
+          )}
+          
+          <div className="text-center pr-8">
             <div className="text-green-400 text-xs mb-1">💎 RUGGED Balance</div>
             <div className="text-white font-bold text-2xl">{ruggedBalance.toFixed(0)} RUGGED</div>
             <div className="text-xs text-gray-500">Gaming tokens</div>

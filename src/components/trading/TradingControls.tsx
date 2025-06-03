@@ -660,25 +660,65 @@ const BettingSection: FC<{
   embeddedWalletBalance,
   onQuickTransfer
 }) => {
-
   // Quick transfer amounts
-  const quickTransferAmounts = [0.001, 0.01, 0.05, 0.1];
-
-  // 🔧 FIXED: Memoize complex calculations
-  const { amountValid, amountInRange, minBetAmount, maxBetAmount } = useMemo(() => {
+  const quickTransferAmounts = [0.01, 0.05, 0.1, 0.5];
+  const [isTransferMode, setIsTransferMode] = useState(false);
+  
+  // 🚀 ADD THIS MISSING VARIABLE:
+  const showTransferOption = currentToken === TokenType.SOL && embeddedWalletBalance > 0.005;
+  // 🚀 UPDATED: Smart amount validation for both modes
+  const { amountValid, amountInRange, minBetAmount, maxBetAmount, relevantBalance } = useMemo(() => {
     const amountNum = parseFloat(amount);
-    const minBet = currentToken === TokenType.SOL ? 0.001 : 1;
+    const minBet = currentToken === TokenType.SOL ? 0.005 : 1;
     const maxBet = currentToken === TokenType.SOL ? 10.0 : 10000;
+    const minTransfer = 0.05;
+    const maxTransfer = embeddedWalletBalance;
+    
+    // Use appropriate balance and limits based on mode
+    const balance = isTransferMode ? embeddedWalletBalance : activeBalance;
+    const minAmount = isTransferMode ? minTransfer : minBet;
+    const maxAmount = isTransferMode ? maxTransfer : maxBet;
     
     return {
-      amountValid: !isNaN(amountNum) && amountNum > 0 && amountNum <= activeBalance,
-      amountInRange: amountNum >= minBet && amountNum <= maxBet,
-      minBetAmount: minBet,
-      maxBetAmount: maxBet
+      amountValid: !isNaN(amountNum) && amountNum > 0 && amountNum <= balance,
+      amountInRange: amountNum >= minAmount && amountNum <= maxAmount,
+      minBetAmount: isTransferMode ? minTransfer : minBet,
+      maxBetAmount: isTransferMode ? maxTransfer : maxBet,
+      relevantBalance: balance
     };
-  }, [amount, activeBalance, currentToken]);
+  }, [amount, activeBalance, embeddedWalletBalance, currentToken, isTransferMode]);
+  
+  // 🚀 NEW: Smart quick amounts based on mode
+  const currentQuickAmounts = useMemo(() => {
+    return isTransferMode ? quickTransferAmounts : quickAmounts;
+  }, [isTransferMode, quickTransferAmounts, quickAmounts]);
+  
+  // 🚀 NEW: Smart amount handlers
+  const handleSmartQuickAmount = useCallback((amt: number) => {
+    if (isTransferMode) {
+      onQuickTransfer(amt);
+    } else {
+      onQuickAmount(amt);
+    }
+  }, [isTransferMode, onQuickTransfer, onQuickAmount]);
+  
+  const handleHalfAmount = useCallback(() => {
+    if (isTransferMode) {
+      onQuickTransfer(embeddedWalletBalance * 0.5);
+    } else {
+      onQuickAmount(activeBalance * 0.5);
+    }
+  }, [isTransferMode, embeddedWalletBalance, activeBalance, onQuickTransfer, onQuickAmount]);
+  
+  const handleMaxAmount = useCallback(() => {
+    if (isTransferMode) {
+      onQuickTransfer(Math.min(embeddedWalletBalance, 1.0));
+    } else {
+      onQuickAmount(Math.min(activeBalance, maxBetAmount));
+    }
+  }, [isTransferMode, embeddedWalletBalance, activeBalance, maxBetAmount, onQuickTransfer, onQuickAmount]);
 
-  // 🔧 FIXED: Memoize button states with debug logging
+  // 🔧 UPDATED: Button states with transfer mode awareness
   const buttonStates = useMemo(() => {
     const buyDisabled = isPlacingBet || !isWalletReady || !amountValid || !amountInRange || !canBet;
     const rugDisabled = isCashingOut || !isConnected || gameStatus !== 'active' || !activeBet;
@@ -689,84 +729,85 @@ const BettingSection: FC<{
   if (isMobile) {
     return (
       <div>
-        {/* Quick Transfer Section - Mobile */}
-        {currentToken === TokenType.SOL && embeddedWalletBalance > 0.001 && (
-          <div className="bg-purple-900 bg-opacity-30 border border-purple-800 rounded-lg p-2 mb-2">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <div className="text-purple-400 text-xs font-medium">💰 Quick Transfer</div>
-                <div className="text-xs text-gray-400">Move SOL to game balance</div>
-              </div>
-              <div className="text-xs text-purple-300">
-                {embeddedWalletBalance.toFixed(3)} SOL
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-4 gap-1">
-              {quickTransferAmounts.map((transferAmount) => (
-                <button
-                  key={transferAmount}
-                  onClick={() => onQuickTransfer(transferAmount)}
-                  disabled={transferAmount > embeddedWalletBalance}
-                  className={`px-2 py-1 text-xs rounded transition-colors ${
-                    transferAmount > embeddedWalletBalance
-                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                      : 'bg-purple-600 hover:bg-purple-700 text-white'
-                  }`}
-                >
-                  {transferAmount}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {!activeBet ? (
           <>
             <div className="mb-2">
+              {/* 🚀 NEW: Toggle Button (only when transfer option available) */}
+              {showTransferOption && (
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs text-gray-400">
+                    {isTransferMode 
+                      ? `💳 Transfer from Wallet (${embeddedWalletBalance.toFixed(3)} SOL)` 
+                      : `🎮 Bet with Game Balance (${activeBalance.toFixed(3)} ${currentToken})`
+                    }
+                  </div>
+                  <button
+                    onClick={() => setIsTransferMode(!isTransferMode)}
+                    className={`text-xs px-2 py-1 rounded transition-colors ${
+                      isTransferMode 
+                        ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                        : 'bg-green-600 hover:bg-green-700 text-white'
+                    }`}
+                  >
+                    {isTransferMode ? 'Bet' : 'Transfer'}
+                  </button>
+                </div>
+              )}
+
               <div className="flex gap-1 mb-1">
                 <input
                   type="text"
                   value={amount}
                   onChange={(e) => onAmountChange(e.target.value)}
                   className="flex-1 bg-gray-700 text-white px-2 py-1.5 rounded text-sm focus:outline-none"
-                  placeholder={`Min: ${minBetAmount}`}
-                  disabled={!canBet}
+                  placeholder={isTransferMode ? `Transfer SOL (Min: ${minBetAmount})` : `Bet ${currentToken} (Min: ${minBetAmount})`}
+                  disabled={isTransferMode ? false : !canBet}
                 />
                 <button
-                  onClick={() => onQuickAmount(activeBalance * 0.5)}
-                  className="bg-gray-600 text-gray-300 px-2 text-xs rounded hover:bg-gray-500"
-                  disabled={!canBet}
+                  onClick={handleHalfAmount}
+                  className={`px-2 text-xs rounded hover:bg-gray-500 ${
+                    isTransferMode 
+                      ? 'bg-purple-600 text-purple-100 hover:bg-purple-500' 
+                      : 'bg-gray-600 text-gray-300'
+                  }`}
+                  disabled={isTransferMode ? false : !canBet}
                 >
                   ½
                 </button>
                 <button
-                  onClick={() => onQuickAmount(Math.min(activeBalance, maxBetAmount))}
-                  className="bg-gray-600 text-gray-300 px-2 text-xs rounded hover:bg-gray-500"
-                  disabled={!canBet}
+                  onClick={handleMaxAmount}
+                  className={`px-2 text-xs rounded hover:bg-gray-500 ${
+                    isTransferMode 
+                      ? 'bg-purple-600 text-purple-100 hover:bg-purple-500' 
+                      : 'bg-gray-600 text-gray-300'
+                  }`}
+                  disabled={isTransferMode ? false : !canBet}
                 >
                   Max
                 </button>
               </div>
               
               <div className="grid grid-cols-4 gap-1">
-                {quickAmounts.map((amt) => (
+                {currentQuickAmounts.map((amt) => (
                   <button
                     key={amt}
-                    onClick={() => onQuickAmount(amt)}
+                    onClick={() => handleSmartQuickAmount(amt)}
                     className={`py-1 text-xs rounded transition-colors ${
                       parseFloat(amount) === amt
-                        ? 'bg-green-600 text-white'
-                        : 'bg-gray-700 text-gray-300'
+                        ? (isTransferMode ? 'bg-purple-600 text-white' : 'bg-green-600 text-white')
+                        : (isTransferMode ? 'bg-purple-700 text-purple-300 hover:bg-purple-600' : 'bg-gray-700 text-gray-300 hover:bg-gray-600')
                     }`}
-                    disabled={!canBet}
+                    disabled={isTransferMode 
+                      ? amt > embeddedWalletBalance 
+                      : !canBet || amt > activeBalance
+                    }
                   >
-                    {amt}
+                    {amt}{isTransferMode ? '' : ''}
                   </button>
                 ))}
               </div>
 
-              {betValidationError && (
+              {betValidationError && !isTransferMode && (
                 <div className="text-red-400 text-xs mt-1">{betValidationError}</div>
               )}
             </div>
@@ -842,50 +883,44 @@ const BettingSection: FC<{
     );
   }
 
+
   // Desktop layout
   return (
     <div className="border-t border-gray-800 pt-3">
       <h3 className="text-sm font-bold text-gray-400 mb-3">
-        {activeBet ? 'ACTIVE BET' : 'PLACE BUY'}
+        {activeBet ? 'ACTIVE BET' : (isTransferMode ? 'QUICK TRANSFER' : 'PLACE BUY')}
       </h3>
-      
-      {/* Quick Transfer Section - Desktop */}
-      {currentToken === TokenType.SOL && embeddedWalletBalance > 0.001 && (
-        <div className="bg-purple-900 bg-opacity-30 border border-purple-800 rounded-lg p-3 mb-3">
-          <div className="flex items-center justify-between mb-2">
-            <div>
-              <div className="text-purple-400 text-sm font-medium">💰 Quick Transfer</div>
-              <div className="text-xs text-gray-400">Move SOL from wallet to game balance</div>
-            </div>
-            <div className="text-xs text-purple-300">
-              Available: {embeddedWalletBalance.toFixed(3)} SOL
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-4 gap-1">
-            {quickTransferAmounts.map((transferAmount) => (
-              <button
-                key={transferAmount}
-                onClick={() => onQuickTransfer(transferAmount)}
-                disabled={transferAmount > embeddedWalletBalance}
-                className={`px-2 py-1 text-xs rounded transition-colors ${
-                  transferAmount > embeddedWalletBalance
-                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-purple-600 hover:bg-purple-700 text-white'
-                }`}
-              >
-                {transferAmount} SOL
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
       
       {!activeBet && (
         <>
           <div className="mb-3">
+            {/* 🚀 NEW: Toggle Button for Desktop (only when transfer option available) */}
+            {showTransferOption && (
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs text-gray-400">
+                  {isTransferMode 
+                    ? `💳 Transfer from Wallet - Available: ${embeddedWalletBalance.toFixed(3)} SOL` 
+                    : `🎮 Bet with Game Balance - Available: ${activeBalance.toFixed(3)} ${currentToken}`
+                  }
+                </div>
+                <button
+                  onClick={() => setIsTransferMode(!isTransferMode)}
+                  className={`text-sm px-3 py-1 rounded transition-colors ${
+                    isTransferMode 
+                      ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                      : 'bg-green-600 hover:bg-green-700 text-white'
+                  }`}
+                >
+                  {isTransferMode ? 'Switch to Betting' : 'Switch to Transfer'}
+                </button>
+              </div>
+            )}
+
             <label className="block text-gray-400 text-xs mb-1">
-              Buy Amount ({currentToken}) - Min: {minBetAmount}, Max: {maxBetAmount}
+              {isTransferMode 
+                ? `Transfer Amount (SOL) - Min: ${minBetAmount}, Max: ${maxBetAmount.toFixed(3)}`
+                : `Bet Amount (${currentToken}) - Min: ${minBetAmount}, Max: ${maxBetAmount}`
+              }
             </label>
             <div className="flex">
               <input
@@ -893,43 +928,54 @@ const BettingSection: FC<{
                 value={amount}
                 onChange={(e) => onAmountChange(e.target.value)}
                 className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-l-md focus:outline-none"
-                placeholder={`Min: ${minBetAmount}`}
-                disabled={!canBet}
+                placeholder={isTransferMode ? `Transfer SOL (Min: ${minBetAmount})` : `Bet ${currentToken} (Min: ${minBetAmount})`}
+                disabled={isTransferMode ? false : !canBet}
               />
               <button
-                onClick={() => onQuickAmount(activeBalance * 0.5)}
-                className="bg-gray-600 text-gray-300 px-2 text-xs border-l border-gray-900 hover:bg-gray-500"
-                disabled={!canBet}
+                onClick={handleHalfAmount}
+                className={`px-2 text-xs border-l border-gray-900 transition-colors ${
+                  isTransferMode 
+                    ? 'bg-purple-600 text-purple-100 hover:bg-purple-500' 
+                    : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+                }`}
+                disabled={isTransferMode ? false : !canBet}
               >
                 Half
               </button>
               <button
-                onClick={() => onQuickAmount(Math.min(activeBalance, maxBetAmount))}
-                className="bg-gray-600 text-gray-300 px-2 text-xs rounded-r-md hover:bg-gray-500"
-                disabled={!canBet}
+                onClick={handleMaxAmount}
+                className={`px-2 text-xs rounded-r-md transition-colors ${
+                  isTransferMode 
+                    ? 'bg-purple-600 text-purple-100 hover:bg-purple-500' 
+                    : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+                }`}
+                disabled={isTransferMode ? false : !canBet}
               >
                 Max
               </button>
             </div>
             
-            {betValidationError && (
+            {betValidationError && !isTransferMode && (
               <div className="text-red-400 text-xs mt-1">{betValidationError}</div>
             )}
           </div>
           
           <div className="grid grid-cols-4 gap-2 mb-3">
-            {quickAmounts.map((amt) => (
+            {currentQuickAmounts.map((amt) => (
               <button
                 key={amt}
-                onClick={() => onQuickAmount(amt)}
+                onClick={() => handleSmartQuickAmount(amt)}
                 className={`px-2 py-1 text-xs rounded transition-colors ${
                   parseFloat(amount) === amt
-                    ? 'bg-green-600 text-white'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    ? (isTransferMode ? 'bg-purple-600 text-white' : 'bg-green-600 text-white')
+                    : (isTransferMode ? 'bg-purple-700 text-purple-300 hover:bg-purple-600' : 'bg-gray-700 text-gray-300 hover:bg-gray-600')
                 }`}
-                disabled={!canBet}
+                disabled={isTransferMode 
+                  ? amt > embeddedWalletBalance 
+                  : !canBet || amt > activeBalance
+                }
               >
-                {amt.toString()} {currentToken}
+                {amt.toString()} {isTransferMode ? 'SOL' : currentToken}
               </button>
             ))}
           </div>

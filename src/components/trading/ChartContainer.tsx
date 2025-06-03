@@ -51,8 +51,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     custodialBalance, 
     loading: custodialBalanceLoading, 
     forceRefresh: refreshCustodialBalance,
-    error: balanceError,
-    lastUpdated: custodialLastUpdated
+    error: balanceError
   } = useSharedCustodialBalance(currentUser?.id || '');
   
   const { 
@@ -84,7 +83,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
 
   const isMobile = width ? width < 768 : false;
 
-  // 🚀 ENHANCED: Calculate potential payout with proper validation
+  // 🚀 ENHANCED: Calculate potential payout with proper validation - UPDATED LOGIC
   const calculatePotentialPayout = useCallback(() => {
     if (!activeBet || !currentGame) return 0;
     
@@ -92,16 +91,19 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     const entryMultiplier = activeBet.entryMultiplier || 1.0;
     const betAmount = activeBet.amount || 0;
     
-    // Use the higher of current multiplier or entry multiplier (can't cash out for less than entry)
-    const effectiveMultiplier = Math.max(currentMultiplier, entryMultiplier);
+    // Calculate potential payout based on current multiplier vs entry point
+    // If current multiplier is higher than entry, calculate gain
+    // If current multiplier is lower than entry, this represents potential loss/no gain
+    const multiplierDifference = currentMultiplier - entryMultiplier;
+    const effectiveMultiplier = entryMultiplier + Math.max(0, multiplierDifference);
     
-    // Apply 60% payout rate (same as TradingControls)
-    const potentialPayout = betAmount * effectiveMultiplier * 0.6;
+    // Apply 95% payout rate (5% house edge)
+    const potentialPayout = betAmount * effectiveMultiplier * 0.95;
     
     return potentialPayout;
   }, [activeBet, currentGame]);
 
-  // 🚀 ENHANCED: Calculate potential profit with color coding
+  // 🚀 ENHANCED: Calculate potential profit with color coding - UPDATED LOGIC
   const calculatePotentialProfit = useCallback(() => {
     if (!activeBet) return { profit: 0, isProfit: false };
     
@@ -433,19 +435,8 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         </div>
       </div>
 
-      {/* 🚀 ENHANCED: Balance Display - Perfectly synchronized with TradingControls */}
+      {/* 🚀 ENHANCED: Bet Display - Keep Bet, Entry, Payout, and Profit */}
       <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg flex flex-wrap justify-between border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>
-        <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
-          <span className="text-gray-400">Balance:</span>
-          <span className="text-green-400 ml-1 font-bold">
-            {custodialBalance.toFixed(3)} SOL
-            {custodialBalanceLoading && <span className="ml-1 text-xs animate-spin">↻</span>}
-          </span>
-          {balanceError && (
-            <span className="ml-1 text-red-400 text-xs" title={balanceError}>⚠</span>
-          )}
-        </div>
-        
         <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
           <span className="text-gray-400">Bet:</span>
           <span className={`ml-1 font-bold ${hasActiveGame ? 'text-blue-400' : 'text-gray-500'}`}>
@@ -467,7 +458,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
           </span>
         </div>
         
-        {/* 🚀 NEW: Show potential profit with color coding */}
+        {/* 🚀 Show potential profit with color coding */}
         {activeBet && (
           <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
             <span className="text-gray-400">Profit:</span>
@@ -494,11 +485,6 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
                 'text-green-400'
               }`}>
                 {isPlacingBet ? 'Placing...' : isCashingOut ? 'Cashing...' : 'Active Bet'}
-              </span>
-            )}
-            {custodialLastUpdated && (
-              <span className="text-xs text-gray-500">
-                Updated: {new Date(custodialLastUpdated).toLocaleTimeString()}
               </span>
             )}
           </div>
@@ -626,7 +612,6 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
             Connected: {isConnected ? 'YES' : 'NO'}
           </div>
           <div>
-            Last Updated: {custodialLastUpdated ? new Date(custodialLastUpdated).toLocaleTimeString() : 'Never'} | 
             Loading: {custodialBalanceLoading ? 'YES' : 'NO'} | 
             Error: {balanceError || 'None'}
           </div>

@@ -339,19 +339,11 @@ const BalanceDisplay: FC<{
           onClick={onToggleExpanded}
         >
           <div className="flex items-center space-x-2">
-            <div className={`w-5 h-5 rounded-full flex items-center justify-center ${
-              currentToken === TokenType.SOL ? 'bg-blue-500' : 'bg-green-500'
-            }`}>
-              <span className="text-white font-bold text-xs">
-                {currentToken === TokenType.SOL ? 'S' : 'R'}
-              </span>
-            </div>
+            <Wallet className="w-4 h-4 text-gray-400" />
             <div>
-              <div className="text-xs text-gray-400">Token Mode</div>
-              <div className={`text-sm font-bold ${
-                currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
-              }`}>
-                {currentToken}
+              <div className="text-xs text-gray-400">Balance</div>
+              <div className="text-sm font-bold text-white">
+                View Details
                 {isLoading && <span className="ml-1 text-xs text-gray-400">⟳</span>}
               </div>
             </div>
@@ -371,7 +363,6 @@ const BalanceDisplay: FC<{
                 <span className={`text-base ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
               </button>
             )}
-            <Wallet className="w-4 h-4 text-gray-400" />
             <span className="text-gray-400 text-sm">{showExpanded ? '▲' : '▼'}</span>
           </div>
         </div>
@@ -407,20 +398,6 @@ const BalanceDisplay: FC<{
               </div>
             )}
             
-            {/* Single toggle button */}
-            <div className="flex justify-center mb-2">
-              <button
-                onClick={handleTokenToggle}
-                className={`px-4 py-2 text-sm rounded-lg transition-all duration-200 ${
-                  currentToken === TokenType.SOL 
-                    ? 'bg-blue-600 hover:bg-blue-700 text-white' 
-                    : 'bg-green-600 hover:bg-green-700 text-white'
-                }`}
-              >
-                Switch to {currentToken === TokenType.SOL ? 'RUGGED' : 'SOL'}
-              </button>
-            </div>
-
             <div className="flex space-x-2">
               <button
                 onClick={onDepositClick}
@@ -436,6 +413,17 @@ const BalanceDisplay: FC<{
                 <ArrowUpRight className="w-3 h-3 mr-1" />
                 Withdraw
               </button>
+              {/* Single toggle button - smaller and positioned on the right */}
+              <button
+                onClick={handleTokenToggle}
+                className={`px-2 py-1 text-xs rounded transition-all duration-200 ${
+                  currentToken === TokenType.SOL 
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                    : 'bg-green-600 hover:bg-green-700 text-white'
+                }`}
+              >
+                {currentToken === TokenType.SOL ? 'RUG' : 'SOL'}
+              </button>
             </div>
           </div>
         )}
@@ -443,104 +431,94 @@ const BalanceDisplay: FC<{
     );
   }
 
- // Desktop version with improved layout
- return (
-  <div className="bg-gray-800 rounded-lg p-3 mb-3">
-    <div className="flex items-center justify-between mb-3">
-      <div className="flex items-center space-x-3">
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-          currentToken === TokenType.SOL ? 'bg-blue-500' : 'bg-green-500'
-        }`}>
-          <span className="text-white font-bold text-sm">
-            {currentToken === TokenType.SOL ? 'SOL' : 'RUG'}
-          </span>
-        </div>
-        
-        <div>
-          <div className="text-xs text-gray-400">Token Mode</div>
-          <div className={`text-lg font-bold ${
-            currentToken === TokenType.SOL ? 'text-blue-400' : 'text-green-400'
-          }`}>
-            {currentToken}
-            {isLoading && <span className="ml-2 text-xs text-gray-400">Updating...</span>}
+  // Desktop version with improved layout
+  return (
+    <div className="bg-gray-800 rounded-lg p-3 mb-3">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center space-x-3">
+          <Wallet className="w-6 h-6 text-gray-400" />
+          <div>
+            <div className="text-xs text-gray-400">Balance Overview</div>
+            <div className="text-lg font-bold text-white">
+              Account Balances
+              {isLoading && <span className="ml-2 text-xs text-gray-400">Updating...</span>}
+            </div>
           </div>
         </div>
-      </div>
-      
-      <div className="flex items-center space-x-3">
-        {/* 🚀 Improved refresh button for desktop */}
-        {onRefresh && (
-          <button
-            onClick={onRefresh}
-            className="text-gray-400 hover:text-blue-400 transition-colors p-2 rounded hover:bg-gray-700"
-            disabled={isLoading}
-            title="Refresh all balances"
-          >
-            <span className={`text-lg ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
-          </button>
-        )}
         
-        {/* Single toggle button */}
+        <div className="flex items-center space-x-3">
+          {/* 🚀 Improved refresh button for desktop */}
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              className="text-gray-400 hover:text-blue-400 transition-colors p-2 rounded hover:bg-gray-700"
+              disabled={isLoading}
+              title="Refresh all balances"
+            >
+              <span className={`text-lg ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Always show the main balance breakdown for SOL */}
+      {currentToken === TokenType.SOL && (
+        <div className="mb-3 p-2 bg-gray-900 rounded-md">
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <div className="text-green-400 text-xs mb-1">🎮 Game Balance</div>
+              <div className="text-white font-bold">{custodialBalance.toFixed(3)} SOL</div>
+              <div className="text-xs text-gray-500">For gaming</div>
+            </div>
+            <div>
+              <div className="text-blue-400 text-xs mb-1">💼 Wallet Balance</div>
+              <div className="text-white font-bold">{embeddedWalletBalance.toFixed(3)} SOL</div>
+              <div className="text-xs text-gray-500">For deposits</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Show RUGGED balance when in RUGGED mode */}
+      {currentToken === TokenType.RUGGED && (
+        <div className="mb-3 p-2 bg-gray-900 rounded-md">
+          <div className="text-center">
+            <div className="text-green-400 text-xs mb-1">💎 RUGGED Balance</div>
+            <div className="text-white font-bold text-2xl">{ruggedBalance.toFixed(0)} RUGGED</div>
+            <div className="text-xs text-gray-500">Gaming tokens</div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          onClick={onDepositClick}
+          className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 px-3 rounded text-sm flex items-center justify-center"
+        >
+          <ArrowDownLeft className="w-4 h-4 mr-2" />
+          Deposit
+        </button>
+        <button
+          onClick={onWithdrawClick}
+          className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm flex items-center justify-center"
+        >
+          <ArrowUpRight className="w-4 h-4 mr-2" />
+          Withdraw
+        </button>
+        {/* Single toggle button - smaller and positioned on the right */}
         <button
           onClick={handleTokenToggle}
-          className={`px-4 py-2 text-sm rounded-lg transition-all duration-200 ${
+          className={`px-3 py-2 text-sm rounded transition-all duration-200 ${
             currentToken === TokenType.SOL 
               ? 'bg-blue-600 hover:bg-blue-700 text-white' 
               : 'bg-green-600 hover:bg-green-700 text-white'
           }`}
         >
-          Switch to {currentToken === TokenType.SOL ? 'RUGGED' : 'SOL'}
+          {currentToken === TokenType.SOL ? 'RUG' : 'SOL'}
         </button>
       </div>
     </div>
-
-    {/* Always show the main balance breakdown for SOL */}
-    {currentToken === TokenType.SOL && (
-      <div className="mb-3 p-2 bg-gray-900 rounded-md">
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <div className="text-green-400 text-xs mb-1">🎮 Game Balance</div>
-            <div className="text-white font-bold">{custodialBalance.toFixed(3)} SOL</div>
-            <div className="text-xs text-gray-500">For gaming</div>
-          </div>
-          <div>
-            <div className="text-blue-400 text-xs mb-1">💼 Wallet Balance</div>
-            <div className="text-white font-bold">{embeddedWalletBalance.toFixed(3)} SOL</div>
-            <div className="text-xs text-gray-500">For deposits</div>
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* Show RUGGED balance when in RUGGED mode */}
-    {currentToken === TokenType.RUGGED && (
-      <div className="mb-3 p-2 bg-gray-900 rounded-md">
-        <div className="text-center">
-          <div className="text-green-400 text-xs mb-1">💎 RUGGED Balance</div>
-          <div className="text-white font-bold text-2xl">{ruggedBalance.toFixed(0)} RUGGED</div>
-          <div className="text-xs text-gray-500">Gaming tokens</div>
-        </div>
-      </div>
-    )}
-
-    <div className="grid grid-cols-2 gap-2">
-      <button
-        onClick={onDepositClick}
-        className="bg-green-600 hover:bg-green-700 text-white py-2 px-3 rounded text-sm flex items-center justify-center"
-      >
-        <ArrowDownLeft className="w-4 h-4 mr-2" />
-        Deposit
-      </button>
-      <button
-        onClick={onWithdrawClick}
-        className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-3 rounded text-sm flex items-center justify-center"
-      >
-        <ArrowUpRight className="w-4 h-4 mr-2" />
-        Withdraw
-      </button>
-    </div>
-  </div>
-);
+  );
 });
 // 🔧 OPTIMIZED: Memoized components to prevent unnecessary re-renders
 const CompactGameInfo: FC<{

@@ -3175,9 +3175,10 @@ async function placeBetFromCustodialBalance(
     }
 
     // Check if user already has active bet
-    if (currentGame.activeBets.has(userProfile.externalWalletAddress)) {
-        return { success: false, reason: 'Already has active bet' };
-    }
+    const existingBet = currentGame.activeBets.get(userProfile.externalWalletAddress);
+if (existingBet && !existingBet.cashedOut && existingBet.isValid) {
+    return { success: false, reason: 'Already has active bet' };
+}
 
     try {
         // INSTANT RUG PULL CHECK
@@ -3417,12 +3418,19 @@ async function cashOutToCustodialBalance(
         if (payoutWithHouseEdge > config.MAX_SINGLE_PAYOUT) {
             console.log(`🚨 CUSTODIAL CASHOUT RUG: ${payoutWithHouseEdge.toFixed(3)} SOL > ${config.MAX_SINGLE_PAYOUT} SOL limit`);
             
-            // Mark bet as cashed out with 0 payout
-            bet.cashedOut = true;
-            bet.cashoutMultiplier = cashoutMultiplier;
-            bet.cashoutAmount = 0;
-            bet.cashoutTime = Date.now();
-            bet.payoutProcessed = true;
+           
+            // Mark bet as cashed out
+bet.cashedOut = true;
+bet.cashoutMultiplier = cashoutMultiplier;
+bet.cashoutAmount = safePayout;
+bet.cashoutTime = Date.now();
+bet.payoutProcessed = true;
+
+currentGame.activeBets.delete(walletAddress);
+console.log(`🗑️ Removed cashed out bet for ${walletAddress} from active bets`);
+
+// Also update the player count
+currentGame.totalPlayers = currentGame.activeBets.size;
             
             // Crash the game
             setTimeout(() => {
@@ -4528,7 +4536,7 @@ async function cashOut(walletAddress: string): Promise<{ success: boolean; payou
             
             bet.cashedOut = true;
             bet.cashoutMultiplier = cashoutMultiplier;
-            bet.cashoutAmount = 0;
+            bet.cashoutAmount = safePayout;
             bet.cashoutTime = Date.now();
             bet.payoutProcessed = false;
             

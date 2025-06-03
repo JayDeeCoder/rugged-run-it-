@@ -21,6 +21,9 @@ import {
   ActiveBet 
 } from '../../hooks/useSharedState';
 
+// 🎭 NEW: Import artificial player count hook
+import { useArtificialPlayerCount } from '../../hooks/useArtificialPlayerCount';
+
 interface ChartContainerProps {
   useMobileHeight?: boolean;
 }
@@ -80,6 +83,14 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
 
   // 🚀 ENHANCED: Use shared game state for perfectly synchronized calculations
   const gameDisplayInfo = useSharedGameState(currentGame, currentUser?.id || '');
+
+  // 🎭 NEW: Artificial player count for FOMO effect
+  const { getTotalPlayerCount, triggerCountChange } = useArtificialPlayerCount({
+    minCount: 5,
+    maxCount: 25,
+    changeIntervalMs: 12000, // Change every 12 seconds
+    enabled: true
+  });
 
   const isMobile = width ? width < 768 : false;
 
@@ -171,6 +182,9 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       console.log(`🎮 New game #${currentGame.gameNumber} - Resetting shared bet state`);
       resetBetState();
       setLastGameNumber(currentGame.gameNumber);
+      
+      // 🎭 Trigger artificial player count change on new game
+      triggerCountChange();
     }
 
     // Handle game crash
@@ -193,8 +207,11 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         // Clear the shared bet state
         clearActiveBet();
       }
+
+      // 🎭 Trigger artificial player count change on crash (simulate players leaving/joining)
+      setTimeout(() => triggerCountChange(), 2000);
     }
-  }, [currentGame, lastGameNumber, activeBet, resetBetState, setLastGameNumber, clearActiveBet]);
+  }, [currentGame, lastGameNumber, activeBet, resetBetState, setLastGameNumber, clearActiveBet, triggerCountChange]);
 
   const handleEffectComplete = () => {
     if (isMountedRef.current) {
@@ -473,7 +490,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       {currentGame && (
         <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs'} text-gray-400`}>
           <div className="flex justify-between items-center flex-wrap">
-            <span>RUGGERS: {currentGame.totalPlayers || 0}</span>
+            <span>RUGGERS: {getTotalPlayerCount(currentGame.totalPlayers || 0)}</span>
             <span>Total Liq: {(currentGame.totalBets || 0).toFixed(3)} SOL</span>
             {showCountdown && (
               <span className="text-blue-400 animate-pulse">Next: {countdownSeconds}s</span>

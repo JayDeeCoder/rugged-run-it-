@@ -1130,7 +1130,7 @@ const TradingControls: FC<TradingControlsProps> = ({
   const { getTotalPlayerCount } = useArtificialPlayerCount({
     minCount: 5,
     maxCount: 25,
-    changeIntervalMs: 12000, // Same interval as ChartContainer for sync
+    changeIntervalMs: 15000, // Same interval as ChartContainer for sync
     enabled: true
   });
   // Use shared state values instead of local state

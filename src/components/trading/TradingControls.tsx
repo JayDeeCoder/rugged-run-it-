@@ -288,6 +288,7 @@ const useRuggedBalance = (walletAddress: string) => {
 };
 
 // 🚀 ENHANCED: BalanceDisplay component with manual refresh capability
+// 🚀 ENHANCED: BalanceDisplay component with toggle button and improved refresh
 const BalanceDisplay: FC<{
   currentToken: TokenType;
   custodialBalance: number;
@@ -344,7 +345,6 @@ const BalanceDisplay: FC<{
               <div className="text-xs text-gray-400">Balance</div>
               <div className="text-sm font-bold text-white">
                 View Details
-                {isLoading && <span className="ml-1 text-xs text-gray-400">⟳</span>}
               </div>
             </div>
           </div>
@@ -434,31 +434,18 @@ const BalanceDisplay: FC<{
   // Desktop version with improved layout
   return (
     <div className="bg-gray-800 rounded-lg p-3 mb-3">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center space-x-3">
-          <Wallet className="w-6 h-6 text-gray-400" />
-          <div>
-            <div className="text-xs text-gray-400">Balance Overview</div>
-            <div className="text-lg font-bold text-white">
-              Account Balances
-              {isLoading && <span className="ml-2 text-xs text-gray-400">Updating...</span>}
-            </div>
-          </div>
-        </div>
-        
-        <div className="flex items-center space-x-3">
-          {/* 🚀 Improved refresh button for desktop */}
-          {onRefresh && (
-            <button
-              onClick={onRefresh}
-              className="text-gray-400 hover:text-blue-400 transition-colors p-2 rounded hover:bg-gray-700"
-              disabled={isLoading}
-              title="Refresh all balances"
-            >
-              <span className={`text-lg ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
-            </button>
-          )}
-        </div>
+      <div className="flex justify-end mb-3">
+        {/* 🚀 Improved refresh button for desktop */}
+        {onRefresh && (
+          <button
+            onClick={onRefresh}
+            className="text-gray-400 hover:text-blue-400 transition-colors p-2 rounded hover:bg-gray-700"
+            disabled={isLoading}
+            title="Refresh all balances"
+          >
+            <span className={`text-lg ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
+          </button>
+        )}
       </div>
 
       {/* Always show the main balance breakdown for SOL */}

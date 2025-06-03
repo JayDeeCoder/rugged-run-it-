@@ -635,6 +635,8 @@ const BettingSection: FC<{
   currentMultiplier: number;
   isMobile: boolean;
   betValidationError?: string;
+  embeddedWalletBalance: number;
+  onQuickTransfer: (amount: number) => void;
 }> = React.memo(({
   activeBet,
   amount,
@@ -654,8 +656,13 @@ const BettingSection: FC<{
   isConnected,
   currentMultiplier,
   isMobile,
-  betValidationError
+  betValidationError,
+  embeddedWalletBalance,
+  onQuickTransfer
 }) => {
+
+  // Quick transfer amounts
+  const quickTransferAmounts = [0.001, 0.01, 0.05, 0.1];
 
   // 🔧 FIXED: Memoize complex calculations
   const { amountValid, amountInRange, minBetAmount, maxBetAmount } = useMemo(() => {
@@ -682,6 +689,38 @@ const BettingSection: FC<{
   if (isMobile) {
     return (
       <div>
+        {/* Quick Transfer Section - Mobile */}
+        {currentToken === TokenType.SOL && embeddedWalletBalance > 0.001 && (
+          <div className="bg-purple-900 bg-opacity-30 border border-purple-800 rounded-lg p-2 mb-2">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <div className="text-purple-400 text-xs font-medium">💰 Quick Transfer</div>
+                <div className="text-xs text-gray-400">Move SOL to game balance</div>
+              </div>
+              <div className="text-xs text-purple-300">
+                {embeddedWalletBalance.toFixed(3)} SOL
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-4 gap-1">
+              {quickTransferAmounts.map((transferAmount) => (
+                <button
+                  key={transferAmount}
+                  onClick={() => onQuickTransfer(transferAmount)}
+                  disabled={transferAmount > embeddedWalletBalance}
+                  className={`px-2 py-1 text-xs rounded transition-colors ${
+                    transferAmount > embeddedWalletBalance
+                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      : 'bg-purple-600 hover:bg-purple-700 text-white'
+                  }`}
+                >
+                  {transferAmount}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {!activeBet ? (
           <>
             <div className="mb-2">
@@ -803,12 +842,44 @@ const BettingSection: FC<{
     );
   }
 
-  // Desktop layout (similar optimizations applied)
+  // Desktop layout
   return (
     <div className="border-t border-gray-800 pt-3">
       <h3 className="text-sm font-bold text-gray-400 mb-3">
         {activeBet ? 'ACTIVE BET' : 'PLACE BUY'}
       </h3>
+      
+      {/* Quick Transfer Section - Desktop */}
+      {currentToken === TokenType.SOL && embeddedWalletBalance > 0.001 && (
+        <div className="bg-purple-900 bg-opacity-30 border border-purple-800 rounded-lg p-3 mb-3">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <div className="text-purple-400 text-sm font-medium">💰 Quick Transfer</div>
+              <div className="text-xs text-gray-400">Move SOL from wallet to game balance</div>
+            </div>
+            <div className="text-xs text-purple-300">
+              Available: {embeddedWalletBalance.toFixed(3)} SOL
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-4 gap-1">
+            {quickTransferAmounts.map((transferAmount) => (
+              <button
+                key={transferAmount}
+                onClick={() => onQuickTransfer(transferAmount)}
+                disabled={transferAmount > embeddedWalletBalance}
+                className={`px-2 py-1 text-xs rounded transition-colors ${
+                  transferAmount > embeddedWalletBalance
+                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                    : 'bg-purple-600 hover:bg-purple-700 text-white'
+                }`}
+              >
+                {transferAmount} SOL
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       
       {!activeBet && (
         <>
@@ -2143,27 +2214,30 @@ const TradingControls: FC<TradingControlsProps> = ({
         )}
 
         <div className="bg-gray-900 bg-opacity-50 rounded-lg p-3 mb-3">
-          <BettingSection
-            activeBet={activeBet}
-            amount={amount}
-            onAmountChange={handleAmountChange}
-            onQuickAmount={setQuickAmount}
-            onPlaceBet={handleBuy}
-            onCashout={handleCashout}
-            quickAmounts={quickAmounts}
-            currentToken={currentToken}
-            activeBalance={activeBalance}
-            isPlacingBet={isPlacingBet}
-            isCashingOut={isCashingOut}
-            isWalletReady={isWalletReady}
-            canBet={effectiveCanBet}
-            isWaitingPeriod={isWaitingPeriod}
-            gameStatus={gameState.gameStatus}
-            isConnected={isConnected}
-            currentMultiplier={gameState.activeCurrentMultiplier}
-            isMobile={isMobile}
-            betValidationError={betValidationError}
-          />
+        <BettingSection
+  activeBet={activeBet}
+  amount={amount}
+  onAmountChange={handleAmountChange}
+  onQuickAmount={setQuickAmount}
+  onPlaceBet={handleBuy}
+  onCashout={handleCashout}
+  quickAmounts={quickAmounts}
+  currentToken={currentToken}
+  activeBalance={activeBalance}
+  isPlacingBet={isPlacingBet}
+  isCashingOut={isCashingOut}
+  isWalletReady={isWalletReady}
+  canBet={effectiveCanBet}
+  isWaitingPeriod={isWaitingPeriod}
+  gameStatus={gameState.gameStatus}
+  isConnected={isConnected}
+  currentMultiplier={gameState.activeCurrentMultiplier}
+  isMobile={isMobile}
+  betValidationError={betValidationError}
+  // Add these missing props:
+  embeddedWalletBalance={embeddedWalletBalance}
+  onQuickTransfer={handleQuickTransfer}
+/>
         </div>
 
         <BalanceDisplay
@@ -2181,39 +2255,6 @@ const TradingControls: FC<TradingControlsProps> = ({
           isLoading={custodialBalanceLoading || embeddedWalletLoading || ruggedBalanceLoading}
           onRefresh={refreshAllBalances}
         />
-
-        {/* Transfer Help Section - Shows when user might have transfer issues */}
-        {currentToken === TokenType.SOL && (
-          <div className="bg-yellow-900 bg-opacity-30 border border-yellow-800 rounded-lg p-3 mb-3">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <div className="text-yellow-400 text-sm font-medium">🔄 Balance Issues?</div>
-                <div className="text-xs text-gray-400">If your transfer isn't showing, try these options</div>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={refreshAllBalances}
-                className="px-3 py-2 text-sm rounded transition-colors bg-yellow-600 hover:bg-yellow-700 text-white flex items-center justify-center"
-              >
-                <span className="mr-1">🔄</span>
-                Refresh Balance
-              </button>
-              <button
-                onClick={handleEmergencyBalanceSync}
-                className="px-3 py-2 text-sm rounded transition-colors bg-red-600 hover:bg-red-700 text-white flex items-center justify-center"
-              >
-                <span className="mr-1">🚨</span>
-                Emergency
-              </button>
-            </div>
-            
-            <div className="text-xs text-gray-400 mt-2 text-center">
-              Last updated: {custodialLastUpdated ? new Date(custodialLastUpdated).toLocaleTimeString() : 'Never'}
-            </div>
-          </div>
-        )}
 
         {/* Quick Transfer Section */}
         {currentToken === TokenType.SOL && embeddedWalletBalance > 0.001 && (
@@ -2391,27 +2432,30 @@ const TradingControls: FC<TradingControlsProps> = ({
         </div>
       )}
 
-      <BettingSection
-        activeBet={activeBet}
-        amount={amount}
-        onAmountChange={handleAmountChange}
-        onQuickAmount={setQuickAmount}
-        onPlaceBet={handleBuy}
-        onCashout={handleCashout}
-        quickAmounts={quickAmounts}
-        currentToken={currentToken}
-        activeBalance={activeBalance}
-        isPlacingBet={isPlacingBet}
-        isCashingOut={isCashingOut}
-        isWalletReady={isWalletReady}
-        canBet={effectiveCanBet}
-        isWaitingPeriod={isWaitingPeriod}
-        gameStatus={gameState.gameStatus}
-        isConnected={isConnected}
-        currentMultiplier={gameState.activeCurrentMultiplier}
-        isMobile={isMobile}
-        betValidationError={betValidationError}
-      />
+<BettingSection
+  activeBet={activeBet}
+  amount={amount}
+  onAmountChange={handleAmountChange}
+  onQuickAmount={setQuickAmount}
+  onPlaceBet={handleBuy}
+  onCashout={handleCashout}
+  quickAmounts={quickAmounts}
+  currentToken={currentToken}
+  activeBalance={activeBalance}
+  isPlacingBet={isPlacingBet}
+  isCashingOut={isCashingOut}
+  isWalletReady={isWalletReady}
+  canBet={effectiveCanBet}
+  isWaitingPeriod={isWaitingPeriod}
+  gameStatus={gameState.gameStatus}
+  isConnected={isConnected}
+  currentMultiplier={gameState.activeCurrentMultiplier}
+  isMobile={isMobile}
+  betValidationError={betValidationError}
+  // Add these missing props:
+  embeddedWalletBalance={embeddedWalletBalance}
+  onQuickTransfer={handleQuickTransfer}
+/>
 
       {/* Status Messages */}
       {(serverError || !isWalletReady || !isConnected) && (

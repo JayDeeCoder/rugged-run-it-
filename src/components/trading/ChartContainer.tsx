@@ -579,12 +579,6 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
             <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Rounds</div>
             <div className={`font-bold text-blue-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameResults.length}</div>
           </div>
-          <div className="text-center">
-            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Balance</div>
-            <div className={`font-bold text-green-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>
-              {custodialBalance.toFixed(2)}
-            </div>
-          </div>
         </div>
       </div>
 

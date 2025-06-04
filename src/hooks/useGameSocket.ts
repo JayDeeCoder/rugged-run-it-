@@ -128,16 +128,6 @@ export function useGameSocket(walletAddress: string, userId?: string) {
       artificialPlayerCount: updateData.artificialPlayerCount !== undefined ? updateData.artificialPlayerCount : baseGame.artificialPlayerCount
     };
 
-    console.log(`🎭 Game state updated from ${source}:`, {
-      gameNumber: updatedGame.gameNumber,
-      multiplier: updatedGame.multiplier?.toFixed(2) + 'x',
-      realBets: updatedGame.totalBets?.toFixed(3) + ' SOL',
-      boostedBets: updatedGame.boostedTotalBets?.toFixed(3) + ' SOL',
-      realPlayers: updatedGame.totalPlayers,
-      boostedPlayers: updatedGame.boostedPlayerCount,
-      liquidityGrowth: updatedGame.liquidityBreakdown?.liquidityGrowth?.toFixed(3) + ' SOL'
-    });
-
     return updatedGame;
   }, []);
 
@@ -344,7 +334,6 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
     // 🚀 ENHANCED: Server sync with liquidity data
     newSocket.on('serverSync', (data: any) => {
-      console.log('🔄 Server sync with liquidity data:', data);
       
       if (data.serverTime) {
         syncServerTime(data.serverTime);

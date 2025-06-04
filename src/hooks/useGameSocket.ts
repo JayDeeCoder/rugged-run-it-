@@ -247,7 +247,6 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
     // 🚀 NEW: Dedicated artificial boost/liquidity update handler
     newSocket.on('artificialBoostUpdate', (data: any) => {
-      console.log('🎭 REAL-TIME: Artificial boost/liquidity update:', data);
       
       if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
         const updatedGame = updateGameWithLiquidityData(

@@ -271,7 +271,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
     // Handle waiting period start
     newSocket.on('gameWaiting', (data: any) => {
-      console.log('⏳ Game waiting period started with liquidity reset:', data);
+      
       
       if (data.serverTime) {
         syncServerTime(data.serverTime);
@@ -304,7 +304,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
     // 🚀 ENHANCED: Countdown handler with liquidity preservation
     newSocket.on('countdown', (data: any) => {
-      console.log('⏰ Countdown update with state:', data);
+      
       
       if (data.serverTime) {
         syncServerTime(data.serverTime);
@@ -435,7 +435,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
     // 🚀 ENHANCED: Game crashed with liquidity cleanup
     newSocket.on('gameCrashed', (data: any) => {
-      console.log('💥 Game crashed with liquidity cleanup:', data);
+      
       
       setCountdown(0);
       setIsWaitingPeriod(false);
@@ -558,7 +558,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     // 🚀 NEW: Handle liquidity updates on player cashouts
     newSocket.on('playerCashedOut', (data: any) => {
       if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
-        console.log('💸 REAL-TIME: Player cashed out, updating liquidity...', data);
+        
         
         // Liquidity should decrease when players cash out (server handles this)
         // Just trigger a refresh to get latest boosted values
@@ -628,7 +628,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
       
       socket.once('betResult', (data: BetResult) => {
         clearTimeout(timeout);
-        console.log('🎯 Bet result:', data);
+       
         
         if (data.success) {
           resolve(true);
@@ -675,7 +675,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
       
       socket.once('cashOutResult', (data: CashOutResult) => {
         clearTimeout(timeout);
-        console.log('💸 Cashout result:', data);
+       
         resolve({
           success: data.success,
           payout: data.payout,
@@ -706,7 +706,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
   
       socket.once('custodialBetResult', (data: any) => {
         clearTimeout(timeout);
-        console.log('🎯 Custodial bet result:', data);
+        
         
         if (data.success && data.gameState && gameStateRef.current) {
           const updatedGame = updateGameWithLiquidityData(
@@ -750,7 +750,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
       socket.once('custodialCashOutResult', (data: any) => {
         clearTimeout(timeout);
-        console.log('💸 Custodial cashout result:', data);
+       
         
         resolve({
           success: data.success,
@@ -778,7 +778,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
       socket.once('custodialBalanceResponse', (data: any) => {
         clearTimeout(timeout);
-        console.log('📊 Custodial balance received:', data);
+        
         
         if (data.success) {
           resolve(data.custodialBalance);

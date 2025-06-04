@@ -2059,7 +2059,7 @@ const TradingControls: FC<TradingControlsProps> = ({
       };
 
       const handleGameEnded = (data: any) => {
-        console.log(`🏁 REAL-TIME: Enhanced game ended`, data);
+      
         
         if (activeBet) {
           console.log('🗑️ REAL-TIME: Clearing active bet - game ended, ready for new round');

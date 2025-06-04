@@ -53,7 +53,7 @@ export const useSharedCustodialBalance = (userId: string) => {
       
       if (data.custodialBalance !== undefined) {
         const newBalance = parseFloat(data.custodialBalance) || 0;
-        console.log(`💰 Custodial balance updated: ${newBalance.toFixed(6)} SOL`);
+        console.log(`💰 New Custodial balance updated: ${newBalance.toFixed(3)} SOL`);
         
         setState(prev => ({
           ...prev,

@@ -2068,7 +2068,7 @@ const TradingControls: FC<TradingControlsProps> = ({
       };
 
       const handleGameWaiting = (data: any) => {
-        console.log(`⏳ REAL-TIME: Enhanced new game waiting period started`, data);
+
         
         if (activeBet) {
           console.log('🗑️ REAL-TIME: Clearing stuck active bet - new game starting');

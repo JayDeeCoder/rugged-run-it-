@@ -564,28 +564,22 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       </div>
 
       {/* 🚀 ENHANCED: Game Statistics with better formatting */}
-      <div className={`mt-4 bg-[#0d0d0f] p-3 rounded-lg border border-gray-800 ${isMobile ? 'p-2' : 'p-3'}`}>
-        <div className="grid grid-cols-4 gap-4">
-          <div className="text-center">
-            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Average</div>
-            <div className={`font-bold text-green-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.average}x</div>
-          </div>
-          <div className="text-center">
-            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Best</div>
-            <div className={`font-bold text-yellow-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.highest}x</div>
-          </div>
-          <div className="text-center">
-            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Rounds</div>
-            <div className={`font-bold text-blue-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameResults.length}</div>
-          </div>
-          <div className="text-center">
-            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Balance</div>
-            <div className={`font-bold text-green-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>
-              {custodialBalance.toFixed(2)}
-            </div>
-          </div>
-        </div>
-      </div>
+<div className={`mt-4 bg-[#0d0d0f] p-3 rounded-lg border border-gray-800 ${isMobile ? 'p-2' : 'p-3'}`}>
+  <div className="grid grid-cols-3 gap-4">
+    <div className="text-center">
+      <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Average</div>
+      <div className={`font-bold text-green-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.average}x</div>
+    </div>
+    <div className="text-center">
+      <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Best</div>
+      <div className={`font-bold text-yellow-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.highest}x</div>
+    </div>
+    <div className="text-center">
+      <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Rounds</div>
+      <div className={`font-bold text-blue-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameResults.length}</div>
+    </div>
+  </div>
+</div>
 
       {/* 🚀 ENHANCED: Debug information in development with detailed shared state */}
       {process.env.NODE_ENV === 'development' && (

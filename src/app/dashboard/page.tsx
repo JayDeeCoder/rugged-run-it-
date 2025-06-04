@@ -1005,7 +1005,7 @@ const Dashboard: FC = () => {
                 href="/leaderboard" 
                 className="block w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors text-center"
               >
-                View Leaderboard
+                View Top Rugger Board
               </Link>
             </div>
           </div>
@@ -1016,7 +1016,7 @@ const Dashboard: FC = () => {
               {isValidWallet ? (
                 <p>No recent activity</p>
               ) : (
-                <p>Connect wallet to view activity</p>
+                <p>Login to view wallet activity</p>
               )}
             </div>
           </div>

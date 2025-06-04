@@ -90,9 +90,17 @@ const useWalletBalance = (walletAddress: string) => {
 
   const forceRefresh = useCallback(async () => {
     if (!walletAddress) return;
+    
+    // 🔧 FIXED: Add debouncing to prevent rapid refreshes
+    const now = Date.now();
+    if (now - lastUpdated < 5000) { // Prevent refresh if less than 5 seconds since last update
+      console.log('⚠️ WithdrawModal: Embedded refresh blocked - too frequent');
+      return;
+    }
+    
     console.log(`🔄 Force refreshing wallet balance for: ${walletAddress}`);
     await updateBalance();
-  }, [walletAddress, updateBalance]);
+  }, [walletAddress, updateBalance, lastUpdated]);
 
   // EXACT polling setup from TradingControls  
   useEffect(() => {
@@ -120,7 +128,7 @@ const useWalletBalance = (walletAddress: string) => {
     }
   }, [walletAddress, updateBalance]);
 
-  // EXACT socket listeners from TradingControls
+  // EXACT socket listeners from TradingControls (with reduced frequency)
   useEffect(() => {
     if (!walletAddress || socketListenersRef.current) return;
     
@@ -137,10 +145,11 @@ const useWalletBalance = (walletAddress: string) => {
         }
       };
 
+      // 🔧 FIXED: Reduced frequency - only refresh every 10 seconds after transaction
       const handleTransactionConfirmed = (data: any) => {
         if (data.walletAddress === walletAddress) {
-          console.log(`🔗 REAL-TIME: Transaction confirmed for ${walletAddress}, refreshing balance...`);
-          setTimeout(forceRefresh, 3000);
+          console.log(`🔗 REAL-TIME: Transaction confirmed for ${walletAddress}, will refresh in 10s`);
+          setTimeout(forceRefresh, 10000); // Increased from 3000 to 10000
         }
       };
 
@@ -202,6 +211,9 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   const [successMessage, setSuccessMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [addressError, setAddressError] = useState<string | null>(null);
+  
+  // 🚀 FIXED: Add missing state variable for refresh debouncing
+  const [lastRefreshTime, setLastRefreshTime] = useState<number>(0);
   
   const modalRef = useRef<HTMLDivElement>(null);
   
@@ -537,98 +549,77 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
           
           <div className="p-3">
             {success ? (
-              <div className="text-center py-6">
-                <div className="flex justify-center mb-3">
-                  <div className="w-12 h-12 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
-                    <Check size={24} className="text-green-500" />
+              <div className="text-center py-4">
+                <div className="flex justify-center mb-2">
+                  <div className="w-8 h-8 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
+                    <Check size={16} className="text-green-500" />
                   </div>
                 </div>
-                <h3 className="text-lg font-bold text-white mb-2">Success!</h3>
-                <p className="text-gray-400 mb-4 text-sm">{successMessage}</p>
+                <h3 className="text-sm font-bold text-white mb-1">Success!</h3>
+                <p className="text-gray-400 mb-3 text-xs">{successMessage}</p>
                 <button
                   onClick={onClose}
-                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors w-full text-sm"
+                  className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded text-xs w-full"
                 >
                   Done
                 </button>
               </div>
             ) : (
               <>
-                {/* Compact Balance Display */}
-                <div className="bg-gradient-to-r from-purple-900 to-blue-900 bg-opacity-50 rounded-lg p-3 mb-3">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-gray-300 text-sm">Balances</span>
+                {/* Ultra Compact Balance Display */}
+                <div className="bg-gradient-to-r from-purple-900 to-blue-900 bg-opacity-50 rounded p-2 mb-2">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-gray-300 text-xs">Balances</span>
                     <button 
                       onClick={refreshAllBalances}
-                      disabled={custodialLoading || embeddedLoading}
-                      className="text-blue-400 hover:text-blue-300 transition-colors flex items-center space-x-1 text-xs"
+                      disabled={custodialLoading || embeddedLoading || (Date.now() - lastRefreshTime < 3000)}
+                      className="text-blue-400 hover:text-blue-300 transition-colors text-xs"
                     >
-                      <RefreshCw size={12} className={(custodialLoading || embeddedLoading) ? 'animate-spin' : ''} />
-                      <span>Refresh</span>
+                      <RefreshCw size={10} className={(custodialLoading || embeddedLoading) ? 'animate-spin' : ''} />
                     </button>
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-green-900 bg-opacity-30 rounded-lg p-2">
-                      <div className="text-green-400 text-xs mb-1">🎮 Game</div>
-                      <div className="text-white font-bold">
-                        {custodialLoading ? (
-                          <span className="flex items-center">
-                            <Loader size={10} className="animate-spin mr-1" />
-                            ...
-                          </span>
-                        ) : (
-                          `${custodialBalance.toFixed(3)} SOL`
-                        )}
+                  <div className="grid grid-cols-2 gap-1 text-xs">
+                    <div className="bg-green-900 bg-opacity-30 rounded p-2">
+                      <div className="text-green-400 text-xs">🎮</div>
+                      <div className="text-white font-bold text-xs">
+                        {custodialLoading ? '...' : `${custodialBalance.toFixed(2)}`}
                       </div>
                     </div>
                     
-                    <div className="bg-purple-900 bg-opacity-30 rounded-lg p-2">
-                      <div className="text-purple-400 text-xs mb-1">💼 Wallet</div>
-                      <div className="text-white font-bold">
-                        {embeddedLoading ? (
-                          <span className="flex items-center">
-                            <Loader size={10} className="animate-spin mr-1" />
-                            ...
-                          </span>
-                        ) : (
-                          `${embeddedBalance.toFixed(3)} SOL`
-                        )}
+                    <div className="bg-purple-900 bg-opacity-30 rounded p-2">
+                      <div className="text-purple-400 text-xs">💼</div>
+                      <div className="text-white font-bold text-xs">
+                        {embeddedLoading ? '...' : `${embeddedBalance.toFixed(2)}`}
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Compact Flow Indicator */}
-                <div className="bg-blue-900 bg-opacity-20 border border-blue-700 rounded-lg p-2 mb-3">
+                {/* Ultra Compact Flow */}
+                <div className="bg-blue-900 bg-opacity-20 border border-blue-700 rounded p-2 mb-2">
                   <div className="flex items-center justify-between text-xs">
                     <div className={`flex items-center ${activeStep === 'transfer' ? 'text-blue-300' : 'text-gray-500'}`}>
-                      <span className="mr-1">🎮</span>
-                      Game
+                      <span>🎮</span>
                     </div>
-                    <ChevronRight size={12} className="text-gray-400" />
+                    <ChevronRight size={10} className="text-gray-400" />
                     <div className={`flex items-center ${activeStep === 'withdraw' || embeddedBalance > 0.001 ? 'text-purple-300' : 'text-gray-500'}`}>
-                      <span className="mr-1">💼</span>
-                      Wallet
+                      <span>💼</span>
                     </div>
-                    <ChevronRight size={12} className="text-gray-400" />
+                    <ChevronRight size={10} className="text-gray-400" />
                     <div className="flex items-center text-orange-300">
-                      <span className="mr-1">🌐</span>
-                      External
+                      <span>🌐</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Compact Step Content */}
+                {/* Ultra Compact Step Content */}
                 {activeStep === 'transfer' ? (
-                  <div className="space-y-3">
-                    <div className="bg-gradient-to-r from-green-900 to-purple-900 bg-opacity-30 border border-green-700 text-green-300 p-3 rounded-lg">
-                      <div className="flex items-center mb-1">
-                        <Zap size={16} className="mr-2 text-yellow-400" />
-                        <div className="font-medium text-sm">Step 1: Move to Wallet</div>
-                      </div>
-                      <div className="text-xs opacity-90">
-                        Transfer SOL from game balance to wallet.
+                  <div className="space-y-2">
+                    <div className="bg-gradient-to-r from-green-900 to-purple-900 bg-opacity-30 border border-green-700 text-green-300 p-2 rounded">
+                      <div className="flex items-center">
+                        <Zap size={12} className="mr-1 text-yellow-400" />
+                        <div className="font-medium text-xs">Move to Wallet</div>
                       </div>
                     </div>
 
@@ -639,17 +630,17 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                           value={transferAmount}
                           onChange={handleTransferAmountChange}
                           placeholder="0.000"
-                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 pr-12 text-white placeholder-gray-500 focus:border-green-500 focus:outline-none text-sm"
+                          className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-2 pr-10 text-white placeholder-gray-500 focus:border-green-500 focus:outline-none text-xs"
                         />
                         <button
                           onClick={setMaxTransferAmount}
-                          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-green-400 text-xs hover:text-green-300 font-medium"
+                          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-green-400 text-xs hover:text-green-300"
                         >
                           MAX
                         </button>
                       </div>
                       <div className="text-xs text-gray-500 mt-1">
-                        Available: {custodialBalance.toFixed(3)} SOL
+                        {custodialBalance.toFixed(2)} SOL
                       </div>
                     </div>
 
@@ -659,7 +650,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                           key={amt}
                           onClick={() => setQuickTransferAmount(amt)}
                           disabled={amt > custodialBalance}
-                          className={`py-1 px-1 text-xs rounded transition-all font-medium ${
+                          className={`py-1 text-xs rounded transition-all ${
                             parseFloat(transferAmount) === amt
                               ? 'bg-gradient-to-r from-green-600 to-purple-600 text-white'
                               : amt > custodialBalance
@@ -675,17 +666,17 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                     <button
                       onClick={handleTransferToEmbedded}
                       disabled={isTransferring || !transferAmount || parseFloat(transferAmount) <= 0 || parseFloat(transferAmount) > custodialBalance}
-                      className="w-full bg-gradient-to-r from-green-600 to-purple-600 hover:from-green-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white py-3 px-3 rounded-lg transition-all flex items-center justify-center font-bold text-sm"
+                      className="w-full bg-gradient-to-r from-green-600 to-purple-600 hover:from-green-700 hover:to-purple-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white py-2 rounded transition-all flex items-center justify-center text-xs"
                     >
                       {isTransferring ? (
                         <>
-                          <Loader size={16} className="animate-spin mr-2" />
-                          <span>Transferring...</span>
+                          <Loader size={12} className="animate-spin mr-1" />
+                          <span>Moving...</span>
                         </>
                       ) : (
                         <>
-                          <ArrowLeftRight size={16} className="mr-2" />
-                          <span>Transfer {transferAmount || '0'} SOL</span>
+                          <ArrowLeftRight size={12} className="mr-1" />
+                          <span>Move {transferAmount || '0'}</span>
                         </>
                       )}
                     </button>
@@ -693,22 +684,19 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                     {embeddedBalance > 0.001 && (
                       <button
                         onClick={() => setActiveStep('withdraw')}
-                        className="w-full bg-gray-700 hover:bg-gray-600 text-white py-2 px-3 rounded-lg transition-all flex items-center justify-center font-medium text-sm"
+                        className="w-full bg-gray-700 hover:bg-gray-600 text-white py-2 rounded transition-all flex items-center justify-center text-xs"
                       >
-                        <span>Skip - Use Existing ({embeddedBalance.toFixed(3)} SOL)</span>
-                        <ChevronRight size={14} className="ml-1" />
+                        <span>Skip ({embeddedBalance.toFixed(2)})</span>
+                        <ChevronRight size={12} className="ml-1" />
                       </button>
                     )}
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    <div className="bg-gradient-to-r from-purple-900 to-orange-900 bg-opacity-30 border border-purple-700 text-purple-300 p-3 rounded-lg">
-                      <div className="flex items-center mb-1">
-                        <Send size={16} className="mr-2 text-orange-400" />
-                        <div className="font-medium text-sm">Step 2: Instant Withdraw</div>
-                      </div>
-                      <div className="text-xs opacity-90">
-                        Send SOL to any external wallet instantly.
+                  <div className="space-y-2">
+                    <div className="bg-gradient-to-r from-purple-900 to-orange-900 bg-opacity-30 border border-purple-700 text-purple-300 p-2 rounded">
+                      <div className="flex items-center">
+                        <Send size={12} className="mr-1 text-orange-400" />
+                        <div className="font-medium text-xs">Send Out</div>
                       </div>
                     </div>
 
@@ -719,17 +707,17 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                           value={withdrawAmount}
                           onChange={handleWithdrawAmountChange}
                           placeholder="0.000"
-                          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 pr-12 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none text-sm"
+                          className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-2 pr-10 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none text-xs"
                         />
                         <button
                           onClick={setMaxWithdrawAmount}
-                          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-purple-400 text-xs hover:text-purple-300 font-medium"
+                          className="absolute right-2 top-1/2 transform -translate-y-1/2 text-purple-400 text-xs hover:text-purple-300"
                         >
                           MAX
                         </button>
                       </div>
                       <div className="text-xs text-gray-500 mt-1">
-                        Available: {embeddedBalance.toFixed(3)} SOL
+                        {embeddedBalance.toFixed(2)} SOL
                       </div>
                     </div>
 
@@ -739,7 +727,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                           key={amt}
                           onClick={() => setQuickWithdrawAmount(amt)}
                           disabled={amt > embeddedBalance}
-                          className={`py-1 px-1 text-xs rounded transition-all font-medium ${
+                          className={`py-1 text-xs rounded transition-all ${
                             parseFloat(withdrawAmount) === amt
                               ? 'bg-gradient-to-r from-purple-600 to-orange-600 text-white'
                               : amt > embeddedBalance
@@ -762,13 +750,13 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                             validateAddress(e.target.value);
                           }
                         }}
-                        placeholder="Enter Solana wallet address"
-                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none text-sm"
+                        placeholder="Solana address"
+                        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-2 text-white placeholder-gray-500 focus:border-purple-500 focus:outline-none text-xs"
                       />
                       {addressError && (
                         <div className="text-red-400 text-xs mt-1 flex items-center">
-                          <AlertTriangle size={12} className="mr-1" />
-                          {addressError}
+                          <AlertTriangle size={10} className="mr-1" />
+                          Invalid address
                         </div>
                       )}
                     </div>
@@ -776,17 +764,17 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                     <button
                       onClick={handleEmbeddedWithdraw}
                       disabled={isWithdrawing || !withdrawAmount || parseFloat(withdrawAmount) <= 0 || parseFloat(withdrawAmount) > embeddedBalance || !destinationAddress || !!addressError}
-                      className="w-full bg-gradient-to-r from-purple-600 to-orange-600 hover:from-purple-700 hover:to-orange-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white py-3 px-3 rounded-lg transition-all flex items-center justify-center font-bold text-sm"
+                      className="w-full bg-gradient-to-r from-purple-600 to-orange-600 hover:from-purple-700 hover:to-orange-700 disabled:from-gray-600 disabled:to-gray-600 disabled:cursor-not-allowed text-white py-2 rounded transition-all flex items-center justify-center text-xs"
                     >
                       {isWithdrawing ? (
                         <>
-                          <Loader size={16} className="animate-spin mr-2" />
-                          <span>Withdrawing...</span>
+                          <Loader size={12} className="animate-spin mr-1" />
+                          <span>Sending...</span>
                         </>
                       ) : (
                         <>
-                          <Send size={16} className="mr-2" />
-                          <span>Withdraw {withdrawAmount || '0'} SOL</span>
+                          <Send size={12} className="mr-1" />
+                          <span>Send {withdrawAmount || '0'}</span>
                         </>
                       )}
                     </button>
@@ -794,19 +782,19 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                     <button
                       onClick={() => setActiveStep('transfer')}
                       disabled={isWithdrawing}
-                      className="w-full bg-gray-700 hover:bg-gray-600 text-white py-2 px-3 rounded-lg transition-all flex items-center justify-center font-medium text-sm"
+                      className="w-full bg-gray-700 hover:bg-gray-600 text-white py-2 rounded transition-all flex items-center justify-center text-xs"
                     >
-                      <ArrowLeftRight size={14} className="mr-1" />
+                      <ArrowLeftRight size={12} className="mr-1" />
                       Back
                     </button>
                   </div>
                 )}
                 
-                {/* Error Message */}
+                {/* Compact Error Message */}
                 {error && (
-                  <div className="bg-red-900 bg-opacity-30 border border-red-700 text-red-400 p-3 rounded-lg mt-3">
+                  <div className="bg-red-900 bg-opacity-30 border border-red-700 text-red-400 p-2 rounded mt-2">
                     <div className="flex items-center">
-                      <AlertTriangle size={14} className="mr-2 flex-shrink-0" />
+                      <AlertTriangle size={12} className="mr-1 flex-shrink-0" />
                       <span className="text-xs">{error}</span>
                     </div>
                   </div>

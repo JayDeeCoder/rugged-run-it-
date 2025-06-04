@@ -171,7 +171,7 @@ export default function Home() {
             {isDesktop && !isLeaderboardVisible && (
               <div className="text-center py-4 text-gray-400 transition-opacity duration-300 animate-bounce">
                 <div className="flex flex-col items-center">
-                  <span className="text-sm">Scroll down to see leaderboard</span>
+                  <span className="text-sm">Scroll Down To See TOP RUGGERS</span>
                   <span className="text-lg">▼</span>
                 </div>
               </div>

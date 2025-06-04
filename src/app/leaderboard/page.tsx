@@ -299,7 +299,7 @@ const LeaderboardPage: FC = () => {
           <div className="flex items-center">
             <Trophy className="text-yellow-400 mr-3" size={32} />
             <div>
-              <h1 className="text-3xl font-bold text-white">Leaderboard</h1>
+              <h1 className="text-3xl font-bold text-white">Top Ruggers</h1>
               <p className="text-gray-400">{getPeriodDisplayName(period)} Rankings</p>
             </div>
           </div>
@@ -370,7 +370,7 @@ const LeaderboardPage: FC = () => {
           {loading && (
             <div className="text-center py-12">
               <div className="animate-spin h-8 w-8 border-2 border-blue-400 border-t-transparent rounded-full mx-auto mb-4"></div>
-              <p className="text-gray-400">Loading leaderboard...</p>
+              <p className="text-gray-400">Loading RUGGER board...</p>
             </div>
           )}
           
@@ -393,7 +393,7 @@ const LeaderboardPage: FC = () => {
           {!loading && !error && leaderboardData.length === 0 && (
             <div className="text-center py-12">
               <Trophy className="text-gray-600 mx-auto mb-4" size={48} />
-              <p className="text-gray-400 mb-2">No leaderboard data available for this period.</p>
+              <p className="text-gray-400 mb-2">No RUGGER board data available for this period.</p>
               <p className="text-gray-500 text-sm">Players need at least 5 games to qualify.</p>
             </div>
           )}
@@ -401,7 +401,7 @@ const LeaderboardPage: FC = () => {
         
         {/* Rules */}
         <div className="bg-gray-900 rounded-lg p-6">
-          <h2 className="text-xl font-bold text-white mb-4">Leaderboard Rules</h2>
+          <h2 className="text-xl font-bold text-white mb-4">RUGGER Board Rules</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <ul className="list-disc list-inside text-gray-400 space-y-2">
               <li>Rankings based on profit percentage over selected timeframe</li>
@@ -409,7 +409,7 @@ const LeaderboardPage: FC = () => {
               <li>Profit percentage calculated as (Total Profit / Total Wagered) × 100</li>
             </ul>
             <ul className="list-disc list-inside text-gray-400 space-y-2">
-              <li>Leaderboard updates in real-time as games complete</li>
+              <li>Rugger board updates in real-time</li>
               <li>Rankings reset at the end of each period</li>
               <li>Top performers receive exclusive rewards and recognition</li>
             </ul>

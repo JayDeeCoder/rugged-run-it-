@@ -39,7 +39,7 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries: propEntries }) => {
         {/* Title and Live Indicator Row */}
         <div className="flex items-center justify-between">
           <h2 className="text-xl sm:text-2xl lg:text-3xl uppercase font-semibold text-white">
-            Leaderboard
+            RUGGER Board
           </h2>
           <div className='flex items-center'>
             <span className="h-2 w-2 bg-blue-500 rounded-full mr-2 animate-pulse"></span>
@@ -104,7 +104,7 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries: propEntries }) => {
       <div className="max-h-64 sm:max-h-80 overflow-y-auto scrollbar-hide">
         {loading ? (
           <div className="flex justify-center py-8">
-            <div className="animate-pulse text-gray-400 text-sm">Loading leaderboard...</div>
+            <div className="animate-pulse text-gray-400 text-sm">Loading Ruggerboard...</div>
           </div>
         ) : error ? (
           <div className="text-center py-8 text-red-500 text-sm">

@@ -248,7 +248,7 @@ const Navbar: FC = () => {
                 className="px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors block w-full" 
                 onClick={() => setShowUserMenu(false)}
               >
-                <Trophy size={14} className="mr-2" /> Leaderboard
+                <Trophy size={14} className="mr-2" /> Rugger Board
               </Link>
               <Link 
                 href="/settings" 
@@ -321,7 +321,7 @@ const Navbar: FC = () => {
                 Dashboard
               </Link>
               <Link href="/leaderboard" className="px-3 py-1 hover:text-gray-300 text-sm transition-colors">
-                Leaderboard
+                RUGGER Board
               </Link>
             </nav>
           </div>
@@ -413,7 +413,7 @@ const Navbar: FC = () => {
                 className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm transition-colors"
                 onClick={() => setShowMobileMenu(false)}
               >
-                Leaderboard
+                RUGGER Board
               </Link>
               {authenticated && (
                 <Link 

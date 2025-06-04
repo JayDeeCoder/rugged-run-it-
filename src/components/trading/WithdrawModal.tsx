@@ -163,10 +163,8 @@ const useEmbeddedWalletBalance = (walletAddress: string) => {
       // Transaction confirmed for this wallet
       const handleTransactionConfirmed = (data: any) => {
         if (data.walletAddress === walletAddress) {
-          console.log(`🔗 WithdrawModal REAL-TIME: Transaction confirmed for ${walletAddress}, refreshing balance...`);
-          
-          // Force refresh after confirmation with delay for blockchain settlement
-          setTimeout(forceRefresh, 3000);
+          console.log(`🔗 WithdrawModal REAL-TIME: Transaction confirmed for ${walletAddress}, will refresh on next 30s cycle`);
+          // Don't force immediate refresh - let the 30s interval handle it
         }
       };
 
@@ -238,9 +236,9 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
   
   const modalRef = useRef<HTMLDivElement>(null);
   
-  // Enhanced refresh function
+  // Enhanced refresh function (MANUAL ONLY - for refresh button)
   const refreshAllBalances = useCallback(() => {
-    console.log('🔄 WithdrawModal: Refreshing all balances...');
+    console.log('🔄 WithdrawModal: MANUAL refresh triggered by user');
     refreshCustodialBalance();
     if (embeddedWalletAddress) {
       refreshEmbeddedBalance();
@@ -293,10 +291,8 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         setTransferStatus('Transfer completed!');
         toast.success(`Successfully moved ${amount} SOL to embedded wallet!`);
         
-        // Refresh balances
-        setTimeout(() => {
-          refreshAllBalances();
-        }, 1000);
+        // Balance will refresh automatically in next 30s cycle
+        console.log('✅ Transfer completed - balances will refresh automatically');
         
         // Move to next step
         setActiveStep('withdraw');
@@ -424,10 +420,8 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       setSuccess(true);
       setSuccessMessage(`Successfully withdrew ${amount} SOL to ${destinationAddress.slice(0, 8)}...${destinationAddress.slice(-8)}`);
       
-      // Refresh embedded wallet balance
-      setTimeout(() => {
-        refreshEmbeddedBalance();
-      }, 2000);
+      // Balance will refresh automatically in next 30s cycle
+      console.log('✅ Withdrawal completed - embedded wallet balance will refresh automatically');
       
       if (onSuccess) onSuccess();
       
@@ -535,9 +529,9 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       setTransferStatus('');
       setWithdrawStatus('');
       
-      setTimeout(() => {
-        refreshAllBalances();
-      }, 500);
+      // Single initial refresh when modal opens
+      console.log('🔄 WithdrawModal: Initial balance refresh on modal open');
+      refreshAllBalances();
     }
   }, [isOpen, refreshAllBalances]);
 

@@ -399,7 +399,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
     // 🚀 ENHANCED: Game started with full liquidity initialization
     newSocket.on('gameStarted', (data: any) => {
-      console.log('🚀 Enhanced game started with liquidity system:', data);
+     
       
       if (data.serverTime) {
         syncServerTime(data.serverTime);
@@ -429,13 +429,6 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         artificialPlayerCount: data.artificialPlayerCount
       };
       
-      console.log('🎭 New game liquidity initialized:', {
-        realBets: newGameState.totalBets?.toFixed(3) + ' SOL',
-        boostedBets: newGameState.boostedTotalBets?.toFixed(3) + ' SOL',
-        realPlayers: newGameState.totalPlayers,
-        boostedPlayers: newGameState.boostedPlayerCount
-      });
-      
       setCurrentGame(newGameState);
       gameStateRef.current = newGameState;
     });
@@ -460,12 +453,6 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           liquidityBreakdown: gameStateRef.current.liquidityBreakdown
         };
         
-        console.log('💥 Final game state preserved:', {
-          crashMultiplier: crashedGame.multiplier?.toFixed(2) + 'x',
-          finalBoostedBets: crashedGame.boostedTotalBets?.toFixed(3) + ' SOL',
-          finalBoostedPlayers: crashedGame.boostedPlayerCount
-        });
-        
         setCurrentGame(crashedGame);
         gameStateRef.current = null; // Clear current game
         
@@ -475,7 +462,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
     // Handle game sync responses
     newSocket.on('gameSync', (data: any) => {
-      console.log('📥 Received game sync with liquidity:', data);
+
       
       if (data.serverTime) {
         syncServerTime(data.serverTime);
@@ -551,7 +538,6 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     // 🚀 NEW: Handle custodial bet placed with liquidity updates
     newSocket.on('custodialBetPlaced', (data: any) => {
       if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
-        console.log('🎯 REAL-TIME: Custodial bet placed, updating liquidity...', data);
         
         const updatedGame = updateGameWithLiquidityData(
           gameStateRef.current,
@@ -654,8 +640,6 @@ export function useGameSocket(walletAddress: string, userId?: string) {
               {
                 totalBets: data.gameState.totalBets,
                 totalPlayers: data.gameState.totalPlayers,
-                boostedPlayerCount: data.gameState.boostedPlayerCount,
-                boostedTotalBets: data.gameState.boostedTotalBets,
                 countdown: data.gameState.countdown
               },
               'betResult'

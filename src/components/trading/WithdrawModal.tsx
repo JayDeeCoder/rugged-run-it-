@@ -346,6 +346,9 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       const toPubkey = new PublicKey(destinationAddress);
       const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
       
+      // Get a recent blockhash
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      
       // Create transaction
       const transaction = new Transaction().add(
         SystemProgram.transfer({
@@ -355,8 +358,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         })
       );
       
-      // Get a recent blockhash
-      const { blockhash } = await connection.getLatestBlockhash();
+      // Set transaction properties
       transaction.recentBlockhash = blockhash;
       transaction.feePayer = fromPubkey;
       
@@ -383,20 +385,73 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       
       toast.loading('Waiting for blockchain confirmation...', { id: withdrawToastId });
       
-      // Wait for confirmation
-      const { blockhash: confirmBlockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      // 🚀 ENHANCED: Better confirmation logic with retry and timeout handling
+      let confirmed = false;
+      let confirmationAttempts = 0;
+      const maxAttempts = 3;
       
-      const confirmation = await connection.confirmTransaction({
-        signature,
-        blockhash: confirmBlockhash,
-        lastValidBlockHeight
-      }, 'confirmed');
-      
-      if (confirmation.value.err) {
-        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      while (!confirmed && confirmationAttempts < maxAttempts) {
+        try {
+          confirmationAttempts++;
+          console.log(`🔄 Confirmation attempt ${confirmationAttempts}/${maxAttempts}`);
+          
+          // Use the same blockhash and lastValidBlockHeight from transaction creation
+          const confirmation = await Promise.race([
+            connection.confirmTransaction({
+              signature,
+              blockhash,
+              lastValidBlockHeight
+            }, 'confirmed'),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Confirmation timeout')), 60000) // 60 second timeout
+            )
+          ]) as any;
+          
+          if (confirmation.value?.err) {
+            throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+          }
+          
+          confirmed = true;
+          console.log('✅ WithdrawModal: Transaction confirmed on blockchain');
+          
+        } catch (confirmError: any) {
+          console.warn(`⚠️ Confirmation attempt ${confirmationAttempts} failed:`, confirmError);
+          
+          if (confirmationAttempts >= maxAttempts) {
+            // Final attempt failed - check if transaction actually succeeded
+            console.log('🔍 Checking transaction status manually...');
+            
+            try {
+              const txInfo = await connection.getTransaction(signature, {
+                commitment: 'confirmed',
+                maxSupportedTransactionVersion: 0
+              });
+              
+              if (txInfo && !txInfo.meta?.err) {
+                console.log('✅ Transaction actually succeeded! Blockchain confirmed it.');
+                confirmed = true;
+                break;
+              } else if (txInfo?.meta?.err) {
+                throw new Error(`Transaction failed on blockchain: ${JSON.stringify(txInfo.meta.err)}`);
+              } else {
+                // Transaction not found - might still be processing
+                console.log('⏳ Transaction not found, but this might be temporary...');
+                throw new Error(`Transaction confirmation timed out. Check signature ${signature} on Solana Explorer to verify status.`);
+              }
+            } catch (statusError) {
+              console.error('❌ Failed to check transaction status:', statusError);
+              throw new Error(`Transaction may have succeeded but confirmation failed. Check signature ${signature} on Solana Explorer: https://explorer.solana.com/tx/${signature}`);
+            }
+          } else {
+            // Wait before retry
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
+        }
       }
       
-      console.log('✅ WithdrawModal: Transaction confirmed on blockchain');
+      if (!confirmed) {
+        throw new Error(`Transaction confirmation failed after ${maxAttempts} attempts. Check signature ${signature} on Solana Explorer.`);
+      }
       
       // Success!
       toast.success(`Successfully withdrew ${amount} SOL!`, { id: withdrawToastId });

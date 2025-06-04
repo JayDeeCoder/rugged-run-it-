@@ -232,73 +232,104 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
       toast.error('Wallet not ready for transfer');
       return;
     }
-
+  
     const amount = parseFloat(transferAmount);
     if (!amount || amount <= 0 || amount > custodialBalance) {
       setError(`Invalid amount. Available: ${custodialBalance.toFixed(3)} SOL`);
       return;
     }
-
-    if (amount < 0.001) {
-      setError('Minimum transfer amount is 0.001 SOL');
+  
+    if (amount < 0.002) { // Match minimum from API
+      setError('Minimum transfer amount is 0.002 SOL');
       return;
     }
-
+  
     console.log('🚀 WithdrawModal: Starting transfer from custodial to embedded');
     
     setError(null);
     setIsTransferring(true);
     
+    const transferToastId = `transfer-${Date.now()}`;
+    
     try {
+      toast.loading('Processing custodial transfer...', { id: transferToastId });
+      
       // 🔧 FIXED: Use the CORRECT API endpoint for custodial withdrawals
-      const response = await fetch('/api/custodial/withdraw-to-embedded', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userId,
-          amount: amount,
-          embeddedWalletAddress: embeddedWalletAddress
-        })
-      });
+       // 🔧 FIXED: Use the CORRECT API endpoint that already exists
+    const response = await fetch('/api/transfer/custodial-to-privy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: userId,
+        amount: amount
+        // Note: embeddedWalletAddress is retrieved from database in the API
+      })
+    });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Transfer failed');
-      }
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Transfer failed');
+    }
 
-      const result = await response.json();
+    const result = await response.json();
 
-      if (result.success) {
-        toast.success(`Successfully moved ${amount} SOL to embedded wallet!`);
-        console.log('✅ Transfer completed - balances will refresh in next 30s cycle');
-        
-        // Move to next step
-        setActiveStep('withdraw');
-        
+    if (result.success) {
+      console.log('✅ Transfer completed:', result);
+      
+      toast.success(
+        `Successfully transferred ${amount} SOL to embedded wallet!`, 
+        { id: transferToastId }
+      );
+      
+      // 🚀 ENHANCED: Force immediate balance refresh after successful transfer
+      console.log('🔄 Forcing immediate balance refresh after transfer');
+      setTimeout(() => {
+        refreshCustodialBalance();
+        if (embeddedWalletAddress) {
+          refreshEmbeddedBalance();
+        }
+      }, 2000); // Wait 2 seconds for blockchain confirmation
+      
+      // Clear transfer amount and move to next step
+      setTransferAmount('');
+      setActiveStep('withdraw');
+      
+    } else {
+      throw new Error(result.error || 'Transfer failed');
+    }
+    
+  } catch (error) {
+    console.error('❌ WithdrawModal: Transfer error:', error);
+    
+    let errorMessage = 'Transfer failed';
+    if (error instanceof Error) {
+      if (error.message.includes('Daily transfer limit exceeded')) {
+        errorMessage = error.message; // Show detailed limit info
+      } else if (error.message.includes('Insufficient custodial balance')) {
+        errorMessage = `Insufficient balance. Available: ${custodialBalance.toFixed(3)} SOL`;
+      } else if (error.message.includes('Invalid amount')) {
+        errorMessage = error.message;
+      } else if (error.message.includes('Server configuration error')) {
+        errorMessage = 'Service temporarily unavailable. Please try again.';
       } else {
-        throw new Error(result.error || 'Transfer failed');
-      }
-      
-    } catch (error) {
-      console.error('❌ WithdrawModal: Transfer error:', error);
-      
-      let errorMessage = 'Transfer failed';
-      if (error instanceof Error) {
         errorMessage = error.message;
       }
-      
-      setError(errorMessage);
-      toast.error(errorMessage);
-    } finally {
-      setIsTransferring(false);
     }
-  }, [
-    embeddedWallet, 
-    embeddedWalletAddress, 
-    userId, 
-    transferAmount, 
-    custodialBalance
-  ]);
+    
+    setError(errorMessage);
+    toast.error(errorMessage, { id: transferToastId });
+  } finally {
+    setIsTransferring(false);
+  }
+}, [
+  embeddedWallet, 
+  embeddedWalletAddress, 
+  userId, 
+  transferAmount, 
+  custodialBalance,
+  refreshCustodialBalance,
+  refreshEmbeddedBalance
+]);
 
   // 🚀 ENHANCED: Direct embedded wallet withdrawal (using your useSendTransaction pattern)
   const handleEmbeddedWithdraw = useCallback(async () => {

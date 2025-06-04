@@ -124,6 +124,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, []);
 
+  // 🔧 FIX: Helper function to convert string errors to Error objects
+  const combineErrors = useCallback((): Error | null => {
+    // Priority: component error > cashout error > place bet error
+    if (error) return error;
+    if (cashOutError) return new Error(cashOutError);
+    if (placeBetError) return new Error(placeBetError);
+    return null;
+  }, [error, cashOutError, placeBetError]);
+
   // Set auto cashout settings
   const setAutoCashout = (value: boolean, multiplier: number = 2.0) => {
     setGameState(prevState => ({
@@ -178,7 +187,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       toast.success('Game started!');
     } catch (err) {
-      setError(err instanceof Error ? err : new Error('Failed to start game'));
+      const errorObj = err instanceof Error ? err : new Error('Failed to start game');
+      setError(errorObj);
       toast.error('Failed to start game!');
     } finally {
       setIsLoading(false);
@@ -232,7 +242,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       toast.success(`Cashed out at ${gameState.currentMultiplier.toFixed(2)}x!`);
     } catch (err) {
-      setError(err instanceof Error ? err : new Error('Failed to RUG'));
+      const errorObj = err instanceof Error ? err : new Error('Failed to RUG');
+      setError(errorObj);
       toast.error('Failed to RUG!');
     } finally {
       setIsLoading(false);
@@ -259,7 +270,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     startGame,
     cashout,
     isLoading: isLoading || isPlacingBet || isCashingOut,
-    error: error || placeBetError || cashOutError,
+    error: combineErrors(), // 🔧 FIX: Use the helper function to ensure Error type
     clearActiveGame,
     setAutoCashout
   };

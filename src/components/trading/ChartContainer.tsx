@@ -83,38 +83,37 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
 
   const isMobile = width ? width < 768 : false;
 
-  // 🚀 ENHANCED: Calculate potential payout with proper validation - UPDATED LOGIC
-  const calculatePotentialPayout = useCallback(() => {
-    if (!activeBet || !currentGame) return 0;
+  // 🚀 FIXED: Correct position calculation with proper profit/loss logic
+  const calculateCurrentPositionValue = useCallback(() => {
+    if (!activeBet || !currentGame) {
+      return {
+        positionValue: 0,
+        cashoutValue: 0,
+        profit: 0,
+        isProfit: false
+      };
+    }
     
     const currentMultiplier = currentGame.multiplier || 1.0;
     const entryMultiplier = activeBet.entryMultiplier || 1.0;
     const betAmount = activeBet.amount || 0;
     
-    // Calculate potential payout based on current multiplier vs entry point
-    // If current multiplier is higher than entry, calculate gain
-    // If current multiplier is lower than entry, this represents potential loss/no gain
-    const multiplierDifference = currentMultiplier - entryMultiplier;
-    const effectiveMultiplier = entryMultiplier + Math.max(0, multiplierDifference);
+    // Position value = betAmount × (currentMultiplier ÷ entryMultiplier)
+    const positionValue = betAmount * (currentMultiplier / entryMultiplier);
     
-    // Apply 95% payout rate (5% house edge)
-    const potentialPayout = betAmount * effectiveMultiplier * 0.95;
+    // Cashout value = positionValue × 0.95 (5% house edge only on cashout)
+    const cashoutValue = positionValue * 0.95;
     
-    return potentialPayout;
-  }, [activeBet, currentGame]);
-
-  // 🚀 ENHANCED: Calculate potential profit with color coding - UPDATED LOGIC
-  const calculatePotentialProfit = useCallback(() => {
-    if (!activeBet) return { profit: 0, isProfit: false };
-    
-    const potentialPayout = calculatePotentialPayout();
-    const profit = potentialPayout - activeBet.amount;
+    // Profit = cashoutValue - original bet
+    const profit = cashoutValue - betAmount;
     
     return {
+      positionValue,
+      cashoutValue,
       profit,
       isProfit: profit > 0
     };
-  }, [activeBet, calculatePotentialPayout]);
+  }, [activeBet, currentGame]);
 
   useEffect(() => {
     return () => {
@@ -276,7 +275,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     }
   }, [custodialBalance, currentGame, placeCustodialBet, currentUser?.id, placeOrder, canBet, activeBet, setIsPlacingBet, setActiveBet]);
 
-  // 🚀 UPDATED: Use shared bet state and custodial cashout with enhanced payout calculation
+  // 🚀 FIXED: Use correct cashout value from position calculation
   const handleSell = useCallback(async (percentage: number) => {
     if (!activeBet || !currentGame || currentGame.status !== 'active' || !isMountedRef.current) {
       toast.error('No active bet to RUG');
@@ -297,10 +296,11 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     
     try {
       const currentMultiplier = currentGame.multiplier;
-      const potentialPayout = calculatePotentialPayout();
-      const potentialProfit = potentialPayout - activeBet.amount;
+      const positionData = calculateCurrentPositionValue();
+      const expectedCashout = positionData.cashoutValue;
+      const expectedProfit = positionData.profit;
       
-      console.log(`💸 Cashing out 100% at multiplier ${currentMultiplier}x - Potential: ${potentialPayout.toFixed(3)} SOL`);
+      console.log(`💸 Cashing out 100% at multiplier ${currentMultiplier}x - Expected: ${expectedCashout.toFixed(3)} SOL`);
 
       const result = await custodialCashOut(currentUser.id, walletAddress);
       
@@ -310,11 +310,11 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
 
       if (typeof result === 'boolean') {
         success = result;
-        actualPayout = success ? potentialPayout : undefined;
+        actualPayout = success ? expectedCashout : undefined;
         reason = undefined;
       } else if (result && typeof result === 'object' && 'success' in result) {
         success = (result as any).success;
-        actualPayout = (result as any).payout || potentialPayout;
+        actualPayout = (result as any).payout || expectedCashout;
         reason = (result as any).reason;
       } else {
         success = false;
@@ -323,7 +323,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       }
       
       if (success) {
-        const finalPayout = actualPayout || potentialPayout;
+        const finalPayout = actualPayout || expectedCashout;
         
         const order: Order = {
           side: 'sell',
@@ -348,7 +348,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         clearActiveBet();
         
         const actualProfit = finalPayout - activeBet.amount;
-        toast.success(`🎉 Cashed out at ${currentMultiplier.toFixed(2)}x! Profit: +${actualProfit.toFixed(3)} SOL (${finalPayout.toFixed(3)} total)`);
+        toast.success(`🎉 Cashed out at ${currentMultiplier.toFixed(2)}x! Profit: ${actualProfit >= 0 ? '+' : ''}${actualProfit.toFixed(3)} SOL (${finalPayout.toFixed(3)} total)`);
       } else {
         toast.error(reason || 'Failed to RUG');
         // Clear bet state even on failure to prevent stuck states
@@ -364,7 +364,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         setIsCashingOut(false);
       }
     }
-  }, [activeBet, currentGame, custodialCashOut, currentUser?.id, walletAddress, placeOrder, setIsCashingOut, clearActiveBet, calculatePotentialPayout]);
+  }, [activeBet, currentGame, custodialCashOut, currentUser?.id, walletAddress, placeOrder, setIsCashingOut, clearActiveBet, calculateCurrentPositionValue]);
 
   const calculateGameStats = useCallback(() => {
     if (gameResults.length === 0) {
@@ -389,7 +389,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
     return isMobile ? 260 : 500;
   };
 
-  // 🚀 ENHANCED: Real game data from server and shared state with proper calculations
+  // 🚀 ENHANCED: Real game data from server and shared state with correct calculations
   const currentMultiplier = currentGame?.multiplier || 1.0;
   const gameStatus = currentGame?.status || 'waiting';
   const gameId = currentGame?.gameNumber || 0;
@@ -398,9 +398,8 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   const showCountdown = isWaitingPeriod && countdown && countdown > 0;
   const countdownSeconds = countdown ? Math.ceil(countdown / 1000) : 0;
   
-  // Calculate current values using shared data
-  const potentialPayout = calculatePotentialPayout();
-  const { profit: potentialProfit, isProfit } = calculatePotentialProfit();
+  // 🚀 FIXED: Use correct position calculation
+  const positionData = calculateCurrentPositionValue();
 
   return (
     <div className="p-2 flex flex-col">
@@ -435,10 +434,10 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         </div>
       </div>
 
-      {/* 🚀 ENHANCED: Bet Display - Keep Bet, Entry, Payout, and Profit */}
+      {/* 🚀 FIXED: Position Display - Buy, Entry, Balance, Cashout, P&L */}
       <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg flex flex-wrap justify-between border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>
         <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
-          <span className="text-gray-400">Bet:</span>
+          <span className="text-gray-400">Buy:</span>
           <span className={`ml-1 font-bold ${hasActiveGame ? 'text-blue-400' : 'text-gray-500'}`}>
             {activeBet ? activeBet.amount.toFixed(3) : '0.000'} SOL
           </span>
@@ -450,45 +449,44 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
             {activeBet ? activeBet.entryMultiplier.toFixed(2) + 'x' : '-'}
           </span>
         </div>
-        
         <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
-          <span className="text-gray-400">Payout:</span>
+          <span className="text-gray-400">Cashout:</span>
           <span className={`ml-1 font-bold ${hasActiveGame ? 'text-green-400' : 'text-gray-500'}`}>
-            {potentialPayout.toFixed(3)} SOL
+            {positionData.cashoutValue.toFixed(3)} SOL
           </span>
         </div>
         
-        {/* 🚀 Show potential profit with color coding */}
+        {/* 🚀 FIXED: Show P&L with correct calculation and color coding */}
         {activeBet && (
           <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
-            <span className="text-gray-400">Profit:</span>
-            <span className={`ml-1 font-bold ${isProfit ? 'text-green-400' : 'text-red-400'}`}>
-              {isProfit ? '+' : ''}{potentialProfit.toFixed(3)} SOL
+            <span className="text-gray-400">P&L:</span>
+            <span className={`ml-1 font-bold ${positionData.isProfit ? 'text-green-400' : 'text-red-400'}`}>
+              {positionData.isProfit ? '+' : ''}{positionData.profit.toFixed(3)} SOL
             </span>
           </div>
         )}
       </div>
 
       {currentGame && (
-  <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs'} text-gray-400`}>
-    <div className="flex justify-between items-center flex-wrap">
-      <span>RUGGERS: {currentGame.boostedPlayerCount || currentGame.totalPlayers || 0}</span>
-      <span>Total Liq: {(currentGame.boostedTotalBets || currentGame.totalBets || 0).toFixed(2)} SOL</span>
-      {showCountdown && (
-        <span className="text-blue-400 animate-pulse">Next: {countdownSeconds}s</span>
+        <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs'} text-gray-400`}>
+          <div className="flex justify-between items-center flex-wrap">
+            <span>RUGGERS: {currentGame.boostedPlayerCount || currentGame.totalPlayers || 0}</span>
+            <span>Total Liq: {(currentGame.boostedTotalBets || currentGame.totalBets || 0).toFixed(2)} SOL</span>
+            {showCountdown && (
+              <span className="text-blue-400 animate-pulse">Next: {countdownSeconds}s</span>
+            )}
+            {hasActiveGame && (
+              <span className={`font-medium ${
+                isPlacingBet ? 'text-blue-400 animate-pulse' : 
+                isCashingOut ? 'text-yellow-400 animate-pulse' : 
+                'text-green-400'
+              }`}>
+                {isPlacingBet ? 'Placing...' : isCashingOut ? 'Cashing...' : 'Active Bet'}
+              </span>
+            )}
+          </div>
+        </div>
       )}
-      {hasActiveGame && (
-        <span className={`font-medium ${
-          isPlacingBet ? 'text-blue-400 animate-pulse' : 
-          isCashingOut ? 'text-yellow-400 animate-pulse' : 
-          'text-green-400'
-        }`}>
-          {isPlacingBet ? 'Placing...' : isCashingOut ? 'Cashing...' : 'Active Bet'}
-        </span>
-      )}
-    </div>
-  </div>
-)}
 
       {/* Mini charts showing recent game results */}
       <div className="mb-2">
@@ -564,28 +562,28 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
       </div>
 
       {/* 🚀 ENHANCED: Game Statistics with better formatting */}
-<div className={`mt-4 bg-[#0d0d0f] p-3 rounded-lg border border-gray-800 ${isMobile ? 'p-2' : 'p-3'}`}>
-  <div className="grid grid-cols-3 gap-4">
-    <div className="text-center">
-      <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Average</div>
-      <div className={`font-bold text-green-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.average}x</div>
-    </div>
-    <div className="text-center">
-      <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Best</div>
-      <div className={`font-bold text-yellow-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.highest}x</div>
-    </div>
-    <div className="text-center">
-      <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Rounds</div>
-      <div className={`font-bold text-blue-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameResults.length}</div>
-    </div>
-  </div>
-</div>
+      <div className={`mt-4 bg-[#0d0d0f] p-3 rounded-lg border border-gray-800 ${isMobile ? 'p-2' : 'p-3'}`}>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="text-center">
+            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Average</div>
+            <div className={`font-bold text-green-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.average}x</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Best</div>
+            <div className={`font-bold text-yellow-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.highest}x</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Rounds</div>
+            <div className={`font-bold text-blue-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameResults.length}</div>
+          </div>
+        </div>
+      </div>
 
-      {/* 🚀 ENHANCED: Debug information in development with detailed shared state */}
+      {/* 🚀 FIXED: Debug information with correct position values */}
       {process.env.NODE_ENV === 'development' && (
         <div className="mt-2 p-2 bg-gray-900 rounded text-xs text-gray-400 space-y-1">
           <div>
-            <strong>Shared State Debug:</strong>
+            <strong>Position Debug (Fixed Calculation):</strong>
           </div>
           <div>
             Balance: {custodialBalance.toFixed(3)} SOL | 
@@ -594,9 +592,9 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
             Current: {currentMultiplier.toFixed(2)}x
           </div>
           <div>
-            Potential Payout: {potentialPayout.toFixed(3)} SOL | 
-            Potential Profit: {isProfit ? '+' : ''}{potentialProfit.toFixed(3)} SOL | 
-            Status: {gameStatus}
+            Position Value: {positionData.positionValue.toFixed(3)} SOL | 
+            Cashout Value: {positionData.cashoutValue.toFixed(3)} SOL | 
+            P&L: {positionData.isProfit ? '+' : ''}{positionData.profit.toFixed(3)} SOL
           </div>
           <div>
             Active Bet: {hasActiveGame ? 'YES' : 'NO'} | 

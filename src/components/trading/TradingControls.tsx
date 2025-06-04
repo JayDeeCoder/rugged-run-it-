@@ -758,7 +758,7 @@ const BettingSection: FC<{
                   <div className="text-xs text-gray-400">
                     {isTransferMode 
                       ? `💳 Transfer from Wallet (${embeddedWalletBalance.toFixed(3)} SOL)` 
-                      : `🎮 Bet with Game Balance (${activeBalance.toFixed(3)} ${currentToken})`
+                      : `🎮 Trade with Game Balance (${activeBalance.toFixed(3)} ${currentToken})`
                     }
                   </div>
                   <button
@@ -769,7 +769,7 @@ const BettingSection: FC<{
                         : 'bg-green-600 hover:bg-green-700 text-white'
                     }`}
                   >
-                    {isTransferMode ? 'Bet' : 'Transfer'}
+                    {isTransferMode ? 'Trade' : 'Transfer'}
                   </button>
                 </div>
               )}
@@ -908,7 +908,7 @@ const BettingSection: FC<{
   return (
     <div className="border-t border-gray-800 pt-3">
       <h3 className="text-sm font-bold text-gray-400 mb-3">
-        {activeBet ? 'ACTIVE BET' : (isTransferMode ? 'QUICK TRANSFER' : 'PLACE BUY')}
+        {activeBet ? 'ACTIVE TRADE' : (isTransferMode ? 'QUICK TRANSFER' : 'PLACE BUY')}
       </h3>
       
       {!activeBet && (
@@ -920,7 +920,7 @@ const BettingSection: FC<{
                 <div className="text-xs text-gray-400">
                   {isTransferMode 
                     ? `💳 Transfer from Wallet - Available: ${embeddedWalletBalance.toFixed(3)} SOL` 
-                    : `🎮 Bet with Game Balance - Available: ${activeBalance.toFixed(3)} ${currentToken}`
+                    : `🎮 Trade with Game Balance - Available: ${activeBalance.toFixed(3)} ${currentToken}`
                   }
                 </div>
                 <button
@@ -939,7 +939,7 @@ const BettingSection: FC<{
             <label className="block text-gray-400 text-xs mb-1">
               {isTransferMode 
                 ? `Transfer Amount (SOL) - Min: ${minBetAmount}, Max: ${maxBetAmount.toFixed(3)}`
-                : `Bet Amount (${currentToken}) - Min: ${minBetAmount}, Max: ${maxBetAmount}`
+                : `Trade Amount (${currentToken}) - Min: ${minBetAmount}, Max: ${maxBetAmount}`
               }
             </label>
             <div className="flex">
@@ -948,7 +948,7 @@ const BettingSection: FC<{
                 value={amount}
                 onChange={(e) => onAmountChange(e.target.value)}
                 className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-l-md focus:outline-none"
-                placeholder={isTransferMode ? `Transfer SOL (Min: ${minBetAmount})` : `Bet ${currentToken} (Min: ${minBetAmount})`}
+                placeholder={isTransferMode ? `Transfer SOL (Min: ${minBetAmount})` : `Trade ${currentToken} (Min: ${minBetAmount})`}
                 disabled={isTransferMode ? false : !canBet}
               />
               <button

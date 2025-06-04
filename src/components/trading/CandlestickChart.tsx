@@ -105,7 +105,6 @@ const CandlestickSVG: FC<{
     ? candles.slice(-maxDisplayCandles) // Show last N candles
     : candles;
   
-  console.log(`📊 Candle Display: Total=${candles.length}, Showing=${displayCandles.length}, MaxFit=${maxDisplayCandles}, Width=${optimalCandleWidth}px`);
   
   const startX = leftMargin + 10; // Fixed start position
   const baselineY = scaleY(1.0);

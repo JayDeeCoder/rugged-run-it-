@@ -1095,15 +1095,30 @@ const TradingControls: FC<TradingControlsProps> = ({
   // 🚀 IMPORTANT: Declare userId BEFORE using it in hooks
   const [userId, setUserId] = useState<string | null>(null);
   
-  // 🚀 NEW: Use shared state hooks (userId now properly declared above)
+  const trackedSetUserId = useCallback((newUserId: string) => {
+    console.log(`👤 TRACKED setUserId called:`, {
+      newUserId,
+      newUserIdType: typeof newUserId,
+      isUUID: newUserId?.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+      isPrivyID: newUserId?.startsWith('did:privy:'),
+      stackTrace: new Error().stack?.split('\n')[2]?.trim() // Show where it's called from
+    });
+    
+    setUserId(newUserId);
+  }, []);
+  
+  console.log(`💰 TRACKED: useSharedCustodialBalance called with userId: ${userId}`);
+
   const { 
     custodialBalance, 
     loading: custodialBalanceLoading, 
     updateCustodialBalance, 
     forceRefresh: refreshCustodialBalance,
+    syncAfterCashout,
     error: balanceError,
     lastUpdated: custodialLastUpdated
   } = useSharedCustodialBalance(userId || '');
+  
   
   const { 
     activeBet, 
@@ -1934,21 +1949,24 @@ const handleQuickTransfer = useCallback(async (amount: number) => {
   // User initialization effect
   useEffect(() => {
     if (!authenticated || !walletAddress) {
+      console.log('🔍 USER INIT: Not authenticated or no wallet');
       return;
     }
     
     if (initializationRef.current.completed && 
         initializationRef.current.lastWallet === walletAddress &&
         initializationRef.current.lastUserId === (userId || '')) {
+      console.log('🔍 USER INIT: Already completed');
       return;
     }
     
     if (initializationRef.current.attempted && 
         initializationRef.current.lastWallet === walletAddress) {
+      console.log('🔍 USER INIT: Already attempted');
       return;
     }
     
-    console.log(`🔗 Starting user initialization for wallet: ${walletAddress}`);
+    console.log(`🔗 TRACKED: Starting user initialization for wallet: ${walletAddress}`);
     initializationRef.current.attempted = true;
     initializationRef.current.lastWallet = walletAddress;
     
@@ -1957,27 +1975,47 @@ const handleQuickTransfer = useCallback(async (amount: number) => {
     console.log(`🔍 USER INIT DEBUG:`, {
       walletAddress,
       currentUserId: userId,
-      authenticated
+      authenticated,
+      privyUserId: user?.id // Add this to see Privy ID
     });
     
     const initUser = async () => {
       try {
         if (userId && initializationRef.current.lastUserId === userId) {
-          console.log(`✅ User ${userId} already initialized for this wallet`);
+          console.log(`✅ TRACKED: User ${userId} already initialized for this wallet`);
           initializationRef.current.completed = true;
           return;
         }
         
-        console.log(`📡 Getting user data for wallet: ${walletAddress}`);
+        console.log(`📡 TRACKED: Getting user data for wallet: ${walletAddress}`);
         const userData = await UserAPI.getUserOrCreate(walletAddress);
         
+        console.log(`📡 TRACKED: getUserOrCreate returned:`, userData);
+        
         if (userData) {
-          setUserId(userData.id);
+          console.log(`👤 TRACKED: About to set userId to: ${userData.id}`);
+          console.log(`👤 TRACKED: userData.id analysis:`, {
+            id: userData.id,
+            type: typeof userData.id,
+            length: userData.id?.length,
+            isUUID: userData.id?.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+            isPrivyID: userData.id?.startsWith('did:privy:')
+          });
+          
+          trackedSetUserId(userData.id); // Use tracked version
           initializationRef.current.lastUserId = userData.id;
-          console.log(`👤 User ID set: ${userData.id}`);
+          
+          // Verify it was set correctly
+          setTimeout(() => {
+            console.log(`👤 TRACKED: Verification after setUserId:`, {
+              expectedId: userData.id,
+              actualUserId: userId,
+              match: userId === userData.id
+            });
+          }, 100);
           
           initTimeout = setTimeout(() => {
-            console.log(`📡 Initializing user via socket (one-time)...`);
+            console.log(`📡 TRACKED: Initializing user via socket with ID: ${userData.id}`);
             
             const socket = (window as any).gameSocket;
             if (socket) {
@@ -1987,38 +2025,48 @@ const handleQuickTransfer = useCallback(async (amount: number) => {
               });
               
               socket.once('userInitializeResult', (result: any) => {
-                console.log('📡 User initialization result:', result);
+                console.log('📡 TRACKED: User initialization result:', result);
                 
                 if (result.success) {
-                  console.log(`✅ User ${result.userId} initialized successfully`);
+                  console.log(`✅ TRACKED: User ${result.userId} initialized successfully`);
                   
                   initializationRef.current.completed = true;
                   initializationRef.current.lastUserId = result.userId;
                   
+                  // 🔍 Check if socket result has different ID
+                  if (result.userId !== userData.id) {
+                    console.warn(`⚠️ TRACKED: Socket returned different userId!`, {
+                      originalId: userData.id,
+                      socketId: result.userId,
+                      shouldUpdate: false // We shouldn't update to socket ID
+                    });
+                  }
+                  
                   setTimeout(() => {
+                    console.log(`🔄 TRACKED: Triggering balance update with userId: ${userId}`);
                     try {
                       updateCustodialBalance();
                       updateRuggedBalance();
                     } catch (error) {
-                      console.warn('⚠️ Balance update failed during initialization:', error);
+                      console.warn('⚠️ TRACKED: Balance update failed during initialization:', error);
                     }
                   }, 500);
                 } else {
-                  console.error('❌ User initialization failed:', result.error);
+                  console.error('❌ TRACKED: User initialization failed:', result.error);
                   toast.error('Failed to initialize wallet');
                   initializationRef.current.attempted = false;
                   initializationRef.current.completed = false;
                 }
               });
             } else {
-              console.error('❌ Socket not available for user initialization');
+              console.error('❌ TRACKED: Socket not available for user initialization');
               initializationRef.current.attempted = false;
               initializationRef.current.completed = false;
             }
           }, 1000);
         }
       } catch (error) {
-        console.error('❌ Could not initialize user:', error);
+        console.error('❌ TRACKED: Could not initialize user:', error);
         toast.error('Failed to initialize wallet');
         initializationRef.current.attempted = false;
         initializationRef.current.completed = false;
@@ -2030,7 +2078,91 @@ const handleQuickTransfer = useCallback(async (amount: number) => {
     return () => {
       if (initTimeout) clearTimeout(initTimeout);
     };
-  }, [authenticated, walletAddress, userId, updateCustodialBalance, updateRuggedBalance]);
+  }, [authenticated, walletAddress, userId, user?.id, trackedSetUserId, updateCustodialBalance, updateRuggedBalance]);
+
+  useEffect(() => {
+    if (userId) {
+      const isUUID = userId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      const isPrivyID = userId.startsWith('did:privy:');
+      
+      console.log(`💰 TRACKED: Balance hook userId analysis:`, {
+        userId,
+        isUUID: !!isUUID,
+        isPrivyID: !!isPrivyID,
+        expectedFormat: 'UUID',
+        willWork: !!isUUID
+      });
+      
+      if (isPrivyID) {
+        console.error('🚨 TRACKED: Balance hook called with Privy ID - this will fail!');
+        console.error('🚨 Transfer will use UUID, balance will use Privy ID = mismatch');
+      }
+    }
+  }, [userId]);
+  
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).debugUserIdFlow = () => {
+        return {
+          currentUserId: userId,
+          privyUserId: user?.id,
+          walletAddress: walletAddress,
+          custodialBalance: custodialBalance,
+          initializationState: initializationRef.current,
+          expectedTransferMatch: 'UUID should match between transfer and balance'
+        };
+      };
+      
+      (window as any).forceCorrectUserId = async () => {
+        console.log('🔧 TRACKED: Force getting correct userId...');
+        try {
+          const userData = await UserAPI.getUserOrCreate(walletAddress);
+          console.log('🔧 TRACKED: Fresh getUserOrCreate result:', userData);
+          
+          if (userData && userData.id) {
+            console.log('🔧 TRACKED: Setting correct userId:', userData.id);
+            trackedSetUserId(userData.id);
+            
+            setTimeout(() => {
+              console.log('🔧 TRACKED: Force refreshing balance...');
+              refreshCustodialBalance();
+            }, 500);
+            
+            return userData.id;
+          }
+        } catch (error) {
+          console.error('🔧 TRACKED: Force update failed:', error);
+        }
+      };
+    }
+    
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete (window as any).debugUserIdFlow;
+        delete (window as any).forceCorrectUserId;
+      }
+    };
+  }, [userId, user?.id, walletAddress, custodialBalance, trackedSetUserId, refreshCustodialBalance]);
+  
+  // 🔍 ENHANCED: Check for other places where userId might get set
+  useEffect(() => {
+    // Look for any other code that might be calling setUserId
+    if (typeof window !== 'undefined') {
+      const originalSetUserId = setUserId;
+      
+      // Override setUserId globally to catch all calls
+      (window as any).trackSetUserId = (id: string, source: string) => {
+        console.log(`👤 EXTERNAL setUserId called from ${source}:`, {
+          id,
+          isUUID: id?.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+          isPrivyID: id?.startsWith('did:privy:')
+        });
+        trackedSetUserId(id);
+      };
+    }
+  }, [trackedSetUserId]);
+
+  
 
   // Reset initialization tracking when wallet changes
   useEffect(() => {

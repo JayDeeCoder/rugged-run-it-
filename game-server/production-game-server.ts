@@ -2368,6 +2368,7 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                         const { data: balanceResult, error: balanceError } = await supabaseService
                             .rpc('update_unified_user_balance', {
                                 p_user_id: userId,
+                                p_wallet_address: fromAddress,
                                 p_custodial_change: amount,
                                 p_privy_change: 0,
                                 p_embedded_change: 0,
@@ -2384,7 +2385,7 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                         }
 
                         const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
-                        const newTotalBalance = parseFloat(balanceResult[0].new_total_balance || balanceResult[0].new_custodial_balance);
+                        const newTotalBalance = parseFloat(balanceResult[0].calculated_total_balance || balanceResult[0].new_custodial_balance); // FIXED
                         const newTotalDeposited = parseFloat(balanceResult[0].new_total_deposited || balanceResult[0].new_custodial_balance);
                         
                         console.log(`✅ [FIXED] Balance updated: ${userId} - Custodial: ${newCustodialBalance.toFixed(3)} SOL (Tx: ${sigInfo.signature})`);
@@ -2393,7 +2394,7 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                         io.emit('custodialBalanceUpdate', {
                             userId,
                             custodialBalance: newCustodialBalance,
-                            totalBalance: newTotalBalance,
+                            totalBalance: newTotalBalance, // FIXED
                             totalDeposited: newTotalDeposited,
                             depositAmount: amount,
                             transactionSignature: sigInfo.signature,
@@ -2740,7 +2741,7 @@ async function resolvePendingDeposits(): Promise<void> {
 
                 const result = balanceResult[0];
                 const newCustodialBalance = parseFloat(result.new_custodial_balance || '0');
-                const newTotalBalance = parseFloat(result.new_total_balance || result.new_custodial_balance || '0');
+                const newTotalBalance = parseFloat(result.calculated_total_balance || result.new_custodial_balance || '0');
                 const newTotalDeposited = parseFloat(result.new_total_deposited || result.new_custodial_balance || '0');
                 
                 console.log(`✅ FIXED: Balance updated successfully:`, {
@@ -2899,6 +2900,8 @@ async function getUserWalletBalance(walletAddress: string): Promise<number> {
 // Replaces the old fragmented table approach
 // ============================================================================
 
+// 🔧 FIXED registerNewUser - Replace your existing function with this
+// 🔧 FIXED registerNewUser - Replace your existing function with this
 async function registerNewUser(walletAddress: string): Promise<string> {
     try {
         // Check if user already exists in users_unified (case-insensitive!)
@@ -2931,6 +2934,7 @@ async function registerNewUser(walletAddress: string): Promise<string> {
                 custodial_balance: 0,
                 privy_balance: 0,
                 embedded_balance: 0,
+                // 🔧 REMOVED: total_balance: 0, (this is a generated column)
                 total_deposited: 0,
                 custodial_total_deposited: 0,
                 total_transfers_to_privy: 0,
@@ -2981,12 +2985,13 @@ async function registerNewUser(walletAddress: string): Promise<string> {
     } catch (error) {
         console.error('❌ User registration failed:', error);
         const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-        throw new Error(errorMessage); // ✅ Throw instead of return object
+        throw new Error(errorMessage);
     }
 }
 
 
 // Enhanced function to get or create user by wallet address
+// 🔧 FIXED getOrCreateUser - Replace your existing function with this
 // 🔧 FIXED getOrCreateUser - Replace your existing function with this
 async function getOrCreateUser(walletAddress: string): Promise<{ 
     userId: string; 
@@ -3039,7 +3044,7 @@ async function getOrCreateUser(walletAddress: string): Promise<{
             custodial_balance: 0,
             privy_balance: 0,
             embedded_balance: 0,
-            total_balance: 0,
+            // 🔧 REMOVED: total_balance: 0, (this is a generated column)
             total_deposited: 0,
             custodial_total_deposited: 0,
             level: 1,
@@ -3393,8 +3398,8 @@ async function resolvePendingDepositsForUser(walletAddress: string): Promise<voi
                 if (!balanceError && balanceResult) {
                     // FIXED: Get all the required variables from the RPC response
                     const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
-                    const newTotalBalance = parseFloat(balanceResult[0].new_total_balance || balanceResult[0].new_custodial_balance);
-                    const newTotalDeposited = parseFloat(balanceResult[0].new_total_deposited || balanceResult[0].new_custodial_balance);
+const newTotalBalance = parseFloat(balanceResult[0].calculated_total_balance || balanceResult[0].new_custodial_balance); // FIXED
+const newTotalDeposited = parseFloat(balanceResult[0].new_total_deposited || balanceResult[0].new_custodial_balance);
                     
                     // Mark pending deposit as resolved
                     await supabaseService
@@ -3774,12 +3779,12 @@ if (existingBet && !existingBet.cashedOut && existingBet.isValid) {
                     p_is_deposit: false,  // or true for deposits
                     p_deposit_amount: 0   // or actual deposit amount
                 });
-            if (balanceError || !balanceResult || balanceResult.length === 0) {
-                console.error(`❌ Failed to update balance for instant rug bet ${userId}:`, balanceError);
-                return { success: false, reason: 'Failed to process bet' };
-            }
-
-            const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
+                if (balanceError || !balanceResult || balanceResult.length === 0) {
+                    console.error(`❌ Failed to update balance for instant rug bet ${userId}:`, balanceError);
+                    return { success: false, reason: 'Failed to process bet' };
+                }
+                
+                const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
             
             // Add bet to game
             const entryMultiplier = currentGame.status === 'waiting' ? 1.0 : currentGame.currentMultiplier;
@@ -7660,7 +7665,7 @@ app.post('/api/transfer/privy-to-custodial', async (req, res): Promise<void> => 
             }
 
             const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
-            const newTotalBalance = parseFloat(balanceResult[0].new_total_balance || balanceResult[0].new_custodial_balance);
+            const newTotalBalance = parseFloat(balanceResult[0].calculated_total_balance || balanceResult[0].new_custodial_balance);
             
             console.log(`💰 TRANSFER API: Balance updated successfully for ${userId}:`);
             console.log(`   Old custodial balance: ${userData.custodial_balance} SOL`);

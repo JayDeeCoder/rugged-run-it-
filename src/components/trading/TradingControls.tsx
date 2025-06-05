@@ -1723,24 +1723,56 @@ const TradingControls: FC<TradingControlsProps> = ({
     setSavedAmount(amtStr);
   }, [setSavedAmount]);
 
-  const handleQuickTransfer = useCallback(async (amount: number) => {
-    transferAttempts.current.push({
-      timestamp: Date.now(),
-      amount: amount
-    });
-    
-    transferAttempts.current = transferAttempts.current.slice(-10);
-    
-    debugLog('Quick transfer initiated', { amount, transferAttempts: transferAttempts.current.length });
-    
-    const success = await autoTransferToGameBalance(amount);
-    if (success) {
-      debugLog(`Quick transfer of ${amount} SOL completed successfully`);
-      setBalanceIssueDetected(false);
-    } else {
-      debugLog(`Quick transfer of ${amount} SOL failed`);
+  // In your TradingControls component, update the handleQuickTransfer function
+const handleQuickTransfer = useCallback(async (amount: number) => {
+  if (!userId) {
+    toast.error('User not available for transfer');
+    return;
+  }
+
+  console.log(`💳 TRADING: Initiating quick transfer of ${amount} SOL for user ${userId}`);
+  
+  transferAttempts.current.push({
+    timestamp: Date.now(),
+    amount: amount
+  });
+  
+  transferAttempts.current = transferAttempts.current.slice(-10);
+  
+  debugLog('Quick transfer initiated', { amount, transferAttempts: transferAttempts.current.length });
+  
+  // 🔥 ENHANCED: Pass the balance refresh callback
+  const success = await executeAutoTransfer(
+    userId, 
+    amount,
+    // This callback will be called after successful transfer
+    async () => {
+      console.log('🔄 TRADING: Transfer success callback - refreshing custodial balance...');
+      await refreshCustodialBalance();
+      
+      // Additional safety refresh
+      setTimeout(() => {
+        console.log('🔄 TRADING: Safety refresh after transfer...');
+        refreshCustodialBalance();
+      }, 2000);
     }
-  }, [autoTransferToGameBalance, debugLog, setBalanceIssueDetected]);
+  );
+  
+  if (success.success) {
+    debugLog(`Quick transfer of ${amount} SOL completed successfully`);
+    setBalanceIssueDetected(false);
+    
+    // Show success toast with new balance
+    if (success.newBalance !== undefined) {
+      toast.success(`Transfer complete! New balance: ${success.newBalance.toFixed(3)} SOL`);
+    } else {
+      toast.success(`Transfer of ${amount} SOL completed!`);
+    }
+  } else {
+    debugLog(`Quick transfer of ${amount} SOL failed:`, success.error);
+    toast.error(success.error || 'Transfer failed');
+  }
+}, [userId, executeAutoTransfer, refreshCustodialBalance, debugLog, setBalanceIssueDetected]);
 
   const handleEmergencyBalanceSync = useCallback(async () => {
     if (!userId) {

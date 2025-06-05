@@ -144,6 +144,41 @@ export const useSharedCustodialBalance = (userId: string) => {
     }
   }, [userId, updateBalance]);
 
+  // Add this to your useSharedCustodialBalance hook in the useEffect section
+useEffect(() => {
+  const handleCustomBalanceUpdate = (event: CustomEvent) => {
+    if (event.detail.userId === userId) {
+      console.log(`🔄 SHARED: Custom balance update event received:`, event.detail);
+      
+      if (event.detail.newBalance !== undefined) {
+        setState(prev => ({
+          ...prev,
+          balance: parseFloat(event.detail.newBalance) || 0,
+          lastUpdated: Date.now(),
+          error: null
+        }));
+      } else {
+        // Trigger refresh if no balance provided
+        forceRefresh();
+      }
+    }
+  };
+
+  const handleForceRefresh = (event: CustomEvent) => {
+    if (event.detail.userId === userId) {
+      console.log(`🔄 SHARED: Force refresh event received:`, event.detail);
+      setTimeout(() => forceRefresh(), 100);
+    }
+  };
+
+  window.addEventListener('custodialBalanceUpdate', handleCustomBalanceUpdate as EventListener);
+  window.addEventListener('forceBalanceRefresh', handleForceRefresh as EventListener);
+  
+  return () => {
+    window.removeEventListener('custodialBalanceUpdate', handleCustomBalanceUpdate as EventListener);
+    window.removeEventListener('forceBalanceRefresh', handleForceRefresh as EventListener);
+  };
+}, [userId, forceRefresh]);
   // Enhanced socket listeners
   useEffect(() => {
     if (!userId || socketListenersRef.current) return;

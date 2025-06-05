@@ -2310,7 +2310,7 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                         
                         // Use the enhanced balance update system
                         const { data: balanceResult, error: balanceError } = await supabaseService
-                            .rpc('update_user_balance_with_audit', {  // ✅ Change function name
+                            .rpc('update_unified_user_balance', {  // ✅ Change function name
                                 p_user_id: userId,
                                 p_custodial_change: amount,
                                 p_privy_change: 0,
@@ -2457,7 +2457,7 @@ async function resolvePendingDeposits(): Promise<void> {
         for (const deposit of pendingDeposits) {
             // Try to find user for this wallet address now
             const { data: userWallet, error: walletError } = await supabaseService
-                .from('user_hybrid_wallets')
+                .from('users_unified')
                 .select('*')
                 .eq('external_wallet_address', deposit.wallet_address)
                 .single();
@@ -2476,14 +2476,14 @@ async function resolvePendingDeposits(): Promise<void> {
                 
                 // Update user balance
                 const { error: updateError } = await supabaseService
-                    .from('user_hybrid_wallets')
+                    .from('users_unified')
                     .update({
                         custodial_balance: newBalance,
                         custodial_total_deposited: newTotalDeposited,
                         last_custodial_deposit: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     })
-                    .eq('user_id', userId);
+                    .eq('id', userId);
 
                 if (!updateError) {
                     // Record the deposit
@@ -2595,56 +2595,97 @@ async function getUserWalletBalance(walletAddress: string): Promise<number> {
 }
 
 // ===== HYBRID SYSTEM FUNCTIONS =====
+// ============================================================================
+// UPDATED USER FUNCTIONS - Uses users_unified table
+// Replaces the old fragmented table approach
+// ============================================================================
 
 async function registerNewUser(walletAddress: string): Promise<string> {
     try {
-        // First check if user already exists in user_profiles
-        const { data: existingProfile, error: profileCheckError } = await supabaseService
-            .from('user_profiles')
-            .select('user_id')
-            .eq('external_wallet_address', walletAddress)
+        // Check if user already exists in users_unified (case-insensitive!)
+        const { data: existingUser, error: userCheckError } = await supabaseService
+            .from('users_unified')
+            .select('id, username')
+            .or(`wallet_address.ilike.${walletAddress},external_wallet_address.ilike.${walletAddress},privy_wallet_address.ilike.${walletAddress}`)
             .single();
             
-        if (!profileCheckError && existingProfile) {
-            console.log(`✅ User already exists in user_profiles: ${existingProfile.user_id}`);
-            return existingProfile.user_id;
+        if (!userCheckError && existingUser) {
+            console.log(`✅ User already exists: ${existingUser.username} (${existingUser.id})`);
+            return existingUser.id;
         }
         
-        // Generate new user ID
+        // Generate new user ID (UUID)
         const userId = crypto.randomUUID();
+        const username = `user_${userId.slice(-8)}`;
         
-        console.log(`🆕 Creating new user ${userId} for wallet ${walletAddress}`);
+        console.log(`🆕 Creating new user ${username} for wallet ${walletAddress}`);
         
-        // Create user in user_profiles table
+        // Create user in users_unified table (single table, no fragmentation!)
         const { error: insertError } = await supabaseService
-            .from('user_profiles')
+            .from('users_unified')
             .insert({
-                user_id: userId,
-                username: `user_${userId.slice(-8)}`,
+                id: userId,
+                username,
+                wallet_address: walletAddress,
                 external_wallet_address: walletAddress,
+                privy_wallet_address: walletAddress,
                 custodial_balance: 0,
                 privy_balance: 0,
+                embedded_balance: 0,
+                total_deposited: 0,
                 custodial_total_deposited: 0,
+                total_transfers_to_privy: 0,
+                total_transfers_from_privy: 0,
                 total_transfers_to_embedded: 0,
                 total_transfers_to_custodial: 0,
                 level: 1,
+                experience: 0,
+                experience_points: 0,
+                experience_to_next_level: 100,
+                total_games_played: 0,
+                total_bets_placed: 0,
+                games_won: 0,
+                games_lost: 0,
+                total_wagered: 0,
+                total_won: 0,
+                total_lost: 0,
+                average_bet_size: 0,
+                largest_win: 0,
+                largest_loss: 0,
+                best_multiplier: 0,
+                daily_profit: 0,
+                weekly_profit: 0,
+                monthly_profit: 0,
+                current_win_streak: 0,
+                best_win_streak: 0,
+                risk_score: 0,
+                behavior_pattern: 'casual',
+                preferred_bet_range: 'small',
+                badge: 'newcomer',
+                badges_earned: [],
+                achievements: [],
+                chat_level: 0,
+                is_chat_moderator: false,
+                is_connected: true,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
             });
             
         if (insertError) {
-            console.error(`❌ Failed to create user in user_profiles:`, insertError);
+            console.error(`❌ Failed to create user in users_unified:`, insertError);
             throw insertError;
         }
         
-        console.log(`✅ Created new user ${userId} in user_profiles`);
+        console.log(`✅ Created new user ${username} (${userId}) in users_unified`);
         return userId;
         
     } catch (error) {
         console.error('❌ User registration failed:', error);
-        throw error;
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        throw new Error(errorMessage); // ✅ Throw instead of return object
     }
 }
+
 
 // Enhanced function to get or create user by wallet address
 async function getOrCreateUser(walletAddress: string): Promise<{ 
@@ -2653,16 +2694,16 @@ async function getOrCreateUser(walletAddress: string): Promise<{
     userProfile: any 
 }> {
     try {
-        // Try to find existing user first
+        // Try to find existing user first using the new unified table
         const { data: existingProfile, error: profileError } = await supabaseService
-            .from('user_profiles')
-            .select('*')
-            .eq('external_wallet_address', walletAddress)
+            .from('users_unified') // ✅ Changed from 'user_profiles'
+            .select('id')
+            .or(`wallet_address.ilike.${walletAddress},external_wallet_address.ilike.${walletAddress},privy_wallet_address.ilike.${walletAddress}`)
             .single();
             
         if (!profileError && existingProfile) {
             return {
-                userId: existingProfile.user_id,
+                userId: existingProfile.id, // ✅ Changed from 'user_id' to 'id'
                 isNewUser: false,
                 userProfile: existingProfile
             };
@@ -2673,9 +2714,9 @@ async function getOrCreateUser(walletAddress: string): Promise<{
         
         // Fetch the newly created profile
         const { data: newProfile, error: fetchError } = await supabaseService
-            .from('user_profiles')
+            .from('users_unified') // ✅ Changed from 'user_profiles'
             .select('*')
-            .eq('user_id', userId)
+            .eq('id', userId) // ✅ Changed from 'user_id'
             .single();
             
         if (fetchError || !newProfile) {
@@ -2694,87 +2735,247 @@ async function getOrCreateUser(walletAddress: string): Promise<{
     }
 }
 
+// Simplified user lookup - no more searching across multiple tables!
 async function findUserByWalletAddress(walletAddress: string): Promise<{ userId: string; userProfile: any } | null> {
     try {
-        console.log(`🔍 ENHANCED: Searching for user with wallet: ${walletAddress}`);
+        console.log(`🔍 UNIFIED: Searching for user with wallet: ${walletAddress}`);
         
-        // Try multiple search strategies
-        const searchPromises = [
-            // Search in user_profiles
-            supabaseService
-                .from('user_profiles')
-                .select('*')
-                .eq('external_wallet_address', walletAddress)
-                .single(),
-            
-            // Search in user_hybrid_wallets
-            supabaseService
-                .from('user_hybrid_wallets')
-                .select('*')
-                .eq('external_wallet_address', walletAddress)
-                .single(),
-                
-            // Search in privy_wallets
-            supabaseService
-                .from('privy_wallets')
-                .select('*')
-                .eq('privy_wallet_address', walletAddress)
-                .single()
-        ];
+        // Single query across all wallet fields (case-insensitive)
+        const { data: user, error } = await supabaseService
+            .from('users_unified')
+            .select('*')
+            .or(`wallet_address.ilike.${walletAddress},external_wallet_address.ilike.${walletAddress},privy_wallet_address.ilike.${walletAddress}`)
+            .single();
         
-        const results = await Promise.allSettled(searchPromises);
-        
-        // Check user_profiles result
-        if (results[0].status === 'fulfilled' && results[0].value.data) {
-            console.log(`✅ Found user in user_profiles: ${results[0].value.data.user_id}`);
+        if (!error && user) {
+            console.log(`✅ Found user: ${user.username} (${user.id})`);
             return {
-                userId: results[0].value.data.user_id,
-                userProfile: results[0].value.data
+                userId: user.id,
+                userProfile: user
             };
         }
         
-        // Check user_hybrid_wallets result
-        if (results[1].status === 'fulfilled' && results[1].value.data) {
-            console.log(`✅ Found user in user_hybrid_wallets: ${results[1].value.data.user_id}`);
-            
-            // Get full profile
-            const { data: profile } = await supabaseService
-                .from('user_profiles')
-                .select('*')
-                .eq('user_id', results[1].value.data.user_id)
-                .single();
-                
-            return {
-                userId: results[1].value.data.user_id,
-                userProfile: profile || results[1].value.data
-            };
-        }
-        
-        // Check privy_wallets result
-        if (results[2].status === 'fulfilled' && results[2].value.data) {
-            console.log(`✅ Found user in privy_wallets: ${results[2].value.data.user_id}`);
-            
-            // Get full profile
-            const { data: profile } = await supabaseService
-                .from('user_profiles')
-                .select('*')
-                .eq('user_id', results[2].value.data.user_id)
-                .single();
-                
-            return {
-                userId: results[2].value.data.user_id,
-                userProfile: profile || { user_id: results[2].value.data.user_id }
-            };
-        }
-        
-        console.log(`❌ User not found in any table for wallet: ${walletAddress}`);
+        console.log(`❌ User not found for wallet: ${walletAddress}`);
         return null;
         
     } catch (error) {
         console.error('❌ Error searching for user:', error);
-        return null;
+        return null; // ✅ Return null instead of object
     }
 }
+
+
+// New function for deposit processing (replaces your complex deposit logic)
+async function processDeposit(walletAddress: string, amount: number, transactionId?: string): Promise<{
+    success: boolean;
+    user?: any;
+    oldBalance?: number;
+    newBalance?: number;
+    error?: string;
+}> {
+    try {
+        console.log(`💰 Processing deposit: ${amount} for wallet ${walletAddress}`);
+        
+        const { data: depositResult, error } = await supabaseService
+            .rpc('update_unified_user_balance', {
+                p_wallet_address: walletAddress,
+                p_custodial_change: amount,
+                p_transaction_type: 'deposit',
+                p_transaction_id: transactionId || null
+            });
+        
+        if (error) {
+            console.error('❌ Deposit function error:', error);
+            return { success: false, error: error.message };
+        }
+        
+        if (!depositResult || !depositResult.success) {
+            console.log('❌ User not found for deposit wallet:', walletAddress);
+            return { success: false, error: 'User not found' };
+        }
+        
+        console.log(`✅ Deposit successful! User: ${depositResult.username}, Balance: ${depositResult.old_balance} → ${depositResult.new_balance}`);
+        
+        return {
+            success: true,
+            user: {
+                id: depositResult.user_id,
+                username: depositResult.username
+            },
+            oldBalance: depositResult.old_balance,
+            newBalance: depositResult.new_balance
+        };
+        
+    } catch (error) {
+        console.error('❌ Deposit processing failed:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        return { success: false, error: errorMessage };
+    }
+}
+
+// New function for balance updates (bets, wins, etc.)
+async function updateUserBalanceUnified(params: {
+    userId?: string;
+    walletAddress?: string;
+    custodialChange?: number;
+    privyChange?: number;
+    embeddedChange?: number;
+    transactionType?: string;
+    transactionId?: string;
+    gameId?: string;
+}): Promise<{
+    success: boolean;
+    user?: any;
+    oldBalance?: number;
+    newBalance?: number;
+    error?: string;
+}> {
+    try {
+        const {
+            userId,
+            walletAddress,
+            custodialChange = 0,
+            privyChange = 0,
+            embeddedChange = 0,
+            transactionType = 'game',
+            transactionId,
+            gameId
+        } = params;
+        
+        // Determine userId if not provided
+        let finalUserId = userId;
+        let username = '';
+        
+        if (!finalUserId && walletAddress) {
+            console.log(`🔍 Looking up user by wallet: ${walletAddress}`);
+            
+            const { data: userData, error: userError } = await supabaseService
+                .from('users_unified')
+                .select('id, username')
+                .or(`external_wallet_address.ilike.${walletAddress},wallet_address.ilike.${walletAddress}`)
+                .single();
+            
+            if (userError || !userData) {
+                return { success: false, error: 'User not found for wallet address' };
+            }
+            
+            finalUserId = userData.id;
+            username = userData.username;
+        }
+        
+        if (!finalUserId) {
+            return { success: false, error: 'Either userId or walletAddress must be provided' };
+        }
+        
+        console.log(`🔄 Updating unified balance for user ${finalUserId}: custodial=${custodialChange}, privy=${privyChange}, embedded=${embeddedChange}`);
+        
+        // Execute the RPC call with all required parameters
+        const { data: result, error } = await supabaseService
+            .rpc('update_unified_user_balance', {
+                p_user_id: finalUserId,
+                p_custodial_change: custodialChange,
+                p_privy_change: privyChange,
+                p_embedded_change: embeddedChange,
+                p_transaction_type: transactionType,
+                p_transaction_id: transactionId || null,
+                p_game_id: gameId || null,
+                p_is_deposit: custodialChange > 0,
+                p_deposit_amount: custodialChange > 0 ? custodialChange : 0
+            });
+        
+        if (error) {
+            console.error(`❌ Unified balance update error for user ${finalUserId}:`, error);
+            return { success: false, error: error.message || 'Balance update failed' };
+        }
+        
+        if (!result || result.length === 0) {
+            console.error(`❌ No result returned for user ${finalUserId}`);
+            return { success: false, error: 'No result returned from database' };
+        }
+        
+        const firstResult = result[0];
+        
+        return {
+            success: true,
+            user: { 
+                id: firstResult.user_id || firstResult.id || finalUserId,
+                username: firstResult.username || username
+            },
+            oldBalance: parseFloat(firstResult.old_custodial_balance) || 0,
+            newBalance: parseFloat(firstResult.new_custodial_balance) || 0
+        };
+        
+    } catch (error) {
+        console.error('❌ Unified balance update failed:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        return { success: false, error: errorMessage };
+    }
+}
+
+async function updateUserBalance(
+    walletAddress: string, 
+    balanceChange: number, 
+    transactionType: string = 'game', 
+    transactionId?: string
+): Promise<{
+    success: boolean;
+    user?: any;
+    oldBalance?: number;
+    newBalance?: number;
+    error?: string;
+}> {
+    return updateUserBalanceUnified({
+        walletAddress,
+        custodialChange: balanceChange,
+        transactionType,
+        transactionId,
+        gameId: currentGame?.id
+    });
+}
+// New function to get user stats for leaderboards/dashboard
+async function getUserStats(userId: string): Promise<any | null> {
+    try {
+        const { data: user, error } = await supabaseService
+            .from('users_unified')
+            .select(`
+                id, username, avatar, level, experience_points,
+                custodial_balance, privy_balance, embedded_balance, total_balance,
+                total_deposited, total_wagered, total_won, total_lost, net_profit,
+                total_games_played, games_won, games_lost, win_rate,
+                current_win_streak, best_win_streak, largest_win, largest_loss,
+                daily_profit, weekly_profit, monthly_profit,
+                badge, badges_earned, achievements,
+                wallet_address, external_wallet_address, privy_wallet_address,
+                created_at, last_active
+            `)
+            .eq('id', userId)
+            .single();
+        
+        if (error) {
+            console.error('❌ Failed to get user stats:', error);
+            return null;
+        }
+        
+        return user;
+        
+   
+    } catch (error) {
+        console.error('❌ Error getting user stats:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        // Use errorMessage instead of error.message
+        return { success: false, error: errorMessage };
+    }
+}
+
+// Export all functions for easy replacement
+export {
+    registerNewUser,
+    getOrCreateUser,
+    findUserByWalletAddress,
+    processDeposit,
+    updateUserBalance,
+    getUserStats
+};
 // ENHANCED: Function to resolve pending deposits for a specific user
 // FIXED: Function to resolve pending deposits for a specific user
 // FIXED: Function to resolve pending deposits for a specific user
@@ -2807,7 +3008,7 @@ async function resolvePendingDepositsForUser(walletAddress: string): Promise<voi
                 // Use the RPC function to update balance
                 const { data: balanceResult, error: balanceError } = await supabaseService
             
-                    .rpc('update_user_balance_with_audit', {  // ✅ Change function name
+                    .rpc('update_unified_user_balance', {  // ✅ Change function name
                         p_user_id: userId,
                         p_custodial_change: depositAmount,
                         p_privy_change: 0,
@@ -2880,7 +3081,7 @@ async function initializeHybridSystem(): Promise<void> {
         console.log('🔄 Initializing hybrid wallet system...');
         
         const { data: hybridWallets, error } = await supabaseService
-            .from('user_hybrid_wallets')
+            .from('users_unified')
             .select('*');
 
         if (!error && hybridWallets) {
@@ -2914,7 +3115,7 @@ async function initializeHybridSystem(): Promise<void> {
 async function saveHybridWallet(wallet: HybridUserWallet): Promise<void> {
     try {
         await supabaseService
-            .from('user_hybrid_wallets')
+            .from('users_unified')
             .upsert({
                 user_id: wallet.userId,
                 external_wallet_address: wallet.externalWalletAddress,
@@ -3058,48 +3259,48 @@ function updateHybridSystemStats(): void {
 // 🔧 NEW: Helper function to sync user balance from database
 async function syncUserBalanceFromDatabase(userId: string): Promise<number> {
     try {
-        console.log(`🔄 Syncing balance from database for user ${userId}...`);
+        console.log(`🔄 Syncing balance from unified table for user ${userId}...`);
         
-        const { data: freshWalletData, error } = await supabaseService
-            .from('user_hybrid_wallets')
+        const { data: freshUserData, error } = await supabaseService
+            .from('users_unified') // ✅ Changed from 'user_hybrid_wallets'
             .select('*')
-            .eq('user_id', userId)
+            .eq('id', userId) // ✅ Changed from 'user_id'
             .single();
 
-        if (error || !freshWalletData) {
+        if (error || !freshUserData) {
             console.warn(`❌ Failed to sync balance for user ${userId}:`, error);
             return 0;
         }
 
-        // Update in-memory wallet with fresh data
+        // Update in-memory wallet with fresh data from unified table
         let userWallet = hybridUserWallets.get(userId);
         if (!userWallet) {
-            // Create new wallet if it doesn't exist in memory
+            // Create new wallet record if it doesn't exist
             userWallet = {
                 userId,
-                externalWalletAddress: freshWalletData.external_wallet_address,
-                custodialBalance: parseFloat(freshWalletData.custodial_balance) || 0,
-                custodialTotalDeposited: parseFloat(freshWalletData.custodial_total_deposited) || 0,
-                lastCustodialDeposit: freshWalletData.last_custodial_deposit ? new Date(freshWalletData.last_custodial_deposit).getTime() : 0,
-                embeddedWalletId: freshWalletData.embedded_wallet_id,
-                embeddedBalance: parseFloat(freshWalletData.embedded_balance) || 0,
-                lastEmbeddedWithdrawal: freshWalletData.last_embedded_withdrawal ? new Date(freshWalletData.last_embedded_withdrawal).getTime() : 0,
-                lastTransferBetweenWallets: freshWalletData.last_transfer_between_wallets ? new Date(freshWalletData.last_transfer_between_wallets).getTime() : 0,
-                totalTransfersToEmbedded: parseFloat(freshWalletData.total_transfers_to_embedded) || 0,
-                totalTransfersToCustodial: parseFloat(freshWalletData.total_transfers_to_custodial) || 0,
-                createdAt: new Date(freshWalletData.created_at).getTime()
+                externalWalletAddress: freshUserData.external_wallet_address || freshUserData.wallet_address,
+                custodialBalance: parseFloat(freshUserData.custodial_balance) || 0,
+                custodialTotalDeposited: parseFloat(freshUserData.custodial_total_deposited) || 0,
+                lastCustodialDeposit: freshUserData.last_custodial_deposit ? new Date(freshUserData.last_custodial_deposit).getTime() : 0,
+                embeddedWalletId: freshUserData.embedded_wallet_id,
+                embeddedBalance: parseFloat(freshUserData.embedded_balance) || 0,
+                lastEmbeddedWithdrawal: freshUserData.last_embedded_withdrawal ? new Date(freshUserData.last_embedded_withdrawal).getTime() : 0,
+                lastTransferBetweenWallets: freshUserData.last_transfer_between_wallets ? new Date(freshUserData.last_transfer_between_wallets).getTime() : 0,
+                totalTransfersToEmbedded: parseFloat(freshUserData.total_transfers_to_embedded) || 0,
+                totalTransfersToCustodial: parseFloat(freshUserData.total_transfers_to_custodial) || 0,
+                createdAt: new Date(freshUserData.created_at).getTime()
             };
         } else {
             // Update existing wallet with fresh data
-            userWallet.custodialBalance = parseFloat(freshWalletData.custodial_balance) || 0;
-            userWallet.custodialTotalDeposited = parseFloat(freshWalletData.custodial_total_deposited) || 0;
-            userWallet.embeddedBalance = parseFloat(freshWalletData.embedded_balance) || 0;
-            userWallet.totalTransfersToEmbedded = parseFloat(freshWalletData.total_transfers_to_embedded) || 0;
-            userWallet.totalTransfersToCustodial = parseFloat(freshWalletData.total_transfers_to_custodial) || 0;
+            userWallet.custodialBalance = parseFloat(freshUserData.custodial_balance) || 0;
+            userWallet.custodialTotalDeposited = parseFloat(freshUserData.custodial_total_deposited) || 0;
+            userWallet.embeddedBalance = parseFloat(freshUserData.embedded_balance) || 0;
+            userWallet.totalTransfersToEmbedded = parseFloat(freshUserData.total_transfers_to_embedded) || 0;
+            userWallet.totalTransfersToCustodial = parseFloat(freshUserData.total_transfers_to_custodial) || 0;
         }
 
         hybridUserWallets.set(userId, userWallet);
-        console.log(`✅ Balance synced for ${userId}: ${userWallet.custodialBalance.toFixed(3)} SOL`);
+        console.log(`✅ Balance synced for ${userId}: ${userWallet.custodialBalance.toFixed(3)} SOL from unified table`);
         
         return userWallet.custodialBalance;
     } catch (error) {
@@ -3132,10 +3333,11 @@ async function placeBetFromCustodialBalance(
         console.log(`🔄 Loading user profile from unified table for ${userId}...`);
         
         const { data: profileData, error } = await supabaseService
-            .from('user_profiles')
-            .select('user_id, username, custodial_balance, privy_balance, total_balance, external_wallet_address, level')
-            .eq('user_id', userId)
-            .single();
+    .from('users_unified')
+    .select('id, username, custodial_balance, privy_balance, total_balance, external_wallet_address, level')
+    .eq('id', userId)
+    .single();
+
 
         if (error || !profileData) {
             console.error(`❌ User profile not found for ${userId}:`, error);
@@ -3143,7 +3345,7 @@ async function placeBetFromCustodialBalance(
         }
 
         userProfile = {
-            userId: profileData.user_id,
+            userId: profileData.id, // ✅ Changed from user_id to id
             username: profileData.username,
             custodialBalance: parseFloat(profileData.custodial_balance) || 0,
             privyBalance: parseFloat(profileData.privy_balance) || 0,
@@ -3189,7 +3391,7 @@ if (existingBet && !existingBet.cashedOut && existingBet.isValid) {
             const { data: balanceResult, error: balanceError } = await supabaseService
             
         
-                .rpc('update_user_balance_with_audit', {  // ✅ Change function name
+                .rpc('update_unified_user_balance', {  // ✅ Change function name
                     p_user_id: userId,
                     p_custodial_change: -betAmount,
                     p_privy_change: 0,
@@ -3267,7 +3469,7 @@ setTimeout(() => {
         // 🔧 NEW: Use atomic balance update function for normal bet
         const { data: balanceResult, error: balanceError } = await supabaseService
             
-            .rpc('update_user_balance_with_audit', {  // ✅ Change function name
+            .rpc('update_unified_user_balance', {  // ✅ Change function name
                 p_user_id: userId,
                 p_custodial_change: -betAmount,
                 p_privy_change: 0,
@@ -3443,7 +3645,7 @@ currentGame.totalPlayers = currentGame.activeBets.size;
         // 🔧 NEW: Use atomic balance update for payout
         const { data: balanceResult, error: balanceError } = await supabaseService
         
-            .rpc('update_user_balance_with_audit', {  // ✅ Change function name
+            .rpc('update_unified_user_balance', {  // ✅ Change function name
                 p_user_id: userId,
                 p_custodial_change: safePayout,
                 p_privy_change: 0,
@@ -3551,9 +3753,9 @@ async function syncUserBalanceAfterTransaction(
     try {
         // Get current balance from database
         const { data: currentBalance } = await supabaseService
-            .from('user_hybrid_wallets')
+            .from('users_unified')
             .select('custodial_balance')
-            .eq('user_id', userId)
+            .eq('id', userId)
             .single();
 
         // Update in-memory cache
@@ -5856,6 +6058,226 @@ app.get('/api/bootstrap/fomo-status', (req, res): void => {
     });
 });
 
+// Add this to your game server
+app.post('/api/transfer/privy-to-custodial', async (req, res): Promise<void> => {
+    try {
+        const { userId, amount, signedTransaction, autoSign, walletAddress } = req.body;
+        
+        console.log(`💳 API: Transfer request - ${amount} SOL for user ${userId}`);
+        console.log(`🔍 Request details:`, { userId, amount, autoSign: !!autoSign, walletAddress, hasSignedTx: !!signedTransaction });
+
+        // Validate inputs
+        if (!userId || !amount || !walletAddress) {
+            res.status(400).json({
+                success: false,
+                error: 'Missing required fields: userId, amount, walletAddress'
+            });
+            return;
+        }
+
+        if (amount <= 0 || amount > 10) {
+            res.status(400).json({
+                success: false,
+                error: 'Invalid amount. Must be between 0 and 10 SOL'
+            });
+            return;
+        }
+
+        // Check if user exists in unified table
+        const { data: userData, error: userError } = await supabaseService
+            .from('users_unified')
+            .select('*')
+            .eq('id', userId)
+            .single();
+
+        if (userError || !userData) {
+            console.log(`❌ User ${userId} not found in users_unified table`);
+            res.status(404).json({
+                success: false,
+                error: 'User not found. Please register first.',
+                hint: 'Call authentication endpoint first'
+            });
+            return;
+        }
+
+        // Step 1: Return unsigned transaction if no signed transaction provided
+        if (!signedTransaction) {
+            console.log(`📝 Creating unsigned transaction for ${amount} SOL transfer`);
+            
+            try {
+                const userPublicKey = new PublicKey(walletAddress);
+                const transaction = await createTransaction(userPublicKey, housePublicKey, amount);
+                
+                const { blockhash } = await solanaConnection.getLatestBlockhash();
+                transaction.recentBlockhash = blockhash;
+                transaction.feePayer = userPublicKey;
+                
+                // Add memo for tracking
+                const memo = `privy-to-custodial-${userId}-${Date.now()}`;
+                transaction.add(
+                    new TransactionInstruction({
+                        keys: [],
+                        programId: new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'),
+                        data: Buffer.from(memo, 'utf8')
+                    })
+                );
+                
+                const serializedTransaction = transaction.serialize({ requireAllSignatures: false });
+                const base64Transaction = serializedTransaction.toString('base64');
+                
+                console.log(`✅ Unsigned transaction created for ${userId}`);
+                
+                res.json({
+                    success: false, // False because transaction not completed yet
+                    unsignedTransaction: base64Transaction,
+                    transferId: `transfer-${userId}-${Date.now()}`,
+                    message: 'Transaction created - please sign and resubmit'
+                });
+                return;
+                
+            } catch (error) {
+                console.error('❌ Failed to create unsigned transaction:', error);
+                res.status(500).json({
+                    success: false,
+                    error: 'Failed to create transaction'
+                });
+                return;
+            }
+        }
+
+        // Step 2: Process signed transaction
+        console.log(`🔗 Processing signed transaction for ${userId}`);
+        
+        try {
+            const transactionBuffer = Buffer.from(signedTransaction, 'base64');
+            
+            // Submit to blockchain
+            const signature = await solanaConnection.sendRawTransaction(
+                transactionBuffer,
+                { skipPreflight: false, preflightCommitment: 'confirmed' }
+            );
+            
+            console.log(`📡 Transaction submitted: ${signature}`);
+            
+            // Wait for confirmation
+            const confirmation = await Promise.race([
+                solanaConnection.confirmTransaction(signature, 'confirmed'),
+                new Promise<any>((_, reject) => 
+                    setTimeout(() => reject(new Error('Transaction timeout')), 30000)
+                )
+            ]);
+            
+            if (confirmation && confirmation.value && confirmation.value.err) {
+                throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+            }
+            
+            console.log(`✅ Transaction confirmed: ${signature}`);
+            
+            // Update user balance in unified table using new RPC
+            const { data: balanceResult, error: balanceError } = await supabaseService
+                .rpc('update_unified_user_balance', {
+                    p_user_id: userId,
+                    p_custodial_change: amount, // Add to custodial
+                    p_privy_change: -amount,    // Remove from privy (if tracking separately)
+                    p_embedded_change: 0,
+                    p_transaction_type: 'privy_to_custodial_transfer',
+                    p_transaction_id: signature,
+                    p_game_id: currentGame?.id || null,
+                    p_is_deposit: false,
+                    p_deposit_amount: 0
+                });
+
+            if (balanceError) {
+                console.error(`❌ Balance update failed:`, balanceError);
+                // Transaction succeeded but balance update failed - this is critical
+                res.status(500).json({
+                    success: false,
+                    error: 'Transaction completed but balance update failed',
+                    transactionId: signature,
+                    criticalError: true
+                });
+                return;
+            }
+
+            if (!balanceResult || balanceResult.length === 0) {
+                console.error(`❌ No balance result returned from RPC`);
+                res.status(500).json({
+                    success: false,
+                    error: 'Balance update returned no results',
+                    transactionId: signature
+                });
+                return;
+            }
+
+            const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
+            const newTotalBalance = parseFloat(balanceResult[0].new_total_balance);
+            
+            console.log(`💰 Balance updated successfully: ${newCustodialBalance.toFixed(6)} SOL custodial`);
+
+            // Update house balance
+            await updateHouseBalance();
+
+            // Emit real-time socket event
+            io.emit('custodialBalanceUpdate', {
+                userId,
+                custodialBalance: newCustodialBalance,
+                totalBalance: newTotalBalance,
+                change: amount,
+                transactionType: 'privy_to_custodial_transfer',
+                transactionId: signature,
+                updateType: 'transfer_completed',
+                timestamp: Date.now(),
+                source: 'unified_transfer_api'
+            });
+
+            // Also emit user-specific balance update
+            io.emit('userBalanceUpdate', {
+                userId,
+                walletAddress,
+                balanceType: 'custodial',
+                oldBalance: newCustodialBalance - amount,
+                newBalance: newCustodialBalance,
+                change: amount,
+                transactionType: 'transfer',
+                transactionSignature: signature,
+                timestamp: Date.now(),
+                source: 'privy_transfer'
+            });
+
+            res.json({
+                success: true,
+                transactionId: signature,
+                transferDetails: {
+                    amount,
+                    newBalance: newCustodialBalance,
+                    newTotalBalance,
+                    fromWallet: walletAddress,
+                    toAccount: 'custodial_balance'
+                },
+                dailyLimits: {
+                    used: amount, // Simplified - you'd track this properly
+                    remaining: 10 - amount,
+                    limit: 10
+                },
+                message: 'Transfer completed successfully'
+            });
+
+        } catch (error) {
+            console.error('❌ Transfer processing error:', error);
+            res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Transfer failed'
+            });
+        }
+
+    } catch (error) {
+        console.error('❌ Transfer API error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
 // ===== HYBRID SYSTEM API =====
 app.get('/api/hybrid/status', (req, res): void => {
     updateHybridSystemStats();
@@ -5877,30 +6299,69 @@ app.get('/api/hybrid/status', (req, res): void => {
         }
     });
 });
-
-app.get('/api/custodial/balance/:userId', (req, res): void => {
+// Add to your server for debugging
+app.get('/api/debug/transfer-test/:userId', async (req, res): Promise<void> => {
     try {
         const { userId } = req.params;
-        const userWallet = hybridUserWallets.get(userId);
         
-        if (!userWallet) {
-            void res.status(404).json({
-                error: 'User wallet not found',
+        // Check user in unified table
+        const { data: userData, error: userError } = await supabaseService
+            .from('users_unified')
+            .select('*')
+            .eq('id', userId)
+            .single();
+        
+        res.json({
+            userFound: !userError,
+            userData: userData ? {
+                id: userData.id,
+                custodial_balance: userData.custodial_balance,
+                privy_balance: userData.privy_balance,
+                total_balance: userData.custodial_balance + userData.privy_balance + userData.embedded_balance
+            } : null,
+            error: userError?.message,
+            serverInfo: {
+                houseWallet: HOUSE_WALLET_ADDRESS,
+                houseBalance: houseBalance,
+                gameActive: !!currentGame
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ 
+            error: error instanceof Error ? error.message : 'Unknown error' 
+        });
+    }
+});
+app.get('/api/custodial/balance/:userId', async (req, res): Promise<void> => {
+    try {
+        const { userId } = req.params;
+        
+        // Fetch from unified table
+        const { data: userData, error } = await supabaseService
+            .from('users_unified') // ✅ Changed from user_hybrid_wallets
+            .select('*')
+            .eq('id', userId) // ✅ Changed from user_id
+            .single();
+        
+        if (error || !userData) {
+            res.status(404).json({
+                error: 'User not found',
                 userId,
-                hint: 'User needs to make a deposit first'
+                hint: 'User needs to be created first'
             });
             return;
         }
         
-        void res.json({
+        res.json({
             userId,
-            walletAddress: userWallet.externalWalletAddress,
-            custodialBalance: userWallet.custodialBalance,
-            totalDeposited: userWallet.custodialTotalDeposited,
-            lastDeposit: userWallet.lastCustodialDeposit,
-            embeddedBalance: userWallet.embeddedBalance,
-            canBet: userWallet.custodialBalance >= 0.001,
-            canCashOut: userWallet.custodialBalance > 0,
+            walletAddress: userData.external_wallet_address || userData.wallet_address,
+            custodialBalance: parseFloat(userData.custodial_balance) || 0,
+            privyBalance: parseFloat(userData.privy_balance) || 0,
+            embeddedBalance: parseFloat(userData.embedded_balance) || 0,
+            totalDeposited: parseFloat(userData.total_deposited) || 0,
+            lastDeposit: userData.last_custodial_deposit,
+            canBet: (parseFloat(userData.custodial_balance) || 0) >= 0.001,
+            canCashOut: (parseFloat(userData.custodial_balance) || 0) > 0,
             timestamp: Date.now()
         });
         
@@ -6187,9 +6648,9 @@ async function syncAllUserBalances(): Promise<void> {
             try {
                 // Get fresh balance from database
                 const { data: freshBalance } = await supabaseService
-                    .from('user_profiles')
+                .from('users_unified')
                     .select('custodial_balance, privy_balance, total_balance')
-                    .eq('user_id', userId)
+                    .eq('id', userId)
                     .single();
                 
                 if (freshBalance) {
@@ -6522,9 +6983,9 @@ async function verifyUserBalances(): Promise<void> {
         for (const [userId, wallet] of hybridUserWallets) {
             try {
                 const { data: dbBalance } = await supabaseService
-                    .from('user_profiles')
+                .from('users_unified')
                     .select('custodial_balance, privy_balance')
-                    .eq('user_id', userId)
+                    .eq('id', userId)
                     .single();
                 
                 if (dbBalance) {
@@ -6705,7 +7166,7 @@ app.post('/api/admin/resolve-all-pending', async (req, res): Promise<void> => {
                     // Update balance using RPC
                     const { data: balanceResult, error: balanceError } = await supabaseService
                         
-                        .rpc('update_user_balance_with_audit', {  // ✅ Change function name
+                        .rpc('update_unified_user_balance', {  // ✅ Change function name
                             p_user_id: userId,
                             p_custodial_change: depositAmount,
                             p_privy_change: 0,

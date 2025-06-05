@@ -1,4 +1,4 @@
-// src/hooks/usePrivyAutoTransfer.ts
+// src/hooks/usePrivyAutoTransfer.ts - FIXED VERSION
 import { useState, useCallback } from 'react';
 import { Transaction } from '@solana/web3.js';
 import { useSolanaWallets } from '@privy-io/react-auth';
@@ -49,15 +49,31 @@ export const usePrivyAutoTransfer = () => {
   }, []);
 
   /**
-   * 🔥 ENHANCED: Execute auto-transfer with better integration
+   * 🔥 FIXED: Execute auto-transfer with proper userId handling
    */
   const executeAutoTransfer = useCallback(async (
     userId: string, 
     amount: number,
     onBalanceUpdate?: () => Promise<void> | void
   ): Promise<TransferResult> => {
-    if (!embeddedWallet) {
+    // 🔥 ENHANCED: Better validation with specific error messages
+    if (!userId || userId.trim() === '') {
+      const error = 'User ID is required and cannot be empty';
+      console.error('❌ TRANSFER HOOK: Missing or empty userId:', { userId, amount });
+      updateState({ error });
+      return { success: false, error };
+    }
+
+    if (!embeddedWallet || !embeddedWallet.address) {
       const error = 'No embedded wallet found. Please create an embedded wallet first.';
+      console.error('❌ TRANSFER HOOK: Missing embedded wallet');
+      updateState({ error });
+      return { success: false, error };
+    }
+
+    if (!amount || amount <= 0 || amount > 10) {
+      const error = 'Invalid amount. Must be between 0.001 and 10 SOL';
+      console.error('❌ TRANSFER HOOK: Invalid amount:', amount);
       updateState({ error });
       return { success: false, error };
     }
@@ -65,17 +81,20 @@ export const usePrivyAutoTransfer = () => {
     updateState({ loading: true, error: null });
 
     try {
-      console.log(`🚀 HOOK: Starting enhanced auto-transfer - ${amount} SOL for user ${userId}`);
+      console.log(`🚀 TRANSFER HOOK: Starting enhanced auto-transfer`);
+      console.log(`👤 TRANSFER HOOK: User ID: ${userId}`);
+      console.log(`💰 TRANSFER HOOK: Amount: ${amount} SOL`);
+      console.log(`📍 TRANSFER HOOK: Wallet: ${embeddedWallet.address}`);
       
-      // Step 1: Get unsigned transaction from backend
+      // 🔥 FIXED: Step 1 - Ensure all required fields are present
       const step1Body = { 
-        userId, 
-        amount, 
-        autoSign: false,
+        userId: userId,  // ✅ Explicit userId
+        amount: amount, 
         walletAddress: embeddedWallet.address
+        // NOTE: No signedTransaction = will get unsigned transaction
       };
       
-      console.log('🔍 HOOK: Step 1 - requesting unsigned transaction');
+      console.log('🔍 TRANSFER HOOK: Step 1 body:', step1Body);
       
       const createResponse = await fetch('/api/transfer/privy-to-custodial', {
         method: 'POST',
@@ -83,38 +102,54 @@ export const usePrivyAutoTransfer = () => {
         body: JSON.stringify(step1Body)
       });
 
-      const createData = await createResponse.json();
-      console.log('📡 HOOK: Step 1 response:', createData);
-
       if (!createResponse.ok) {
-        throw new Error(createData.error || 'Failed to create transfer transaction');
+        const errorData = await createResponse.json();
+        console.error('❌ TRANSFER HOOK: Step 1 failed:', errorData);
+        throw new Error(errorData.error || `HTTP ${createResponse.status}: Failed to create transfer transaction`);
       }
 
+      const createData = await createResponse.json();
+      console.log('📡 TRANSFER HOOK: Step 1 response:', createData);
+
       if (!createData.unsignedTransaction) {
+        console.error('❌ TRANSFER HOOK: No unsigned transaction in response:', createData);
         throw new Error('No unsigned transaction received from server');
       }
 
-      console.log('✅ HOOK: Unsigned transaction received, signing...');
+      console.log('✅ TRANSFER HOOK: Unsigned transaction received, signing...');
 
-      // Step 2: Sign transaction with embedded wallet
-      const transaction = Transaction.from(Buffer.from(createData.unsignedTransaction, 'base64'));
-      
-      if (!embeddedWallet.signTransaction) {
-        throw new Error('Embedded wallet does not support transaction signing');
+      // 🔥 ENHANCED: Step 2 - Better transaction signing with error handling
+      let signedTransaction: Transaction;
+      try {
+        const transaction = Transaction.from(Buffer.from(createData.unsignedTransaction, 'base64'));
+        
+        if (!embeddedWallet.signTransaction) {
+          throw new Error('Embedded wallet does not support transaction signing');
+        }
+
+        signedTransaction = await embeddedWallet.signTransaction(transaction);
+        console.log('✅ TRANSFER HOOK: Transaction signed successfully');
+      } catch (signingError) {
+        console.error('❌ TRANSFER HOOK: Transaction signing failed:', signingError);
+        throw new Error(`Transaction signing failed: ${signingError instanceof Error ? signingError.message : 'Unknown signing error'}`);
       }
 
-      const signedTransaction = await embeddedWallet.signTransaction(transaction);
       const signedBase64 = signedTransaction.serialize().toString('base64');
 
-      console.log('✅ HOOK: Transaction signed, submitting...');
-
-      // Step 3: Submit signed transaction to backend
+      // 🔥 FIXED: Step 3 - Submit with all required fields including userId
       const step2Body = {
-        userId,
-        amount,
+        userId: userId,  // ✅ Explicit userId again
+        amount: amount,
         signedTransaction: signedBase64,
         walletAddress: embeddedWallet.address
       };
+
+      console.log('🔍 TRANSFER HOOK: Step 2 body (without signedTx):', {
+        userId: step2Body.userId,
+        amount: step2Body.amount,
+        walletAddress: step2Body.walletAddress,
+        hasSignedTransaction: !!step2Body.signedTransaction
+      });
       
       const submitResponse = await fetch('/api/transfer/privy-to-custodial', {
         method: 'POST',
@@ -122,50 +157,78 @@ export const usePrivyAutoTransfer = () => {
         body: JSON.stringify(step2Body)
       });
 
-      const submitData = await submitResponse.json();
-      console.log('📡 HOOK: Step 2 response:', submitData);
-
       if (!submitResponse.ok) {
-        throw new Error(submitData.error || 'Failed to submit transfer transaction');
+        const errorData = await submitResponse.json();
+        console.error('❌ TRANSFER HOOK: Step 2 failed:', errorData);
+        throw new Error(errorData.error || `HTTP ${submitResponse.status}: Failed to submit transfer transaction`);
       }
 
+      const submitData = await submitResponse.json();
+      console.log('📡 TRANSFER HOOK: Step 2 response:', submitData);
+
       if (!submitData.success) {
+        console.error('❌ TRANSFER HOOK: Transfer failed:', submitData);
         throw new Error(submitData.error || 'Transfer transaction failed');
       }
 
-      console.log(`✅ HOOK: Auto-transfer completed successfully: ${submitData.transactionId}`);
+      console.log(`✅ TRANSFER HOOK: Auto-transfer completed successfully!`);
+      console.log(`📊 TRANSFER HOOK: Transaction ID: ${submitData.transactionId}`);
+      console.log(`💰 TRANSFER HOOK: New balance: ${submitData.transferDetails?.newBalance || 'Unknown'}`);
 
-      // 🔥 ENHANCED: Trigger multiple refresh mechanisms
+      // 🔥 ENHANCED: Multiple balance refresh mechanisms
       if (onBalanceUpdate) {
         try {
-          console.log('🔄 HOOK: Triggering immediate balance refresh callback...');
+          console.log('🔄 TRANSFER HOOK: Triggering immediate balance refresh callback...');
           await onBalanceUpdate();
+          console.log('✅ TRANSFER HOOK: Balance refresh callback completed');
         } catch (refreshError) {
-          console.warn('⚠️ HOOK: Balance refresh callback failed:', refreshError);
+          console.warn('⚠️ TRANSFER HOOK: Balance refresh callback failed:', refreshError);
+          // Don't fail the transfer if callback fails
         }
       }
 
-      // 🔥 NEW: Trigger global events for shared state updates
-      const customEvent = new CustomEvent('custodialBalanceUpdate', { 
+      // 🔥 ENHANCED: Dispatch multiple custom events for different listeners
+      console.log('📡 TRANSFER HOOK: Dispatching balance update events...');
+      
+      // Primary balance update event
+      const balanceUpdateEvent = new CustomEvent('custodialBalanceUpdate', { 
         detail: { 
-          userId, 
+          userId: userId,
           newBalance: submitData.transferDetails?.newBalance,
           transferAmount: amount,
           transactionId: submitData.transactionId,
-          source: 'auto_transfer_hook'
+          updateType: 'transfer_completed',
+          source: 'auto_transfer_hook',
+          timestamp: Date.now()
         } 
       });
-      window.dispatchEvent(customEvent);
+      window.dispatchEvent(balanceUpdateEvent);
 
-      // 🔥 NEW: Also trigger a force refresh event for shared hooks
+      // Force refresh event for shared hooks
       const refreshEvent = new CustomEvent('forceBalanceRefresh', { 
         detail: { 
-          userId, 
+          userId: userId,
           newBalance: submitData.transferDetails?.newBalance,
-          reason: 'auto_transfer_completed'
+          reason: 'auto_transfer_completed',
+          timestamp: Date.now()
         } 
       });
       window.dispatchEvent(refreshEvent);
+
+      // Transfer completion event
+      const transferEvent = new CustomEvent('transferCompleted', {
+        detail: {
+          userId: userId,
+          amount: amount,
+          transactionId: submitData.transactionId,
+          newBalance: submitData.transferDetails?.newBalance,
+          transferType: 'privy_to_custodial',
+          timestamp: Date.now()
+        }
+      });
+      window.dispatchEvent(transferEvent);
+
+      console.log('✅ TRANSFER HOOK: All events dispatched successfully');
 
       const result: TransferResult = {
         success: true,
@@ -184,7 +247,7 @@ export const usePrivyAutoTransfer = () => {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Auto-transfer failed';
-      console.error('❌ HOOK: Auto-transfer error:', error);
+      console.error('❌ TRANSFER HOOK: Auto-transfer error:', error);
       
       const result: TransferResult = {
         success: false,
@@ -201,7 +264,6 @@ export const usePrivyAutoTransfer = () => {
     }
   }, [embeddedWallet, updateState]);
 
-
   /**
    * Execute direct withdrawal from Privy wallet to external address
    * This handles the full flow: create transaction -> sign -> submit
@@ -211,7 +273,14 @@ export const usePrivyAutoTransfer = () => {
     destinationAddress: string,
     amount: number
   ): Promise<TransferResult> => {
-    if (!embeddedWallet) {
+    // 🔥 ENHANCED: Better validation
+    if (!userId || userId.trim() === '') {
+      const error = 'User ID is required for withdrawal';
+      updateState({ error });
+      return { success: false, error };
+    }
+
+    if (!embeddedWallet || !embeddedWallet.address) {
       const error = 'No embedded wallet found. Please create an embedded wallet first.';
       updateState({ error });
       return { success: false, error };
@@ -220,14 +289,17 @@ export const usePrivyAutoTransfer = () => {
     updateState({ loading: true, error: null });
 
     try {
-      logger.info(`Starting direct withdrawal: ${amount} SOL to ${destinationAddress} for user ${userId}`);
+      console.log(`🏧 WITHDRAWAL HOOK: Starting direct withdrawal`);
+      console.log(`👤 WITHDRAWAL HOOK: User ID: ${userId}`);
+      console.log(`💰 WITHDRAWAL HOOK: Amount: ${amount} SOL`);
+      console.log(`📍 WITHDRAWAL HOOK: Destination: ${destinationAddress}`);
 
       // Step 1: Get unsigned transaction from backend
       const createResponse = await fetch('/api/privy/withdraw', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId,
+          userId: userId,  // ✅ Explicit userId
           walletAddress: embeddedWallet.address,
           amount,
           destinationAddress
@@ -269,7 +341,7 @@ export const usePrivyAutoTransfer = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId,
+          userId: userId,  // ✅ Explicit userId
           walletAddress: embeddedWallet.address,
           amount,
           destinationAddress,
@@ -327,6 +399,11 @@ export const usePrivyAutoTransfer = () => {
    * Check daily withdrawal limits for a user
    */
   const checkDailyLimits = useCallback(async (userId: string): Promise<DailyLimits | null> => {
+    if (!userId) {
+      console.error('❌ LIMITS: Missing userId');
+      return null;
+    }
+
     try {
       const response = await fetch('/api/privy/limits', {
         method: 'POST',
@@ -351,6 +428,11 @@ export const usePrivyAutoTransfer = () => {
    * Get current Privy wallet balance for a user
    */
   const getPrivyBalance = useCallback(async (userId: string): Promise<number | null> => {
+    if (!userId) {
+      console.error('❌ BALANCE: Missing userId');
+      return null;
+    }
+
     try {
       const response = await fetch('/api/privy/balance', {
         method: 'POST',
@@ -375,6 +457,11 @@ export const usePrivyAutoTransfer = () => {
    * Register user's Privy wallet address
    */
   const registerPrivyWallet = useCallback(async (userId: string): Promise<boolean> => {
+    if (!userId) {
+      updateState({ error: 'User ID is required for registration' });
+      return false;
+    }
+
     if (!embeddedWallet) {
       updateState({ error: 'No embedded wallet found' });
       return false;
@@ -385,7 +472,7 @@ export const usePrivyAutoTransfer = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          userId, 
+          userId: userId,  // ✅ Explicit userId
           walletAddress: embeddedWallet.address 
         })
       });
@@ -447,6 +534,5 @@ export const usePrivyAutoTransfer = () => {
     reset
   };
 };
-
 
 export default usePrivyAutoTransfer;

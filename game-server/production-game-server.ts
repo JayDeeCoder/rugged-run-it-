@@ -2314,6 +2314,7 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                                 p_user_id: userId,
                                 p_custodial_change: amount,
                                 p_privy_change: 0,
+                                p_embedded_change: 0,
                                 p_transaction_type: 'external_deposit',
                                 p_transaction_id: 'external_deposit',
                                 p_game_id: currentGame?.id,
@@ -3012,6 +3013,7 @@ async function resolvePendingDepositsForUser(walletAddress: string): Promise<voi
                         p_user_id: userId,
                         p_custodial_change: depositAmount,
                         p_privy_change: 0,
+                        p_embedded_change: 0,
                         p_transaction_type: 'pending_deposit_resolved',
                         p_transaction_id: 'pending_deposit_resolved',
                         p_game_id: currentGame?.id,
@@ -3395,6 +3397,7 @@ if (existingBet && !existingBet.cashedOut && existingBet.isValid) {
                     p_user_id: userId,
                     p_custodial_change: -betAmount,
                     p_privy_change: 0,
+                    p_embedded_change: 0,
                     p_transaction_type: 'instant_rug_bet',
                     p_transaction_id: 'instant_rug_bet',
                     p_game_id: currentGame?.id,
@@ -3473,6 +3476,7 @@ setTimeout(() => {
                 p_user_id: userId,
                 p_custodial_change: -betAmount,
                 p_privy_change: 0,
+                p_embedded_change: 0,
                 p_transaction_type: 'custodial_bet',
                 p_transaction_id: 'custodial_bet',
                 p_game_id: currentGame?.id,
@@ -3521,8 +3525,8 @@ console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFi
 
         console.log(`⚡ CUSTODIAL BET PLACED: ${betAmount} SOL, entry ${entryMultiplier}x, remaining: ${newCustodialBalance.toFixed(3)} SOL`);
 
-        // Save bet to database
-        try {
+         // Save bet to database
+         try {
             await supabaseService
                 .from('player_bets')
                 .insert({
@@ -3541,30 +3545,41 @@ console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFi
             console.warn('Bet database save failed (non-critical):', dbError);
         }
 
+        // 🔧 FIXED: Return the proper response format
         return { 
-            success: true, 
-            entryMultiplier,
-            custodialBalance: newCustodialBalance 
-        };
+        success: true, 
+        entryMultiplier,
+        custodialBalance: newCustodialBalance,
+        reason: 'Bet placed successfully'
+    };
 
-    } catch (error) {
-        console.error('❌ Custodial bet failed:', error);
+} catch (error) {
+    console.error('❌ Custodial bet failed:', error);
+    
         
-        // 🔧 NEW: Refund using atomic balance update
-        try {
-            await supabaseService.rpc('update_user_balance', {
-                p_user_id: userId,
-                p_custodial_change: betAmount, // Refund
-                p_privy_change: 0,
-                p_transaction_type: 'bet_refund'
-            });
-            console.log(`💰 Refunded ${betAmount} SOL to user ${userId} due to error`);
-        } catch (refundError) {
-            console.error(`❌ Failed to refund ${userId}:`, refundError);
-        }
-        
-        return { success: false, reason: 'Server error' };
+    try {
+        await supabaseService.rpc('update_unified_user_balance', {
+            p_user_id: userId,
+            p_custodial_change: betAmount, // Refund
+            p_privy_change: 0,
+            p_embedded_change: 0,
+            p_transaction_type: 'bet_refund',
+            p_transaction_id: 'bet_refund',
+            p_game_id: currentGame?.id,
+            p_is_deposit: false,
+            p_deposit_amount: 0
+        });
+        console.log(`💰 Refunded ${betAmount} SOL to user ${userId} due to error`);
+    } catch (refundError) {
+        console.error(`❌ Failed to refund ${userId}:`, refundError);
     }
+    
+    return { 
+        success: false, 
+        reason: error instanceof Error ? error.message : 'Server error processing bet',
+        custodialBalance: userProfile.custodialBalance 
+    };
+}
 }
 
 // ===== INSTANT CUSTODIAL CASHOUT =====
@@ -3649,6 +3664,7 @@ currentGame.totalPlayers = currentGame.activeBets.size;
                 p_user_id: userId,
                 p_custodial_change: safePayout,
                 p_privy_change: 0,
+                p_embedded_change: 0,
                 p_transaction_type: 'custodial_cashout',
                 p_transaction_id: 'custodial_cashout',
                 p_game_id: currentGame?.id,
@@ -5686,34 +5702,234 @@ io.on('connection', (socket: Socket) => {
         }
     });
 
-    socket.on('custodialCashOut', async (data) => {
-        const { userId, walletAddress } = data;
+// 🔧 FIXED: Complete socket handlers with proper error handling
+
+// Custodial Bet Handler
+socket.on('custodialBet', async (data) => {
+    const { userId, betAmount } = data;
+    
+    try {
+        console.log(`🎯 Processing custodial bet from ${userId}: ${betAmount} SOL`);
         
-        try {
-            console.log(`💸 Processing custodial cashout request from ${userId}`);
-            
-            const result = await cashOutToCustodialBalance(userId, walletAddress);
-            
-            socket.emit('custodialCashOutResult', { 
-                success: result.success,
-                reason: result.reason,
-                payout: result.payout,
-                custodialBalance: result.custodialBalance,
+        // 🔧 CRITICAL: Input validation
+        if (!userId || typeof userId !== 'string') {
+            socket.emit('custodialBetResult', {
+                success: false,
+                reason: 'Invalid user ID provided',
+                userId,
+                betAmount,
+                timestamp: Date.now()
+            });
+            return;
+        }
+        
+        if (!betAmount || typeof betAmount !== 'number' || betAmount <= 0) {
+            socket.emit('custodialBetResult', {
+                success: false,
+                reason: 'Invalid bet amount provided',
+                userId,
+                betAmount,
+                timestamp: Date.now()
+            });
+            return;
+        }
+        
+        // Call the custodial bet function
+        const result = await placeBetFromCustodialBalance(userId, betAmount);
+        
+        console.log(`📊 Custodial bet result for ${userId}:`, result);
+        
+        // 🔧 CRITICAL: Always emit complete response
+        socket.emit('custodialBetResult', {
+            success: result.success,
+            reason: result.reason,
+            entryMultiplier: result.entryMultiplier,
+            custodialBalance: result.custodialBalance,
+            userId,
+            betAmount,
+            timestamp: Date.now(),
+            gameState: currentGame ? {
+                gameId: currentGame.id,
+                gameNumber: currentGame.gameNumber,
+                status: currentGame.status,
+                multiplier: currentGame.currentMultiplier,
+                totalBets: currentGame.totalBets,
+                totalPlayers: currentGame.totalPlayers,
+                countdown: currentGame.status === 'waiting' ? countdownTimeRemaining * 1000 : undefined
+            } : null
+        });
+        
+        // Broadcast bet placement to all clients if successful
+        if (result.success && currentGame) {
+            io.emit('custodialBetPlaced', {
+                gameId: currentGame.id,
+                userId,
+                betAmount,
+                entryMultiplier: result.entryMultiplier,
+                totalBets: currentGame.totalBets,
+                totalPlayers: currentGame.totalPlayers,
+                gameStatus: currentGame.status,
+                betType: 'custodial',
+                timestamp: Date.now()
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ Socket custodial bet processing error:', error);
+        
+        // 🔧 CRITICAL: Always emit response, even on error
+        socket.emit('custodialBetResult', {
+            success: false,
+            reason: error instanceof Error ? error.message : 'Server error processing bet request',
+            userId,
+            betAmount,
+            timestamp: Date.now()
+        });
+    }
+});
+
+// 🔧 FIXED: Custodial Cashout Handler (your current code was missing catch block)
+socket.on('custodialCashOut', async (data) => {
+    const { userId, walletAddress } = data;
+    
+    try {
+        console.log(`💸 Processing custodial cashout request from ${userId}`);
+        
+        // 🔧 CRITICAL: Input validation
+        if (!userId || typeof userId !== 'string') {
+            socket.emit('custodialCashOutResult', {
+                success: false,
+                reason: 'Invalid user ID provided',
                 userId,
                 walletAddress,
                 timestamp: Date.now()
             });
-            
-        } catch (error) {
-            console.error('❌ Socket custodial cashout processing error:', error);
+            return;
+        }
+        
+        if (!walletAddress || typeof walletAddress !== 'string') {
             socket.emit('custodialCashOutResult', {
                 success: false,
-                reason: 'Server error processing cashout request',
+                reason: 'Invalid wallet address provided',
                 userId,
-                walletAddress
+                walletAddress,
+                timestamp: Date.now()
+            });
+            return;
+        }
+        
+        // Call the custodial cashout function
+        const result = await cashOutToCustodialBalance(userId, walletAddress);
+        
+        console.log(`📊 Custodial cashout result for ${userId}:`, result);
+        
+        // 🔧 CRITICAL: Always emit complete response
+        socket.emit('custodialCashOutResult', {
+            success: result.success,
+            reason: result.reason,
+            payout: result.payout,
+            custodialBalance: result.custodialBalance,
+            userId,
+            walletAddress,
+            timestamp: Date.now()
+        });
+        
+        // Broadcast cashout to all clients if successful
+        if (result.success && result.payout) {
+            io.emit('custodialCashout', {
+                gameId: currentGame?.id,
+                userId,
+                walletAddress,
+                entryMultiplier: 0, // You might want to get this from the active bet
+                cashoutMultiplier: currentGame?.currentMultiplier || 0,
+                growthRatio: 0, // Calculate if needed
+                amount: result.payout,
+                profit: result.payout, // Adjust based on your calculation
+                isLoss: false,
+                custodialBalance: result.custodialBalance,
+                timestamp: Date.now()
             });
         }
+        
+    } catch (error) {
+        console.error('❌ Socket custodial cashout processing error:', error);
+        
+        // 🔧 CRITICAL: Always emit response, even on error
+        socket.emit('custodialCashOutResult', {
+            success: false,
+            reason: error instanceof Error ? error.message : 'Server error processing cashout request',
+            userId,
+            walletAddress,
+            timestamp: Date.now()
+        });
+    }
+});
+
+// 🔧 OPTIONAL: Add debugging socket handlers
+socket.on('debugCustodialBet', async (data) => {
+    const { userId, betAmount = 0.005 } = data;
+    
+    try {
+        console.log(`🧪 DEBUG: Testing custodial bet for ${userId} with ${betAmount} SOL`);
+        
+        // Check user exists
+        const { data: userData, error: userError } = await supabaseService
+            .from('users_unified')
+            .select('id, username, custodial_balance, external_wallet_address')
+            .eq('id', userId)
+            .single();
+        
+        if (userError || !userData) {
+            socket.emit('debugCustodialBetResult', {
+                success: false,
+                step: 'user_lookup',
+                error: userError?.message || 'User not found',
+                userId
+            });
+            return;
+        }
+        
+        // Check game state
+        const gameAvailable = currentGame && (currentGame.status === 'active' || currentGame.status === 'waiting');
+        
+        // Test the function without actually placing bet
+        socket.emit('debugCustodialBetResult', {
+            success: true,
+            debug: {
+                userFound: true,
+                userName: userData.username,
+                custodialBalance: parseFloat(userData.custodial_balance) || 0,
+                hasEnoughBalance: (parseFloat(userData.custodial_balance) || 0) >= betAmount,
+                gameAvailable,
+                gameStatus: currentGame?.status,
+                gameId: currentGame?.id,
+                countdown: currentGame?.status === 'waiting' ? countdownTimeRemaining : null,
+                minBet: getCurrentGameConfig().MIN_BET,
+                maxBet: getCurrentGameConfig().MAX_BET
+            },
+            timestamp: Date.now()
+        });
+        
+    } catch (error) {
+        console.error('❌ Debug custodial bet error:', error);
+        socket.emit('debugCustodialBetResult', {
+            success: false,
+            step: 'debug_error',
+            error: error instanceof Error ? error.message : 'Unknown debug error',
+            userId
+        });
+    }
+});
+
+// 🔧 OPTIONAL: Ping handler for testing connectivity
+socket.on('ping', (data) => {
+    console.log(`🏓 Ping received from ${socket.id}:`, data);
+    socket.emit('pong', {
+        ...data,
+        serverTime: Date.now(),
+        socketId: socket.id
     });
+});
     
     socket.on('cashOut', async (data) => {
         const { walletAddress } = data;
@@ -6059,23 +6275,60 @@ app.get('/api/bootstrap/fomo-status', (req, res): void => {
 });
 
 // Add this to your game server
+// Add this to your game server - FIXED Transfer Endpoint
+// Replace your existing '/api/transfer/privy-to-custodial' endpoint with this
+
 app.post('/api/transfer/privy-to-custodial', async (req, res): Promise<void> => {
     try {
-        const { userId, amount, signedTransaction, autoSign, walletAddress } = req.body;
+        const { userId, amount, signedTransaction, walletAddress } = req.body;
         
-        console.log(`💳 API: Transfer request - ${amount} SOL for user ${userId}`);
-        console.log(`🔍 Request details:`, { userId, amount, autoSign: !!autoSign, walletAddress, hasSignedTx: !!signedTransaction });
+        // 🔥 ENHANCED: Better validation and logging
+        console.log(`💳 TRANSFER API: Request received`, {
+            userId: userId || 'MISSING',
+            amount: amount || 'MISSING',
+            walletAddress: walletAddress || 'MISSING',
+            hasSignedTx: !!signedTransaction,
+            bodyKeys: Object.keys(req.body)
+        });
 
-        // Validate inputs
-        if (!userId || !amount || !walletAddress) {
+        // 🔥 CRITICAL: Validate userId first
+        if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+            console.error(`❌ TRANSFER API: Missing or invalid userId in request body:`, {
+                userId,
+                type: typeof userId,
+                receivedBody: req.body
+            });
             res.status(400).json({
                 success: false,
-                error: 'Missing required fields: userId, amount, walletAddress'
+                error: 'Missing required field: userId',
+                received: Object.keys(req.body),
+                debug: { userId, type: typeof userId }
             });
             return;
         }
 
-        if (amount <= 0 || amount > 10) {
+        if (!amount || isNaN(parseFloat(amount))) {
+            console.error(`❌ TRANSFER API: Invalid amount: ${amount}`);
+            res.status(400).json({
+                success: false,
+                error: 'Missing or invalid amount',
+                received: { amount }
+            });
+            return;
+        }
+
+        if (!walletAddress) {
+            console.error(`❌ TRANSFER API: Missing walletAddress`);
+            res.status(400).json({
+                success: false,
+                error: 'Missing required field: walletAddress'
+            });
+            return;
+        }
+
+        const transferAmount = parseFloat(amount);
+
+        if (transferAmount <= 0 || transferAmount > 10) {
             res.status(400).json({
                 success: false,
                 error: 'Invalid amount. Must be between 0 and 10 SOL'
@@ -6083,37 +6336,43 @@ app.post('/api/transfer/privy-to-custodial', async (req, res): Promise<void> => 
             return;
         }
 
-        // Check if user exists in unified table
+        // 🔥 ENHANCED: Check if user exists in unified table
+        console.log(`🔍 TRANSFER API: Checking if user ${userId} exists...`);
+        
         const { data: userData, error: userError } = await supabaseService
             .from('users_unified')
-            .select('*')
+            .select('id, username, custodial_balance, external_wallet_address')
             .eq('id', userId)
             .single();
 
         if (userError || !userData) {
-            console.log(`❌ User ${userId} not found in users_unified table`);
+            console.error(`❌ TRANSFER API: User ${userId} not found in database:`, userError);
             res.status(404).json({
                 success: false,
-                error: 'User not found. Please register first.',
-                hint: 'Call authentication endpoint first'
+                error: 'User not found. Please authenticate first.',
+                userId: userId,
+                debug: { userError: userError?.message }
             });
             return;
         }
 
+        console.log(`✅ TRANSFER API: User found - ${userData.username} (${userData.id})`);
+        console.log(`💰 TRANSFER API: Current custodial balance: ${userData.custodial_balance} SOL`);
+
         // Step 1: Return unsigned transaction if no signed transaction provided
         if (!signedTransaction) {
-            console.log(`📝 Creating unsigned transaction for ${amount} SOL transfer`);
+            console.log(`📝 TRANSFER API: Creating unsigned transaction for ${transferAmount} SOL`);
             
             try {
                 const userPublicKey = new PublicKey(walletAddress);
-                const transaction = await createTransaction(userPublicKey, housePublicKey, amount);
+                const transaction = await createTransaction(userPublicKey, housePublicKey, transferAmount);
                 
                 const { blockhash } = await solanaConnection.getLatestBlockhash();
                 transaction.recentBlockhash = blockhash;
                 transaction.feePayer = userPublicKey;
                 
                 // Add memo for tracking
-                const memo = `privy-to-custodial-${userId}-${Date.now()}`;
+                const memo = `transfer-${userId}-${Date.now()}`;
                 transaction.add(
                     new TransactionInstruction({
                         keys: [],
@@ -6125,28 +6384,30 @@ app.post('/api/transfer/privy-to-custodial', async (req, res): Promise<void> => 
                 const serializedTransaction = transaction.serialize({ requireAllSignatures: false });
                 const base64Transaction = serializedTransaction.toString('base64');
                 
-                console.log(`✅ Unsigned transaction created for ${userId}`);
+                console.log(`✅ TRANSFER API: Unsigned transaction created for ${userId}`);
                 
                 res.json({
-                    success: false, // False because transaction not completed yet
+                    success: false, // False because not completed yet
                     unsignedTransaction: base64Transaction,
                     transferId: `transfer-${userId}-${Date.now()}`,
-                    message: 'Transaction created - please sign and resubmit'
+                    message: 'Transaction created - please sign and resubmit',
+                    userId: userId // Include userId in response for debugging
                 });
                 return;
                 
             } catch (error) {
-                console.error('❌ Failed to create unsigned transaction:', error);
+                console.error('❌ TRANSFER API: Failed to create unsigned transaction:', error);
                 res.status(500).json({
                     success: false,
-                    error: 'Failed to create transaction'
+                    error: 'Failed to create transaction',
+                    userId: userId
                 });
                 return;
             }
         }
 
         // Step 2: Process signed transaction
-        console.log(`🔗 Processing signed transaction for ${userId}`);
+        console.log(`🔗 TRANSFER API: Processing signed transaction for ${userId}`);
         
         try {
             const transactionBuffer = Buffer.from(signedTransaction, 'base64');
@@ -6157,9 +6418,9 @@ app.post('/api/transfer/privy-to-custodial', async (req, res): Promise<void> => 
                 { skipPreflight: false, preflightCommitment: 'confirmed' }
             );
             
-            console.log(`📡 Transaction submitted: ${signature}`);
+            console.log(`📡 TRANSFER API: Transaction submitted: ${signature}`);
             
-            // Wait for confirmation
+            // Wait for confirmation with timeout
             const confirmation = await Promise.race([
                 solanaConnection.confirmTransaction(signature, 'confirmed'),
                 new Promise<any>((_, reject) => 
@@ -6171,14 +6432,16 @@ app.post('/api/transfer/privy-to-custodial', async (req, res): Promise<void> => 
                 throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
             }
             
-            console.log(`✅ Transaction confirmed: ${signature}`);
+            console.log(`✅ TRANSFER API: Transaction confirmed: ${signature}`);
             
-            // Update user balance in unified table using new RPC
+            // 🔥 ENHANCED: Update user balance using the corrected RPC
+            console.log(`💰 TRANSFER API: Updating balance for user ${userId}...`);
+            
             const { data: balanceResult, error: balanceError } = await supabaseService
                 .rpc('update_unified_user_balance', {
                     p_user_id: userId,
-                    p_custodial_change: amount, // Add to custodial
-                    p_privy_change: -amount,    // Remove from privy (if tracking separately)
+                    p_custodial_change: transferAmount,
+                    p_privy_change: 0,
                     p_embedded_change: 0,
                     p_transaction_type: 'privy_to_custodial_transfer',
                     p_transaction_id: signature,
@@ -6188,93 +6451,112 @@ app.post('/api/transfer/privy-to-custodial', async (req, res): Promise<void> => 
                 });
 
             if (balanceError) {
-                console.error(`❌ Balance update failed:`, balanceError);
-                // Transaction succeeded but balance update failed - this is critical
+                console.error(`❌ TRANSFER API: Balance update failed for ${userId}:`, balanceError);
                 res.status(500).json({
                     success: false,
                     error: 'Transaction completed but balance update failed',
                     transactionId: signature,
-                    criticalError: true
+                    userId: userId,
+                    criticalError: true,
+                    debug: { balanceError: balanceError.message }
                 });
                 return;
             }
 
             if (!balanceResult || balanceResult.length === 0) {
-                console.error(`❌ No balance result returned from RPC`);
+                console.error(`❌ TRANSFER API: No balance result returned from RPC for ${userId}`);
                 res.status(500).json({
                     success: false,
                     error: 'Balance update returned no results',
-                    transactionId: signature
+                    transactionId: signature,
+                    userId: userId
                 });
                 return;
             }
 
             const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
-            const newTotalBalance = parseFloat(balanceResult[0].new_total_balance);
+            const newTotalBalance = parseFloat(balanceResult[0].new_total_balance || balanceResult[0].new_custodial_balance);
             
-            console.log(`💰 Balance updated successfully: ${newCustodialBalance.toFixed(6)} SOL custodial`);
+            console.log(`💰 TRANSFER API: Balance updated successfully for ${userId}:`);
+            console.log(`   Old custodial balance: ${userData.custodial_balance} SOL`);
+            console.log(`   New custodial balance: ${newCustodialBalance.toFixed(6)} SOL`);
+            console.log(`   Transfer amount: ${transferAmount} SOL`);
+            console.log(`   Transaction: ${signature}`);
 
             // Update house balance
             await updateHouseBalance();
 
-            // Emit real-time socket event
+            // 🔥 ENHANCED: Emit multiple socket events for better frontend updates
+            console.log(`📡 TRANSFER API: Broadcasting balance updates for ${userId}...`);
+
+            // Main custodial balance update event
             io.emit('custodialBalanceUpdate', {
-                userId,
+                userId: userId,
                 custodialBalance: newCustodialBalance,
                 totalBalance: newTotalBalance,
-                change: amount,
+                change: transferAmount,
                 transactionType: 'privy_to_custodial_transfer',
                 transactionId: signature,
                 updateType: 'transfer_completed',
                 timestamp: Date.now(),
-                source: 'unified_transfer_api'
+                source: 'transfer_api'
             });
 
-            // Also emit user-specific balance update
+            // User-specific balance update
             io.emit('userBalanceUpdate', {
-                userId,
-                walletAddress,
+                userId: userId,
+                walletAddress: walletAddress,
                 balanceType: 'custodial',
-                oldBalance: newCustodialBalance - amount,
+                oldBalance: parseFloat(userData.custodial_balance) || 0,
                 newBalance: newCustodialBalance,
-                change: amount,
+                change: transferAmount,
                 transactionType: 'transfer',
                 transactionSignature: signature,
                 timestamp: Date.now(),
-                source: 'privy_transfer'
+                source: 'privy_transfer_api'
             });
+
+            // Transfer completion event
+            io.emit('transferCompleted', {
+                userId: userId,
+                transferType: 'privy_to_custodial',
+                amount: transferAmount,
+                transactionId: signature,
+                newCustodialBalance: newCustodialBalance,
+                timestamp: Date.now()
+            });
+
+            console.log(`✅ TRANSFER API: All socket events emitted for ${userId}`);
 
             res.json({
                 success: true,
                 transactionId: signature,
                 transferDetails: {
-                    amount,
+                    amount: transferAmount,
                     newBalance: newCustodialBalance,
-                    newTotalBalance,
+                    newTotalBalance: newTotalBalance,
                     fromWallet: walletAddress,
-                    toAccount: 'custodial_balance'
-                },
-                dailyLimits: {
-                    used: amount, // Simplified - you'd track this properly
-                    remaining: 10 - amount,
-                    limit: 10
+                    toAccount: 'custodial_balance',
+                    userId: userId
                 },
                 message: 'Transfer completed successfully'
             });
 
         } catch (error) {
-            console.error('❌ Transfer processing error:', error);
+            console.error(`❌ TRANSFER API: Transfer processing error for ${userId}:`, error);
             res.status(500).json({
                 success: false,
-                error: error instanceof Error ? error.message : 'Transfer failed'
+                error: error instanceof Error ? error.message : 'Transfer failed',
+                userId: userId
             });
         }
 
     } catch (error) {
-        console.error('❌ Transfer API error:', error);
+        console.error('❌ TRANSFER API: Unexpected error:', error);
         res.status(500).json({
             success: false,
-            error: 'Internal server error'
+            error: 'Internal server error',
+            details: error instanceof Error ? error.message : 'Unknown error'
         });
     }
 });
@@ -7170,6 +7452,7 @@ app.post('/api/admin/resolve-all-pending', async (req, res): Promise<void> => {
                             p_user_id: userId,
                             p_custodial_change: depositAmount,
                             p_privy_change: 0,
+                            p_embedded_change: 0,
                             p_transaction_type: 'manual_pending_resolved',
                             p_transaction_id: 'manual_pending_resolved',
                             p_game_id: currentGame?.id,

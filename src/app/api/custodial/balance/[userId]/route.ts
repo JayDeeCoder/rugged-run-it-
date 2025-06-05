@@ -1,4 +1,4 @@
-// app/api/custodial/balance/[userId]/route.ts - COLUMN FIXED VERSION
+// app/api/custodial/balance/[userId]/route.ts - USERS_UNIFIED VERSION
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -23,32 +23,33 @@ export async function GET(
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
     
-    console.log('🔍 Getting balance from user_profiles for user:', userId);
+    console.log('🔍 Getting balance from users_unified for user:', userId);
     
-    // 🔧 FIXED: Only select columns that actually exist in user_profiles
-    // Your API should now work correctly since the columns exist
-const { data: userProfile, error: profileError } = await supabase
-.from('user_profiles')
-.select(`
-  user_id,
-  username,
-  custodial_balance,
-  privy_balance,
-  total_balance,
-  external_wallet_address,
-  custodial_total_deposited,
-  last_custodial_deposit,
-  embedded_wallet_id,
-  total_transfers_to_embedded,
-  total_transfers_to_custodial,
-  updated_at,
-  created_at
-`)
-.eq('user_id', userId)
-.single();
+    // ✅ FIXED: Use users_unified table with correct column names
+    const { data: userProfile, error: profileError } = await supabase
+      .from('users_unified')
+      .select(`
+        id,
+        username,
+        custodial_balance,
+        privy_balance,
+        embedded_balance,
+        total_balance,
+        external_wallet_address,
+        wallet_address,
+        custodial_total_deposited,
+        last_custodial_deposit,
+        embedded_wallet_id,
+        total_transfers_to_embedded,
+        total_transfers_to_custodial,
+        updated_at,
+        created_at
+      `)
+      .eq('id', userId)  // ✅ Changed from 'user_id' to 'id'
+      .single();
     
     if (profileError || !userProfile) {
-      console.log(`❌ User ${userId} not found in user_profiles:`, profileError?.message);
+      console.log(`❌ User ${userId} not found in users_unified:`, profileError?.message);
       
       return NextResponse.json({
         userId,
@@ -59,37 +60,39 @@ const { data: userProfile, error: profileError } = await supabase
         totalDeposited: 0,
         lastDeposit: 0,
         hasWallet: false,
-        message: 'User not found in user_profiles table',
-        source: 'user_profiles_not_found',
+        message: 'User not found in users_unified table',
+        source: 'users_unified_not_found',
         error: profileError?.message,
         timestamp: Date.now()
       });
     }
     
-    // 🔧 PARSE: Extract the balances from the found user
+    // ✅ Parse balances from users_unified
     const custodialBalance = parseFloat(userProfile.custodial_balance) || 0;
     const privyBalance = parseFloat(userProfile.privy_balance) || 0;
+    const embeddedBalance = parseFloat(userProfile.embedded_balance) || 0;
     const totalBalance = parseFloat(userProfile.total_balance) || 0;
+    const totalDeposited = parseFloat(userProfile.custodial_total_deposited) || 0;
     
     console.log(`💰 Found user ${userId} with balance: ${custodialBalance.toFixed(9)} SOL`);
     
     return NextResponse.json({
       userId,
-      custodialBalance,           // Should be 0.086269835
+      custodialBalance,
       totalBalance,
       privyBalance,
-      embeddedBalance: privyBalance,
-      totalDeposited: 0,          // 🔧 DEFAULT: Not available in user_profiles
-      lastDeposit: 0,             // 🔧 DEFAULT: Not available in user_profiles
+      embeddedBalance,
+      totalDeposited,
+      lastDeposit: userProfile.last_custodial_deposit || 0,
       hasWallet: true,
-      walletAddress: userProfile.external_wallet_address,
+      walletAddress: userProfile.external_wallet_address || userProfile.wallet_address,
       canBet: custodialBalance >= 0.001,
       canWithdraw: custodialBalance > 0,
-      embeddedWalletId: undefined, // 🔧 DEFAULT: Not available in user_profiles
-      totalTransfersToEmbedded: 0, // 🔧 DEFAULT: Not available in user_profiles
-      totalTransfersToCustodial: 0, // 🔧 DEFAULT: Not available in user_profiles
+      embeddedWalletId: userProfile.embedded_wallet_id,
+      totalTransfersToEmbedded: parseFloat(userProfile.total_transfers_to_embedded) || 0,
+      totalTransfersToCustodial: parseFloat(userProfile.total_transfers_to_custodial) || 0,
       lastActivity: userProfile.updated_at,
-      source: 'user_profiles_fixed',
+      source: 'users_unified_fixed',
       timestamp: Date.now()
     });
     
@@ -105,7 +108,6 @@ const { data: userProfile, error: profileError } = await supabase
   }
 }
 
-// Keep the POST method for consistency
 export async function POST(
   request: NextRequest,
   { params }: { params: { userId: string } }

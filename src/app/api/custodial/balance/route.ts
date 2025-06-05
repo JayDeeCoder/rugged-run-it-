@@ -1,4 +1,4 @@
-// app/api/custodial/balance/route.ts - FIXED VERSION
+// app/api/custodial/balance/route.ts - UPDATED FOR USERS_UNIFIED
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -29,87 +29,61 @@ export async function GET(request: NextRequest) {
     
     console.log('💰 Getting custodial balance for user:', userId);
     
-    // 🔧 CRITICAL FIX: Read from user_profiles table (same as game server)
-    // Your API should now work correctly since the columns exist
-const { data: userProfile, error: profileError } = await supabase
-.from('user_profiles')
-.select(`
-  user_id,
-  username,
-  custodial_balance,
-  privy_balance,
-  total_balance,
-  external_wallet_address,
-  custodial_total_deposited,
-  last_custodial_deposit,
-  embedded_wallet_id,
-  total_transfers_to_embedded,
-  total_transfers_to_custodial,
-  updated_at,
-  created_at
-`)
-.eq('user_id', userId)
-.single();
+    // 🔧 FIXED: Read from users_unified table
+    const { data: userProfile, error: profileError } = await supabase
+      .from('users_unified')
+      .select(`
+        id,
+        username,
+        custodial_balance,
+        privy_balance,
+        embedded_balance,
+        total_balance,
+        external_wallet_address,
+        custodial_total_deposited,
+        last_custodial_deposit,
+        embedded_wallet_id,
+        total_transfers_to_embedded,
+        total_transfers_to_custodial,
+        updated_at,
+        created_at
+      `)
+      .eq('id', userId)  // ✅ Changed from 'user_id' to 'id'
+      .single();
     
-    // 🔧 FALLBACK: If not in user_profiles, try user_hybrid_wallets
     if (profileError || !userProfile) {
-      console.log('📭 No user_profiles entry, checking user_hybrid_wallets...');
-      
-      const { data: userWallet, error: walletError } = await supabase
-        .from('user_hybrid_wallets')
-        .select('custodial_balance, updated_at, created_at, external_wallet_address')
-        .eq('user_id', userId)
-        .single();
-      
-      if (walletError || !userWallet) {
-        console.log('📭 No wallet found in either table, returning zero balance');
-        return NextResponse.json({
-          success: true,
-          balance: '0.000000',
-          balanceSOL: 0,
-          message: 'No wallet found - make a deposit to create your account',
-          walletExists: false,
-          mode: 'custodial',
-          source: 'not_found'
-        });
-      }
-
-      // Return data from user_hybrid_wallets as fallback
-      const balance = parseFloat(userWallet.custodial_balance || '0');
-      
-      console.log(`💰 User ${userId} balance from user_hybrid_wallets: ${balance} SOL`);
-
+      console.log('📭 No user found in users_unified table');
       return NextResponse.json({
         success: true,
-        balance: balance.toFixed(6),
-        balanceSOL: balance,
-        lastUpdated: userWallet.updated_at,
-        walletCreated: userWallet.created_at,
-        walletExists: true,
+        balance: '0.000000',
+        balanceSOL: 0,
+        message: 'No wallet found - make a deposit to create your account',
+        walletExists: false,
         mode: 'custodial',
-        source: 'user_hybrid_wallets',
-        timestamp: new Date().toISOString()
+        source: 'not_found'
       });
     }
 
-    // 🔧 PRIMARY: Return data from user_profiles table
+    // ✅ Return data from users_unified table
     const custodialBalance = parseFloat(userProfile.custodial_balance || '0');
     const privyBalance = parseFloat(userProfile.privy_balance || '0');
+    const embeddedBalance = parseFloat(userProfile.embedded_balance || '0');
     const totalBalance = parseFloat(userProfile.total_balance || '0');
     
-    console.log(`💰 User ${userId} balance from user_profiles: ${custodialBalance} SOL (custodial), ${privyBalance} SOL (privy)`);
+    console.log(`💰 User ${userId} balance from users_unified: ${custodialBalance} SOL (custodial), ${privyBalance} SOL (privy)`);
 
     return NextResponse.json({
       success: true,
       balance: custodialBalance.toFixed(6),
       balanceSOL: custodialBalance,
       privyBalance: privyBalance,
+      embeddedBalance: embeddedBalance,
       totalBalance: totalBalance,
       lastUpdated: userProfile.updated_at,
       walletCreated: userProfile.created_at,
       walletExists: true,
       mode: 'custodial',
-      source: 'user_profiles', // 🔧 NEW: Indicate data source
+      source: 'users_unified',
       timestamp: new Date().toISOString()
     });
 
@@ -151,76 +125,51 @@ export async function POST(request: NextRequest) {
     
     console.log('💰 POST: Getting custodial balance for user:', userId);
     
-    // 🔧 SAME FIX: Read from user_profiles first
-    // Your API should now work correctly since the columns exist
-const { data: userProfile, error: profileError } = await supabase
-.from('user_profiles')
-.select(`
-  user_id,
-  username,
-  custodial_balance,
-  privy_balance,
-  total_balance,
-  external_wallet_address,
-  custodial_total_deposited,
-  last_custodial_deposit,
-  embedded_wallet_id,
-  total_transfers_to_embedded,
-  total_transfers_to_custodial,
-  updated_at,
-  created_at
-`)
-.eq('user_id', userId)
-.single();
+    // 🔧 FIXED: Read from users_unified table
+    const { data: userProfile, error: profileError } = await supabase
+      .from('users_unified')
+      .select(`
+        id,
+        username,
+        custodial_balance,
+        privy_balance,
+        embedded_balance,
+        total_balance,
+        external_wallet_address,
+        updated_at,
+        created_at
+      `)
+      .eq('id', userId)  // ✅ Changed from 'user_id' to 'id'
+      .single();
 
     if (profileError || !userProfile) {
-      console.log('📭 POST: No user_profiles entry, checking user_hybrid_wallets...');
-      
-      const { data: userWallet, error: walletError } = await supabase
-        .from('user_hybrid_wallets')
-        .select('custodial_balance, updated_at')
-        .eq('user_id', userId)
-        .single();
-      
-      if (walletError || !userWallet) {
-        return NextResponse.json({
-          success: true,
-          balance: '0.000000',
-          balanceSOL: 0,
-          message: 'No wallet found - make a deposit to create your account',
-          walletExists: false,
-          mode: 'custodial',
-          source: 'not_found'
-        });
-      }
-
-      const balance = parseFloat(userWallet.custodial_balance || '0');
+      console.log('📭 POST: No user found in users_unified table');
       return NextResponse.json({
         success: true,
-        balance: balance.toFixed(6),
-        balanceSOL: balance,
-        lastUpdated: userWallet.updated_at,
-        walletExists: true,
+        balance: '0.000000',
+        balanceSOL: 0,
+        message: 'No wallet found - make a deposit to create your account',
+        walletExists: false,
         mode: 'custodial',
-        source: 'user_hybrid_wallets',
-        timestamp: new Date().toISOString()
+        source: 'not_found'
       });
     }
 
     const custodialBalance = parseFloat(userProfile.custodial_balance || '0');
     
-    console.log(`💰 POST: User ${userId} balance from user_profiles: ${custodialBalance} SOL`);
+    console.log(`💰 POST: User ${userId} balance from users_unified: ${custodialBalance} SOL`);
 
     return NextResponse.json({
       success: true,
       balance: custodialBalance.toFixed(6),
       balanceSOL: custodialBalance,
       privyBalance: parseFloat(userProfile.privy_balance || '0'),
+      embeddedBalance: parseFloat(userProfile.embedded_balance || '0'),
       totalBalance: parseFloat(userProfile.total_balance || '0'),
       lastUpdated: userProfile.updated_at,
       walletExists: true,
       mode: 'custodial',
-      source: 'user_profiles',
+      source: 'users_unified',
       timestamp: new Date().toISOString()
     });
 

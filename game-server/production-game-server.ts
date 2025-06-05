@@ -8805,6 +8805,181 @@ app.get('/api/admin/status', async (req, res): Promise<void> => {
 });
 // Add this to your enhanced server startup sequence
 // Replace the existing startup sequence with this:
+// 🔧 ADD THIS SIMPLE DEBUG ENDPOINT TO YOUR SERVER
+// Place this BEFORE your server.listen() line
+
+// Simple user balance debug endpoint
+app.get('/api/debug/user-balance/:userId', async (req, res): Promise<void> => {
+    try {
+        const adminKey = req.headers['x-admin-key'] || req.query.adminKey;
+        
+        if (adminKey !== process.env.ADMIN_SECRET_KEY) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        const { userId } = req.params;
+        console.log(`🔍 DEBUG: Checking user ${userId} balance details`);
+
+        // Get user profile
+        const { data: userProfile, error: userError } = await supabaseService
+            .from('users_unified')
+            .select('*')
+            .eq('id', userId)
+            .single();
+
+        if (userError || !userProfile) {
+            res.json({
+                success: false,
+                error: 'User not found',
+                userId
+            });
+            return;
+        }
+
+        // Get recent transactions
+        const { data: transactions, error: txError } = await supabaseService
+            .from('balance_transactions')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        // Check for transactions with 'external_deposit' transaction_id
+        const { data: suspiciousTransactions, error: suspiciousError } = await supabaseService
+            .from('balance_transactions')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('transaction_id', 'external_deposit');
+
+        res.json({
+            success: true,
+            user: {
+                id: userProfile.id,
+                username: userProfile.username,
+                custodialBalance: parseFloat(userProfile.custodial_balance) || 0,
+                totalBalance: parseFloat(userProfile.total_balance) || 0,
+                totalDeposited: parseFloat(userProfile.total_deposited) || 0,
+                walletAddress: userProfile.external_wallet_address
+            },
+            recentTransactions: {
+                count: transactions?.length || 0,
+                transactions: transactions || []
+            },
+            suspiciousTransactions: {
+                description: "Transactions with transaction_id = 'external_deposit'",
+                count: suspiciousTransactions?.length || 0,
+                totalAmount: suspiciousTransactions?.reduce((sum, tx) => sum + parseFloat(tx.amount), 0) || 0,
+                transactions: suspiciousTransactions || []
+            },
+            analysis: {
+                hasInflatedBalance: (suspiciousTransactions?.length || 0) > 1,
+                recommendedCorrection: suspiciousTransactions && suspiciousTransactions.length > 1 
+                    ? suspiciousTransactions.slice(1).reduce((sum, tx) => sum + parseFloat(tx.amount), 0)
+                    : 0
+            },
+            timestamp: Date.now()
+        });
+
+    } catch (error) {
+        console.error('❌ User debug failed:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Debug failed',
+            details: error instanceof Error ? error.message : 'Unknown error',
+            userId: req.params.userId
+        });
+    }
+});
+
+// Simple correction endpoint for a specific user
+app.post('/api/debug/fix-user-balance/:userId', async (req, res): Promise<void> => {
+    try {
+        const adminKey = req.headers['x-admin-key'] || req.query.adminKey;
+        
+        if (adminKey !== process.env.ADMIN_SECRET_KEY) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        const { userId } = req.params;
+        const { correctionAmount } = req.body;
+
+        if (!correctionAmount || isNaN(parseFloat(correctionAmount))) {
+            res.status(400).json({
+                error: 'Missing or invalid correctionAmount in request body'
+            });
+            return;
+        }
+
+        console.log(`🔧 ADMIN: Applying balance correction for ${userId}: ${correctionAmount} SOL`);
+
+        // Get current balance
+        const { data: userProfile } = await supabaseService
+            .from('users_unified')
+            .select('custodial_balance, username')
+            .eq('id', userId)
+            .single();
+
+        const oldBalance = parseFloat(userProfile?.custodial_balance || '0');
+        const newBalance = Math.max(0, oldBalance + parseFloat(correctionAmount));
+
+        // Apply correction
+        const { error: updateError } = await supabaseService
+            .from('users_unified')
+            .update({
+                custodial_balance: newBalance,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', userId);
+
+        if (updateError) {
+            throw updateError;
+        }
+
+        // Create transaction record
+        await supabaseService
+            .from('balance_transactions')
+            .insert({
+                user_id: userId,
+                amount: parseFloat(correctionAmount),
+                transaction_type: 'admin_correction',
+                transaction_id: `admin_correction_${Date.now()}`,
+                notes: `Manual balance correction by admin`,
+                created_at: new Date().toISOString()
+            });
+
+        // Broadcast update
+        io.emit('balanceCorrection', {
+            userId,
+            username: userProfile?.username,
+            oldBalance,
+            newBalance,
+            correction: parseFloat(correctionAmount),
+            reason: 'Manual admin correction',
+            timestamp: Date.now()
+        });
+
+        res.json({
+            success: true,
+            userId,
+            username: userProfile?.username,
+            oldBalance,
+            newBalance,
+            correction: parseFloat(correctionAmount),
+            message: 'Balance corrected successfully',
+            timestamp: Date.now()
+        });
+
+    } catch (error) {
+        console.error('❌ Balance correction failed:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Correction failed',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
 
 server.listen(PORT, async () => {
     console.log('🚀 Starting enhanced game server with recovery...');

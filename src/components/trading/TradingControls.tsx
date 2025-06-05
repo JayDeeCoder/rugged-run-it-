@@ -1295,6 +1295,8 @@ const TradingControls: FC<TradingControlsProps> = ({
         }
       });
 
+      
+
       const successCount = results.filter(r => r.status === 'fulfilled').length;
       
       if (successCount === 3) {
@@ -1616,9 +1618,21 @@ const TradingControls: FC<TradingControlsProps> = ({
           
           clearActiveBet(); // Use shared state setter
           
-          setTimeout(() => {
-            updateCustodialBalance();
-          }, 100);
+          // Multiple update strategies
+setTimeout(async () => {
+  console.log('🔄 Strategy 1: updateCustodialBalance');
+  await updateCustodialBalance();
+}, 100);
+
+setTimeout(async () => {
+  console.log('🔄 Strategy 2: refreshCustodialBalance');
+  await refreshCustodialBalance();
+}, 500);
+
+setTimeout(async () => {
+  console.log('🔄 Strategy 3: force refresh all');
+  await refreshAllBalances();
+}, 1000);
           
         } else {
           console.error('❌ Custodial cashout failed:', result.reason);

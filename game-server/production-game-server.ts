@@ -2439,102 +2439,253 @@ async function monitorAndUpdateDatabase(): Promise<void> {
     }
 }
 // Function to resolve pending deposits when users register
+// 🔧 FIXED resolvePendingDeposits - Replace your existing function with this
 async function resolvePendingDeposits(): Promise<void> {
     try {
-        console.log('🔄 Checking for pending deposits to resolve...');
+        console.log('🔄 FIXED: Checking for pending deposits to resolve...');
         
         // Get all pending deposits
         const { data: pendingDeposits, error: pendingError } = await supabaseService
             .from('pending_deposits')
             .select('*')
-            .eq('status', 'pending');
+            .eq('status', 'pending')
+            .order('detected_at', { ascending: true })
+            .limit(20); // Process in smaller batches
 
-        if (pendingError || !pendingDeposits || pendingDeposits.length === 0) {
+        if (pendingError) {
+            console.error('❌ FIXED: Error fetching pending deposits:', pendingError);
             return;
         }
 
-        console.log(`📋 Found ${pendingDeposits.length} pending deposits to check`);
+        if (!pendingDeposits || pendingDeposits.length === 0) {
+            console.log('📝 FIXED: No pending deposits found');
+            return;
+        }
+
+        console.log(`📋 FIXED: Found ${pendingDeposits.length} pending deposits to check`);
 
         for (const deposit of pendingDeposits) {
-            // Try to find user for this wallet address now
-            const { data: userWallet, error: walletError } = await supabaseService
-                .from('users_unified')
-                .select('*')
-                .eq('external_wallet_address', deposit.wallet_address)
-                .single();
+            try {
+                console.log(`🔄 FIXED: Processing deposit ${deposit.id}: ${deposit.amount} SOL from ${deposit.wallet_address}`);
+                
+                // ENHANCED: More robust user resolution with detailed logging
+                let userId: string | null = null;
+                let userProfile: any = null;
+                let isNewUser = false;
 
-            if (!walletError && userWallet) {
-                // User found! Credit their balance
-                const userId = userWallet.user_id;
-                const currentBalance = parseFloat(userWallet.custodial_balance) || 0;
-                const currentDeposited = parseFloat(userWallet.custodial_total_deposited) || 0;
-                const depositAmount = parseFloat(deposit.amount);
+                // Step 1: Try to find existing user with multiple search patterns
+                console.log(`🔍 FIXED: Searching for existing user with wallet: ${deposit.wallet_address}`);
                 
-                const newBalance = currentBalance + depositAmount;
-                const newTotalDeposited = currentDeposited + depositAmount;
-                
-                console.log(`✅ Resolving pending deposit: ${depositAmount} SOL for user ${userId}`);
-                
-                // Update user balance
-                const { error: updateError } = await supabaseService
+                const { data: existingUsers, error: searchError } = await supabaseService
                     .from('users_unified')
-                    .update({
-                        custodial_balance: newBalance,
-                        custodial_total_deposited: newTotalDeposited,
-                        last_custodial_deposit: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
-                    })
-                    .eq('id', userId);
+                    .select('*')
+                    .or(`wallet_address.ilike.${deposit.wallet_address},external_wallet_address.ilike.${deposit.wallet_address},privy_wallet_address.ilike.${deposit.wallet_address}`)
+                    .limit(5); // Get multiple to debug
 
-                if (!updateError) {
-                    // Record the deposit
-                    await supabaseService
-                        .from('custodial_deposits')
-                        .insert({
-                            user_id: userId,
+                if (searchError) {
+                    console.error(`❌ FIXED: User search error for ${deposit.wallet_address}:`, searchError);
+                    continue; // Skip this deposit
+                }
+
+                if (existingUsers && existingUsers.length > 0) {
+                    // User found
+                    userProfile = existingUsers[0];
+                    userId = userProfile.id;
+                    isNewUser = false;
+                    console.log(`✅ FIXED: Found existing user: ${userProfile.username} (${userId})`);
+                } else {
+                    // User not found, create new one
+                    console.log(`🆕 FIXED: Creating new user for wallet: ${deposit.wallet_address}`);
+                    
+                    try {
+                        const newUserId = crypto.randomUUID();
+                        const newUsername = `user_${newUserId.slice(-8)}`;
+                        
+                        const newUserData = {
+                            id: newUserId,
+                            username: newUsername,
                             wallet_address: deposit.wallet_address,
-                            amount: depositAmount,
-                            transaction_signature: deposit.transaction_signature,
-                            processed_at: new Date().toISOString(),
-                            status: 'completed'
-                        });
+                            external_wallet_address: deposit.wallet_address,
+                            privy_wallet_address: deposit.wallet_address,
+                            custodial_balance: 0,
+                            privy_balance: 0,
+                            embedded_balance: 0,
+                            total_balance: 0,
+                            total_deposited: 0,
+                            custodial_total_deposited: 0,
+                            level: 1,
+                            experience: 0,
+                            created_at: new Date().toISOString(),
+                            updated_at: new Date().toISOString()
+                        };
+                        
+                        const { data: createdUser, error: createError } = await supabaseService
+                            .from('users_unified')
+                            .insert(newUserData)
+                            .select()
+                            .single();
+                        
+                        if (createError) {
+                            console.error(`❌ FIXED: User creation failed for ${deposit.wallet_address}:`, createError);
+                            continue; // Skip this deposit
+                        }
+                        
+                        if (!createdUser) {
+                            console.error(`❌ FIXED: User created but no data returned for ${deposit.wallet_address}`);
+                            continue; // Skip this deposit
+                        }
+                        
+                        userProfile = createdUser;
+                        userId = createdUser.id;
+                        isNewUser = true;
+                        console.log(`✅ FIXED: Created new user: ${newUsername} (${userId})`);
+                        
+                    } catch (userCreateError) {
+                        const createErrorMessage = userCreateError instanceof Error ? userCreateError.message : String(userCreateError);
+                        console.error(`❌ FIXED: Exception during user creation for ${deposit.wallet_address}:`, createErrorMessage);
+                        continue; // Skip this deposit
+                    }
+                }
 
-                    // Mark pending deposit as resolved
+                // CRITICAL: Verify we have a valid userId
+                if (!userId || typeof userId !== 'string' || userId.trim() === '') {
+                    console.error(`❌ FIXED: Invalid userId for deposit ${deposit.id}:`, {
+                        userId,
+                        userProfile: userProfile ? Object.keys(userProfile) : null,
+                        walletAddress: deposit.wallet_address
+                    });
+                    continue; // Skip this deposit
+                }
+
+                console.log(`✅ FIXED: User resolution successful for deposit ${deposit.id}: userId=${userId}, isNewUser=${isNewUser}`);
+
+                // Step 2: Update balance using RPC
+                const depositAmount = parseFloat(deposit.amount);
+                console.log(`💰 FIXED: Updating balance for user ${userId}: +${depositAmount} SOL`);
+                
+                const { data: balanceResult, error: balanceError } = await supabaseService
+                    .rpc('update_unified_user_balance', {
+                        p_user_id: userId,
+                        p_custodial_change: depositAmount,
+                        p_privy_change: 0,
+                        p_embedded_change: 0,
+                        p_transaction_type: 'pending_deposit_resolved',
+                        p_transaction_id: deposit.transaction_signature,
+                        p_game_id: currentGame?.id || null,
+                        p_is_deposit: true,
+                        p_deposit_amount: depositAmount
+                    });
+
+                if (balanceError) {
+                    console.error(`❌ FIXED: Balance update failed for user ${userId}:`, {
+                        message: balanceError.message,
+                        code: balanceError.code,
+                        details: balanceError.details,
+                        hint: balanceError.hint
+                    });
+                    continue; // Skip this deposit
+                }
+
+                if (!balanceResult || balanceResult.length === 0) {
+                    console.error(`❌ FIXED: RPC returned no results for user ${userId}`);
+                    continue; // Skip this deposit
+                }
+
+                const result = balanceResult[0];
+                const newCustodialBalance = parseFloat(result.new_custodial_balance || '0');
+                const newTotalBalance = parseFloat(result.new_total_balance || result.new_custodial_balance || '0');
+                const newTotalDeposited = parseFloat(result.new_total_deposited || result.new_custodial_balance || '0');
+                
+                console.log(`✅ FIXED: Balance updated successfully:`, {
+                    userId,
+                    depositAmount,
+                    newCustodialBalance,
+                    transactionSignature: deposit.transaction_signature
+                });
+
+                // Step 3: Mark pending deposit as resolved
+                const { error: updateError } = await supabaseService
+                    .from('pending_deposits')
+                    .update({ 
+                        status: 'resolved',
+                        resolved_at: new Date().toISOString(),
+                        resolved_user_id: userId,
+                        resolution_method: 'fixed_auto_resolve'
+                    })
+                    .eq('id', deposit.id);
+
+                if (updateError) {
+                    console.error(`❌ FIXED: Failed to mark deposit as resolved:`, updateError);
+                    // Continue anyway since balance was updated
+                }
+
+                // Step 4: Broadcast real-time updates
+                console.log(`📡 FIXED: Broadcasting balance updates for user ${userId}`);
+                
+                io.emit('custodialBalanceUpdate', {
+                    userId,
+                    custodialBalance: newCustodialBalance,
+                    totalBalance: newTotalBalance,
+                    totalDeposited: newTotalDeposited,
+                    depositAmount: depositAmount,
+                    transactionSignature: deposit.transaction_signature,
+                    timestamp: Date.now(),
+                    source: 'fixed_pending_resolved',
+                    isNewUser: isNewUser,
+                    walletAddress: deposit.wallet_address,
+                    updateType: 'pending_deposit_resolved_fixed',
+                    username: userProfile?.username
+                });
+
+                io.emit('userBalanceUpdate', {
+                    userId,
+                    walletAddress: deposit.wallet_address,
+                    balanceType: 'custodial',
+                    oldBalance: newCustodialBalance - depositAmount,
+                    newBalance: newCustodialBalance,
+                    change: depositAmount,
+                    transactionType: 'pending_deposit',
+                    transactionSignature: deposit.transaction_signature,
+                    timestamp: Date.now(),
+                    source: 'fixed_pending_resolved'
+                });
+
+                console.log(`✅ FIXED: Successfully resolved pending deposit ${deposit.id}: ${depositAmount} SOL for user ${userId} (${userProfile?.username || 'unknown'})`);
+
+            } catch (depositError) {
+                const errorMessage = depositError instanceof Error ? depositError.message : String(depositError);
+                const errorStack = depositError instanceof Error ? depositError.stack : undefined;
+                
+                console.error(`❌ FIXED: Failed to resolve pending deposit ${deposit.id}:`, {
+                    error: errorMessage,
+                    stack: errorStack,
+                    deposit: {
+                        id: deposit.id,
+                        wallet_address: deposit.wallet_address,
+                        amount: deposit.amount
+                    }
+                });
+                
+                // Update error tracking in database
+                try {
                     await supabaseService
                         .from('pending_deposits')
-                        .update({ 
-                            status: 'resolved',
-                            resolved_at: new Date().toISOString(),
-                            resolved_user_id: userId
+                        .update({
+                            retry_count: (deposit.retry_count || 0) + 1,
+                            last_retry_at: new Date().toISOString(),
+                            last_error: errorMessage
                         })
                         .eq('id', deposit.id);
-
-                    // Update in-memory state if user is loaded
-                    const memoryWallet = hybridUserWallets.get(userId);
-                    if (memoryWallet) {
-                        memoryWallet.custodialBalance = newBalance;
-                        memoryWallet.custodialTotalDeposited = newTotalDeposited;
-                        memoryWallet.lastCustodialDeposit = Date.now();
-                    }
-
-                    // Emit real-time update
-                    if (typeof io !== 'undefined') {
-                        io.emit('custodialBalanceUpdate', {
-                            userId,
-                            custodialBalance: newBalance,
-                            totalDeposited: newTotalDeposited,
-                            depositAmount: depositAmount,
-                            transactionSignature: deposit.transaction_signature,
-                            timestamp: Date.now()
-                        });
-                    }
-
-                    console.log(`✅ Resolved pending deposit: ${depositAmount} SOL for user ${userId}`);
+                } catch (updateError) {
+                    console.error(`❌ FIXED: Could not update error tracking for deposit ${deposit.id}:`, updateError);
                 }
             }
         }
+        
+        console.log(`✅ FIXED: Pending deposits processing cycle complete`);
+        
     } catch (error) {
-        console.error('❌ Error resolving pending deposits:', error);
+        console.error('❌ FIXED: Error in fixed pending deposits resolution:', error);
     }
 }
 
@@ -2689,49 +2840,121 @@ async function registerNewUser(walletAddress: string): Promise<string> {
 
 
 // Enhanced function to get or create user by wallet address
+// 🔧 FIXED getOrCreateUser - Replace your existing function with this
 async function getOrCreateUser(walletAddress: string): Promise<{ 
     userId: string; 
     isNewUser: boolean; 
     userProfile: any 
 }> {
     try {
-        // Try to find existing user first using the new unified table
-        const { data: existingProfile, error: profileError } = await supabaseService
-            .from('users_unified') // ✅ Changed from 'user_profiles'
-            .select('id')
-            .or(`wallet_address.ilike.${walletAddress},external_wallet_address.ilike.${walletAddress},privy_wallet_address.ilike.${walletAddress}`)
-            .single();
-            
-        if (!profileError && existingProfile) {
+        console.log(`🔍 FIXED getOrCreateUser: Processing wallet ${walletAddress}`);
+        
+        if (!walletAddress || typeof walletAddress !== 'string' || walletAddress.trim() === '') {
+            throw new Error('Invalid wallet address provided');
+        }
+
+        const cleanWalletAddress = walletAddress.trim();
+        
+        // Try to find existing user
+        const { data: existingUsers, error: searchError } = await supabaseService
+            .from('users_unified')
+            .select('*')
+            .or(`wallet_address.ilike.${cleanWalletAddress},external_wallet_address.ilike.${cleanWalletAddress},privy_wallet_address.ilike.${cleanWalletAddress}`)
+            .limit(1);
+
+        if (searchError) {
+            console.error(`❌ FIXED getOrCreateUser: Search error for ${cleanWalletAddress}:`, searchError);
+            throw new Error(`User search failed: ${searchError.message}`);
+        }
+
+        if (existingUsers && existingUsers.length > 0) {
+            const user = existingUsers[0];
+            console.log(`✅ FIXED getOrCreateUser: Found existing user ${user.username} (${user.id})`);
             return {
-                userId: existingProfile.id, // ✅ Changed from 'user_id' to 'id'
+                userId: user.id,
                 isNewUser: false,
-                userProfile: existingProfile
+                userProfile: user
             };
         }
         
-        // User doesn't exist, create new one
-        const userId = await registerNewUser(walletAddress);
+        // Create new user
+        console.log(`🆕 FIXED getOrCreateUser: Creating new user for ${cleanWalletAddress}`);
         
-        // Fetch the newly created profile
-        const { data: newProfile, error: fetchError } = await supabaseService
-            .from('users_unified') // ✅ Changed from 'user_profiles'
-            .select('*')
-            .eq('id', userId) // ✅ Changed from 'user_id'
+        const userId = crypto.randomUUID();
+        const username = `user_${userId.slice(-8)}`;
+        
+        const newUserData = {
+            id: userId,
+            username,
+            wallet_address: cleanWalletAddress,
+            external_wallet_address: cleanWalletAddress,
+            privy_wallet_address: cleanWalletAddress,
+            custodial_balance: 0,
+            privy_balance: 0,
+            embedded_balance: 0,
+            total_balance: 0,
+            total_deposited: 0,
+            custodial_total_deposited: 0,
+            level: 1,
+            experience: 0,
+            experience_points: 0,
+            experience_to_next_level: 100,
+            total_games_played: 0,
+            total_bets_placed: 0,
+            games_won: 0,
+            games_lost: 0,
+            total_wagered: 0,
+            total_won: 0,
+            total_lost: 0,
+            net_profit: 0,
+            average_bet_size: 0,
+            largest_win: 0,
+            largest_loss: 0,
+            best_multiplier: 0,
+            daily_profit: 0,
+            weekly_profit: 0,
+            monthly_profit: 0,
+            current_win_streak: 0,
+            best_win_streak: 0,
+            win_rate: 0,
+            risk_score: 0,
+            behavior_pattern: 'casual',
+            preferred_bet_range: 'small',
+            badge: 'newcomer',
+            badges_earned: [],
+            achievements: [],
+            chat_level: 0,
+            is_chat_moderator: false,
+            is_connected: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+        
+        const { data: createdUser, error: createError } = await supabaseService
+            .from('users_unified')
+            .insert(newUserData)
+            .select()
             .single();
             
-        if (fetchError || !newProfile) {
-            throw new Error('Failed to fetch newly created user profile');
+        if (createError) {
+            console.error(`❌ FIXED getOrCreateUser: Creation failed for ${cleanWalletAddress}:`, createError);
+            throw new Error(`User creation failed: ${createError.message}`);
         }
         
+        if (!createdUser || !createdUser.id) {
+            throw new Error('User created but no valid data returned from database');
+        }
+        
+        console.log(`✅ FIXED getOrCreateUser: Created user ${createdUser.username} (${createdUser.id})`);
+        
         return {
-            userId,
+            userId: createdUser.id,
             isNewUser: true,
-            userProfile: newProfile
+            userProfile: createdUser
         };
         
     } catch (error) {
-        console.error('❌ Get or create user failed:', error);
+        console.error(`❌ FIXED getOrCreateUser: Failed for ${walletAddress}:`, error);
         throw error;
     }
 }
@@ -6240,6 +6463,550 @@ app.get('/api/health', async (req, res): Promise<void> => {
     });
 });
 
+
+
+// 🔧 FINAL FIXED DEBUG ENDPOINTS WITH ALL TYPESCRIPT ISSUES RESOLVED
+
+// Define interfaces for proper TypeScript support
+interface DebugDepositStep {
+    userSearch?: {
+        error?: string;
+        found: boolean;
+        user: any;
+    };
+    userCreation?: {
+        wouldCreate: boolean;
+        testUserId?: string;
+        testUsername?: string;
+        testData?: any;
+        existingUserId?: string;
+    };
+    rpcTest?: {
+        error?: {
+            message: string;
+            code?: string;
+            details?: string;
+            hint?: string;
+        } | null;
+        result: any;
+        working: boolean;
+    };
+    error?: string;
+}
+
+interface DebugDepositResult {
+    depositId: string;
+    walletAddress: string;
+    amount: string;
+    steps: DebugDepositStep;
+}
+
+interface DebugWalletStep {
+    search?: {
+        success: boolean;
+        error?: string;
+        found: boolean;
+        user: any;
+    };
+    getOrCreateUser?: {
+        success: boolean;
+        userId?: string;
+        isNewUser?: boolean;
+        username?: string;
+        error?: string;
+        stack?: string;
+    };
+}
+
+interface DebugWalletResult {
+    walletAddress: string;
+    steps: DebugWalletStep;
+}
+
+// Check pending deposits with detailed analysis
+app.get('/api/debug/check-pending', async (req, res): Promise<void> => {
+    try {
+        console.log('🔍 DEBUG: Checking pending deposits issue...');
+        
+        // Get current pending deposits
+        const { data: pendingDeposits, error: pendingError } = await supabaseService
+            .from('pending_deposits')
+            .select('*')
+            .eq('status', 'pending')
+            .limit(5);
+
+        if (pendingError) {
+            res.json({ error: 'Could not fetch pending deposits', details: pendingError.message });
+            return;
+        }
+
+        const results: DebugDepositResult[] = [];
+
+        // Test each pending deposit
+        for (const deposit of pendingDeposits || []) {
+            const depositResult: DebugDepositResult = {
+                depositId: deposit.id,
+                walletAddress: deposit.wallet_address,
+                amount: deposit.amount,
+                steps: {}
+            };
+
+            try {
+                // Step 1: Try to find existing user
+                console.log(`🔍 Testing wallet: ${deposit.wallet_address}`);
+                
+                const { data: existingUser, error: searchError } = await supabaseService
+                    .from('users_unified')
+                    .select('id, username, wallet_address, external_wallet_address')
+                    .or(`wallet_address.ilike.${deposit.wallet_address},external_wallet_address.ilike.${deposit.wallet_address},privy_wallet_address.ilike.${deposit.wallet_address}`)
+                    .limit(1);
+
+                depositResult.steps.userSearch = {
+                    error: searchError?.message,
+                    found: Boolean(existingUser && existingUser.length > 0), // Fix: Convert to boolean
+                    user: existingUser?.[0] || null
+                };
+
+                // Step 2: If not found, test user creation
+                if (!existingUser || existingUser.length === 0) {
+                    console.log(`🆕 Testing user creation for: ${deposit.wallet_address}`);
+                    
+                    const userId = crypto.randomUUID();
+                    const username = `test_${userId.slice(-8)}`;
+                    
+                    // Don't actually create, just test the data structure
+                    depositResult.steps.userCreation = {
+                        wouldCreate: true,
+                        testUserId: userId,
+                        testUsername: username,
+                        testData: {
+                            id: userId,
+                            username,
+                            wallet_address: deposit.wallet_address,
+                            external_wallet_address: deposit.wallet_address
+                        }
+                    };
+                } else {
+                    depositResult.steps.userCreation = {
+                        wouldCreate: false,
+                        existingUserId: existingUser[0].id
+                    };
+                }
+
+                // Step 3: Test RPC function call (with dummy user)
+                const testUserId = existingUser?.[0]?.id || 'test-user-id';
+                
+                const { data: rpcResult, error: rpcError } = await supabaseService
+                    .rpc('update_unified_user_balance', {
+                        p_user_id: testUserId,
+                        p_custodial_change: 0, // Test with 0 change
+                        p_privy_change: 0,
+                        p_embedded_change: 0,
+                        p_transaction_type: 'debug_test',
+                        p_transaction_id: 'debug_test',
+                        p_game_id: null,
+                        p_is_deposit: false,
+                        p_deposit_amount: 0
+                    });
+
+                depositResult.steps.rpcTest = {
+                    error: rpcError ? {
+                        message: rpcError.message,
+                        code: rpcError.code,
+                        details: rpcError.details,
+                        hint: rpcError.hint
+                    } : null,
+                    result: rpcResult,
+                    working: !rpcError
+                };
+
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                depositResult.steps.error = errorMessage;
+            }
+
+            results.push(depositResult);
+        }
+
+        res.json({
+            pendingDepositsCount: pendingDeposits?.length || 0,
+            testResults: results,
+            serverInfo: {
+                currentGame: currentGame?.id || 'none',
+                houseBalance: houseBalance
+            },
+            timestamp: Date.now()
+        });
+
+    } catch (error) {
+        console.error('❌ Debug check failed:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        res.status(500).json({
+            error: 'Debug check failed',
+            details: errorMessage
+        });
+    }
+});
+
+// Test specific wallet operations
+app.post('/api/debug/test-wallet', async (req, res): Promise<void> => {
+    try {
+        const { walletAddress } = req.body;
+        
+        if (!walletAddress) {
+            res.status(400).json({ error: 'walletAddress required' });
+            return;
+        }
+
+        console.log(`🧪 Testing wallet operations for: ${walletAddress}`);
+
+        const result: DebugWalletResult = {
+            walletAddress,
+            steps: {}
+        };
+
+        // Test 1: Search for existing user
+        try {
+            const { data: existingUser, error: searchError } = await supabaseService
+                .from('users_unified')
+                .select('*')
+                .or(`wallet_address.ilike.${walletAddress},external_wallet_address.ilike.${walletAddress},privy_wallet_address.ilike.${walletAddress}`)
+                .limit(1);
+
+            result.steps.search = {
+                success: !searchError,
+                error: searchError?.message,
+                found: Boolean(existingUser && existingUser.length > 0), // Fix: Convert to boolean
+                user: existingUser?.[0] || null
+            };
+
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            result.steps.search = {
+                success: false,
+                error: errorMessage,
+                found: false,
+                user: null
+            };
+        }
+
+        // Test 2: Try getOrCreateUser function
+        try {
+            console.log(`🔄 Testing getOrCreateUser for: ${walletAddress}`);
+            const userResult = await getOrCreateUser(walletAddress);
+            
+            result.steps.getOrCreateUser = {
+                success: true,
+                userId: userResult.userId,
+                isNewUser: userResult.isNewUser,
+                username: userResult.userProfile?.username
+            };
+
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorStack = error instanceof Error ? error.stack : undefined;
+            result.steps.getOrCreateUser = {
+                success: false,
+                error: errorMessage,
+                stack: errorStack
+            };
+        }
+
+        res.json(result);
+
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        res.status(500).json({
+            error: 'Wallet test failed',
+            details: errorMessage
+        });
+    }
+});
+
+// Force resolve specific pending deposit
+app.post('/api/debug/force-resolve-deposit', async (req, res): Promise<void> => {
+    try {
+        const { depositId } = req.body;
+        
+        if (!depositId) {
+            res.status(400).json({ error: 'depositId required' });
+            return;
+        }
+
+        // Get the pending deposit
+        const { data: deposit, error: depositError } = await supabaseService
+            .from('pending_deposits')
+            .select('*')
+            .eq('id', depositId)
+            .single();
+
+        if (depositError || !deposit) {
+            res.status(404).json({
+                error: 'Pending deposit not found',
+                depositId
+            });
+            return;
+        }
+
+        console.log(`🔧 Force resolving deposit: ${deposit.amount} SOL from ${deposit.wallet_address}`);
+
+        // Try to create/find user
+        const userResult = await getOrCreateUser(deposit.wallet_address);
+        const userId = userResult.userId;
+        const amount = parseFloat(deposit.amount);
+
+        // Try balance update
+        const { data: balanceResult, error: balanceError } = await supabaseService
+            .rpc('update_unified_user_balance', {
+                p_user_id: userId,
+                p_custodial_change: amount,
+                p_privy_change: 0,
+                p_embedded_change: 0,
+                p_transaction_type: 'force_resolved',
+                p_transaction_id: deposit.transaction_signature,
+                p_game_id: currentGame?.id || null,
+                p_is_deposit: true,
+                p_deposit_amount: amount
+            });
+
+        if (balanceError) {
+            res.status(500).json({
+                error: 'Balance update failed',
+                details: balanceError.message,
+                userId
+            });
+            return;
+        }
+
+        if (!balanceResult || balanceResult.length === 0) {
+            res.status(500).json({
+                error: 'RPC function returned no results',
+                userId
+            });
+            return;
+        }
+
+        const newBalance = parseFloat(balanceResult[0].new_custodial_balance || '0');
+
+        // Mark as resolved
+        await supabaseService
+            .from('pending_deposits')
+            .update({
+                status: 'resolved',
+                resolved_at: new Date().toISOString(),
+                resolved_user_id: userId,
+                resolution_method: 'force_debug'
+            })
+            .eq('id', depositId);
+
+        // Broadcast update
+        io.emit('custodialBalanceUpdate', {
+            userId,
+            custodialBalance: newBalance,
+            depositAmount: amount,
+            transactionSignature: deposit.transaction_signature,
+            timestamp: Date.now(),
+            source: 'force_resolved',
+            walletAddress: deposit.wallet_address,
+            updateType: 'force_resolved'
+        });
+
+        res.json({
+            success: true,
+            depositId,
+            userId,
+            walletAddress: deposit.wallet_address,
+            amount,
+            newBalance,
+            message: 'Deposit force resolved successfully'
+        });
+
+    } catch (error) {
+        console.error('❌ Force resolve error:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        res.status(500).json({
+            error: 'Force resolve failed',
+            details: errorMessage
+        });
+    }
+});
+
+// Check database health - FIXED count query
+app.get('/api/debug/database-health', async (req, res): Promise<void> => {
+    try {
+        // Test table access
+        const tests: any[] = [];
+
+        // Test users_unified table - FIXED: Use proper count query
+        try {
+            const { data: userTest, error: userError, count: userCount } = await supabaseService
+                .from('users_unified')
+                .select('id', { count: 'exact', head: true });
+            
+            tests.push({
+                table: 'users_unified',
+                accessible: !userError,
+                error: userError?.message,
+                count: userCount || 0 // Fix: Use count from response
+            });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            tests.push({
+                table: 'users_unified',
+                accessible: false,
+                error: errorMessage,
+                count: 0
+            });
+        }
+
+        // Test pending_deposits table - FIXED: Use proper count query
+        try {
+            const { data: depositTest, error: depositError, count: depositCount } = await supabaseService
+                .from('pending_deposits')
+                .select('id', { count: 'exact', head: true });
+            
+            tests.push({
+                table: 'pending_deposits',
+                accessible: !depositError,
+                error: depositError?.message,
+                count: depositCount || 0 // Fix: Use count from response
+            });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            tests.push({
+                table: 'pending_deposits',
+                accessible: false,
+                error: errorMessage,
+                count: 0
+            });
+        }
+
+        // Test RPC function
+        try {
+            const { error: rpcError } = await supabaseService
+                .rpc('update_unified_user_balance', {
+                    p_user_id: 'health-check-test',
+                    p_custodial_change: 0,
+                    p_privy_change: 0,
+                    p_embedded_change: 0,
+                    p_transaction_type: 'health_check',
+                    p_transaction_id: 'health_check',
+                    p_game_id: null,
+                    p_is_deposit: false,
+                    p_deposit_amount: 0
+                });
+            
+            tests.push({
+                function: 'update_unified_user_balance',
+                accessible: !rpcError,
+                error: rpcError?.message
+            });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            tests.push({
+                function: 'update_unified_user_balance',
+                accessible: false,
+                error: errorMessage
+            });
+        }
+
+        res.json({
+            databaseHealth: tests,
+            environment: {
+                supabaseUrl: SUPABASE_URL ? 'Set' : 'Missing',
+                supabaseKey: SUPABASE_ANON_KEY ? 'Set' : 'Missing',
+                serviceKey: process.env.SUPABASE_SERVICE_KEY ? 'Set' : 'Missing'
+            },
+            timestamp: Date.now()
+        });
+
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        res.status(500).json({
+            error: 'Database health check failed',
+            details: errorMessage
+        });
+    }
+});
+
+// Simple RPC test
+app.get('/api/debug/rpc-test', async (req, res): Promise<void> => {
+    try {
+        console.log('🧪 Testing RPC function...');
+        
+        const { data: testResult, error: testError } = await supabaseService
+            .rpc('update_unified_user_balance', {
+                p_user_id: 'test-user-123',
+                p_custodial_change: 0,
+                p_privy_change: 0,
+                p_embedded_change: 0,
+                p_transaction_type: 'test',
+                p_transaction_id: 'test',
+                p_game_id: null,
+                p_is_deposit: false,
+                p_deposit_amount: 0
+            });
+        
+        res.json({
+            rpcTest: {
+                error: testError ? {
+                    message: testError.message,
+                    code: testError.code,
+                    details: testError.details,
+                    hint: testError.hint
+                } : null,
+                result: testResult,
+                working: !testError
+            },
+            timestamp: Date.now()
+        });
+        
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        res.status(500).json({
+            error: 'RPC test failed',
+            details: errorMessage
+        });
+    }
+});
+
+// Get detailed pending deposits info
+app.get('/api/debug/pending-deposits-detailed', async (req, res): Promise<void> => {
+    try {
+        const { data: pendingDeposits, error } = await supabaseService
+            .from('pending_deposits')
+            .select('*')
+            .order('detected_at', { ascending: false })
+            .limit(20);
+
+        const { data: recentUsers, error: usersError } = await supabaseService
+            .from('users_unified')
+            .select('id, username, wallet_address, external_wallet_address, created_at')
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        res.json({
+            pendingDeposits: pendingDeposits || [],
+            recentUsers: recentUsers || [],
+            errors: {
+                pendingError: error?.message,
+                usersError: usersError?.message
+            },
+            stats: {
+                totalPending: pendingDeposits?.filter(d => d.status === 'pending').length || 0,
+                totalResolved: pendingDeposits?.filter(d => d.status === 'resolved').length || 0
+            },
+            timestamp: Date.now()
+        });
+
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        res.status(500).json({
+            error: 'Debug check failed',
+            details: errorMessage
+        });
+    }
+});
 // Add this API endpoint to check FOMO status
 app.get('/api/bootstrap/fomo-status', (req, res): void => {
     const config = getCurrentGameConfig();

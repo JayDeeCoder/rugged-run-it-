@@ -1,4 +1,4 @@
-// app/api/transfer/privy-to-custodial/route.ts
+// app/api/transfer/privy-to-custodial/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server';
 import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, TransactionInstruction } from '@solana/web3.js';
 import { createClient } from '@supabase/supabase-js';
@@ -76,10 +76,18 @@ export async function POST(request: NextRequest) {
     const solanaConnection = new Connection(SOLANA_RPC_URL, 'confirmed');
     
     const body = await request.json();
-    const { userId, amount, signedTransaction, autoSign = true, walletAddress } = body;
+    
+    // 🔥 CRITICAL FIX: Default autoSign to false and properly handle the two-step process
+    const { userId, amount, signedTransaction, walletAddress } = body;
     
     console.log('🔍 Received request body:', JSON.stringify(body, null, 2));
-    console.log('📋 Transfer details:', { userId, amount, hasSignedTx: !!signedTransaction, autoSign, walletAddress });
+    console.log('📋 Transfer details:', { 
+      userId, 
+      amount, 
+      hasSignedTx: !!signedTransaction, 
+      walletAddress,
+      step: signedTransaction ? 'Step 2 (Submit)' : 'Step 1 (Create)'
+    });
     
     // Validate inputs
     if (!userId || typeof userId !== 'string') {
@@ -213,9 +221,13 @@ export async function POST(request: NextRequest) {
       );
     }
     
-    if (!signedTransaction && !autoSign) {
-      // Step 1: Create unsigned transaction for external wallets (manual signing)
-      console.log('📝 Creating unsigned transaction for external wallet...');
+    // 🔥 FIXED: Determine step based on presence of signedTransaction
+    const isStep1 = !signedTransaction; // Create unsigned transaction
+    const isStep2 = !!signedTransaction; // Submit signed transaction
+    
+    if (isStep1) {
+      // 🚀 STEP 1: Create unsigned transaction
+      console.log('📝 Step 1: Creating unsigned transaction...');
       
       const transaction = await createTransferTransaction(
         privyPublicKey,
@@ -228,20 +240,26 @@ export async function POST(request: NextRequest) {
       transaction.recentBlockhash = blockhash;
       transaction.feePayer = privyPublicKey;
       
-      const serializedTransaction = transaction.serialize({ requireAllSignatures: false });
+      const serializedTransaction = transaction.serialize({ 
+        requireAllSignatures: false,
+        verifySignatures: false
+      });
       const base64Transaction = serializedTransaction.toString('base64');
       
+      console.log('✅ Step 1: Unsigned transaction created successfully');
+      
       return NextResponse.json({ 
-        success: false,
+        success: true,
         transferId,
         unsignedTransaction: base64Transaction,
-        message: 'Transaction created - please sign with your Privy wallet',
+        message: 'Unsigned transaction created. Sign and submit to complete transfer.',
         transferDetails: {
           from: wallet.privyWalletAddress,
           to: HOUSE_WALLET_ADDRESS,
           amount: amount,
           currentBalance: currentBalance,
-          estimatedFee: 0.001
+          estimatedFee: 0.001,
+          userId
         },
         dailyLimits: {
           used: dailyCheck.used,
@@ -249,198 +267,253 @@ export async function POST(request: NextRequest) {
           limit: DAILY_WITHDRAWAL_LIMIT
         }
       });
-    }
-    
-    // Step 2: Process transaction (either signed or auto-signed)
-    console.log('💸 Processing transfer transaction...');
-    
-    let transactionBuffer: Buffer;
-    
-    if (signedTransaction) {
-      // External wallet - process provided signed transaction
-      console.log('🔐 Processing externally signed transaction...');
-      transactionBuffer = Buffer.from(signedTransaction, 'base64');
-    } else if (autoSign) {
-      // This should not happen with the current implementation
-      // The frontend should always provide a signed transaction
-      console.log('⚠️ Auto-signing requested but not implemented on server side');
-      return NextResponse.json({
-        error: 'Auto-signing not supported. Please sign the transaction on the frontend.',
-        hint: 'Use the unsigned transaction flow and sign with your Privy wallet'
-      }, { status: 400 });
-    } else {
-      return NextResponse.json(
-        { error: 'No signed transaction provided and auto-sign disabled' },
-        { status: 400 }
-      );
-    }
-    
-    try {
-      // Submit to blockchain
-      const signature = await solanaConnection.sendRawTransaction(
-        transactionBuffer,
-        { skipPreflight: false, preflightCommitment: 'confirmed' }
-      );
       
-      console.log(`📡 Transaction submitted: ${signature}`);
+    } else if (isStep2) {
+      // 🚀 STEP 2: Process signed transaction
+      console.log('💸 Step 2: Processing signed transaction...');
       
-      // Wait for confirmation
-      const confirmation = await Promise.race([
-        solanaConnection.confirmTransaction(signature, 'confirmed'),
-        new Promise<any>((_, reject) => 
-          setTimeout(() => reject(new Error('Transaction timeout')), 30000)
-        )
-      ]);
+      let transactionBuffer: Buffer;
       
-      if (confirmation && confirmation.value && confirmation.value.err) {
-        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      try {
+        transactionBuffer = Buffer.from(signedTransaction, 'base64');
+      } catch (parseError) {
+        console.error('❌ Failed to parse signed transaction:', parseError);
+        return NextResponse.json(
+          { error: 'Invalid signed transaction format' },
+          { status: 400 }
+        );
       }
       
-      console.log(`✅ Transfer transaction confirmed: ${signature}`);
-      
-      // 🔥 CRITICAL FIX: Update custodial balance in database
       try {
-        const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        // Submit to blockchain
+        const signature = await solanaConnection.sendRawTransaction(
+          transactionBuffer,
+          { skipPreflight: false, preflightCommitment: 'confirmed' }
+        );
         
-        if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
-          const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+        console.log(`📡 Transaction submitted: ${signature}`);
+        
+        // Wait for confirmation
+        const confirmation = await Promise.race([
+          solanaConnection.confirmTransaction({
+            signature,
+            blockhash: (await solanaConnection.getLatestBlockhash()).blockhash,
+            lastValidBlockHeight: (await solanaConnection.getLatestBlockhash()).lastValidBlockHeight
+          }),
+          new Promise<any>((_, reject) => 
+            setTimeout(() => reject(new Error('Transaction timeout')), 30000)
+          )
+        ]);
+        
+        if (confirmation && confirmation.value && confirmation.value.err) {
+          throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+        }
+        
+        console.log(`✅ Transfer transaction confirmed: ${signature}`);
+        
+        // 🔥 CRITICAL FIX: Update custodial balance in database
+        let newCustodialBalance = amount; // Default fallback
+        
+        try {
+          const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+          const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
           
-          console.log(`💰 Updating custodial balance for user ${userId} (+${amount} SOL)`);
-          
-          // First, get current custodial balance or create user profile if it doesn't exist
-          const { data: currentUser, error: selectError } = await supabase
-            .from('user_profiles')
-            .select('custodial_balance, privy_balance, total_balance, total_transfers_to_custodial')
-            .eq('user_id', userId)
-            .single();
-          
-          if (selectError && selectError.code !== 'PGRST116') {
-            console.error('❌ Error fetching current balance:', selectError);
-            throw selectError;
-          }
-          
-          const currentCustodialBalance = parseFloat(currentUser?.custodial_balance || '0');
-          const currentPrivyBalance = parseFloat(currentUser?.privy_balance || '0');
-          const newCustodialBalance = currentCustodialBalance + amount;
-          const newPrivyBalance = Math.max(0, currentPrivyBalance - amount); // Decrease privy balance
-          const newTotalBalance = newCustodialBalance + newPrivyBalance;
-          
-          if (!currentUser) {
-            // Create new user profile
-            const { error: insertError } = await supabase
-              .from('user_profiles')
-              .insert({
-                user_id: userId,
-                custodial_balance: newCustodialBalance.toString(),
-                privy_balance: newPrivyBalance.toString(),
-                total_balance: newTotalBalance.toString(),
-                total_transfers_to_custodial: amount,
-                updated_at: new Date().toISOString()
-              });
+          if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+            const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
             
-            if (insertError) {
-              console.error('❌ Failed to create user profile:', insertError);
+            console.log(`💰 Updating custodial balance for user ${userId} (+${amount} SOL)`);
+            
+            // First, get current custodial balance or create user profile if it doesn't exist
+            const { data: currentUser, error: selectError } = await supabase
+              .from('user_profiles')
+              .select('custodial_balance, privy_balance, total_balance, total_transfers_to_custodial')
+              .eq('user_id', userId)
+              .single();
+            
+            if (selectError && selectError.code !== 'PGRST116') {
+              console.error('❌ Error fetching current balance:', selectError);
+              throw selectError;
+            }
+            
+            const currentCustodialBalance = parseFloat(currentUser?.custodial_balance || '0');
+            const currentPrivyBalance = parseFloat(currentUser?.privy_balance || '0');
+            newCustodialBalance = currentCustodialBalance + amount;
+            const newPrivyBalance = Math.max(0, currentPrivyBalance - amount); // Decrease privy balance
+            const newTotalBalance = newCustodialBalance + newPrivyBalance;
+            
+            if (!currentUser) {
+              // Create new user profile
+              const { error: insertError } = await supabase
+                .from('user_profiles')
+                .insert({
+                  user_id: userId,
+                  custodial_balance: newCustodialBalance.toString(),
+                  privy_balance: newPrivyBalance.toString(),
+                  total_balance: newTotalBalance.toString(),
+                  total_transfers_to_custodial: amount,
+                  updated_at: new Date().toISOString()
+                });
+              
+              if (insertError) {
+                console.error('❌ Failed to create user profile:', insertError);
+              } else {
+                console.log(`✅ Created user profile with custodial balance: ${newCustodialBalance} SOL`);
+              }
             } else {
-              console.log(`✅ Created user profile with custodial balance: ${newCustodialBalance} SOL`);
+              // Update existing user profile
+              const { error: updateError } = await supabase
+                .from('user_profiles')
+                .update({ 
+                  custodial_balance: newCustodialBalance.toString(),
+                  privy_balance: newPrivyBalance.toString(),
+                  total_balance: newTotalBalance.toString(),
+                  total_transfers_to_custodial: (parseFloat(currentUser.total_transfers_to_custodial || '0') + amount).toString(),
+                  updated_at: new Date().toISOString()
+                })
+                .eq('user_id', userId);
+              
+              if (updateError) {
+                console.error('❌ Failed to update custodial balance:', updateError);
+              } else {
+                console.log(`✅ Custodial balance updated: ${currentCustodialBalance} → ${newCustodialBalance} SOL`);
+                console.log(`✅ Privy balance updated: ${currentPrivyBalance} → ${newPrivyBalance} SOL`);
+              }
             }
           } else {
-            // Update existing user profile
-            const { error: updateError } = await supabase
-              .from('user_profiles')
-              .update({ 
-                custodial_balance: newCustodialBalance.toString(),
-                privy_balance: newPrivyBalance.toString(),
-                total_balance: newTotalBalance.toString(),
-                total_transfers_to_custodial: (parseFloat(currentUser.total_transfers_to_custodial || '0') + amount).toString(),
-                updated_at: new Date().toISOString()
-              })
-              .eq('user_id', userId);
-            
-            if (updateError) {
-              console.error('❌ Failed to update custodial balance:', updateError);
-            } else {
-              console.log(`✅ Custodial balance updated: ${currentCustodialBalance} → ${newCustodialBalance} SOL`);
-              console.log(`✅ Privy balance updated: ${currentPrivyBalance} → ${newPrivyBalance} SOL`);
-            }
+            console.warn('⚠️ Missing Supabase config - custodial balance not updated');
           }
-        } else {
-          console.warn('⚠️ Missing Supabase config - custodial balance not updated');
+        } catch (dbError) {
+          console.error('❌ Database update error:', dbError);
+          // Don't fail the transaction for DB errors, but log them
         }
-      } catch (dbError) {
-        console.error('❌ Database update error:', dbError);
-        // Don't fail the transaction for DB errors, but log them
-      }
-      
-      // Log the successful transaction
-      await privyWalletAPI.logTransaction(
-        userId,
-        'privy_to_custodial',
-        amount,
-        wallet.privyWalletAddress,
-        HOUSE_WALLET_ADDRESS,
-        signature,
-        'completed',
-        { 
-          transferId,
-          transferType: 'privy_to_custodial',
-          houseWallet: HOUSE_WALLET_ADDRESS
+        
+        // 🚀 NEW: Emit real-time balance update events
+        try {
+          // Check if socket.io is available globally
+          const io = (global as any).io;
+          if (io) {
+            console.log('📡 Emitting real-time balance update events...');
+            
+            // Primary balance update event
+            io.emit('custodialBalanceUpdate', {
+              userId: userId,
+              custodialBalance: newCustodialBalance,
+              depositAmount: amount,
+              updateType: 'transfer_completed',
+              transactionId: signature,
+              source: 'privy_to_custodial_transfer',
+              timestamp: Date.now()
+            });
+
+            // Transfer confirmation event
+            io.emit('embeddedTransferConfirmed', {
+              userId: userId,
+              walletAddress: wallet.privyWalletAddress,
+              amount: amount.toString(),
+              type: 'embedded_to_custodial',
+              transactionId: signature,
+              newCustodialBalance: newCustodialBalance,
+              timestamp: Date.now()
+            });
+
+            console.log('✅ Real-time events emitted successfully');
+          } else {
+            console.warn('⚠️ Socket.io not available for real-time events');
+          }
+        } catch (eventError) {
+          console.warn('⚠️ Failed to emit real-time events:', eventError);
+          // Don't fail the transfer for event emission errors
         }
-      );
-      
-      // Update wallet balance
-      const newBalance = await privyWalletAPI.updateWalletBalance(userId);
-      
-      // Get updated daily limits
-      const updatedDailyCheck = await privyWalletAPI.checkDailyWithdrawalLimit(userId, 0);
-      
-      console.log(`✅ Privy to custodial transfer completed: ${transferId} (${signature})`);
-      
-      return NextResponse.json({
-        success: true,
-        message: `Successfully transferred ${amount} SOL from Privy wallet to custodial balance`,
-        transactionId: signature,
-        transferId,
-        transferDetails: {
+        
+        // Log the successful transaction
+        await privyWalletAPI.logTransaction(
+          userId,
+          'privy_to_custodial',
           amount,
-          sourceAddress: wallet.privyWalletAddress,
-          destinationAddress: HOUSE_WALLET_ADDRESS,
+          wallet.privyWalletAddress,
+          HOUSE_WALLET_ADDRESS,
+          signature,
+          'completed',
+          { 
+            transferId,
+            transferType: 'privy_to_custodial',
+            houseWallet: HOUSE_WALLET_ADDRESS
+          }
+        );
+        
+        // Update wallet balance
+        const newBalance = await privyWalletAPI.updateWalletBalance(userId);
+        
+        // Get updated daily limits
+        const updatedDailyCheck = await privyWalletAPI.checkDailyWithdrawalLimit(userId, 0);
+        
+        console.log(`✅ Step 2: Privy to custodial transfer completed: ${transferId} (${signature})`);
+        
+        return NextResponse.json({
+          success: true,
+          message: `Successfully transferred ${amount} SOL from Privy wallet to custodial balance`,
           transactionId: signature,
-          newBalance: newBalance,
-          timestamp: new Date().toISOString()
-        },
-        dailyLimits: {
-          used: updatedDailyCheck.used,
-          remaining: updatedDailyCheck.remaining,
-          limit: DAILY_WITHDRAWAL_LIMIT
-        }
-      });
-      
-    } catch (transactionError) {
-      console.error('❌ Transaction processing failed:', transactionError);
-      
-      // Log failed transaction
-      await privyWalletAPI.logTransaction(
-        userId,
-        'privy_to_custodial',
-        amount,
-        wallet.privyWalletAddress,
-        HOUSE_WALLET_ADDRESS,
-        undefined,
-        'failed',
-        { 
           transferId,
-          error: transactionError instanceof Error ? transactionError.message : 'Unknown error'
+          transferDetails: {
+            amount,
+            sourceAddress: wallet.privyWalletAddress,
+            destinationAddress: HOUSE_WALLET_ADDRESS,
+            transactionId: signature,
+            newBalance: newCustodialBalance, // Return the updated custodial balance
+            userId,
+            timestamp: new Date().toISOString()
+          },
+          dailyLimits: {
+            used: updatedDailyCheck.used,
+            remaining: updatedDailyCheck.remaining,
+            limit: DAILY_WITHDRAWAL_LIMIT
+          }
+        });
+        
+      } catch (transactionError) {
+        console.error('❌ Step 2: Transaction processing failed:', transactionError);
+        
+        // Log failed transaction
+        await privyWalletAPI.logTransaction(
+          userId,
+          'privy_to_custodial',
+          amount,
+          wallet.privyWalletAddress,
+          HOUSE_WALLET_ADDRESS,
+          undefined,
+          'failed',
+          { 
+            transferId,
+            error: transactionError instanceof Error ? transactionError.message : 'Unknown error'
+          }
+        );
+        
+        // Handle specific error types
+        if (transactionError instanceof Error && transactionError.message.includes('timeout')) {
+          return NextResponse.json(
+            { 
+              error: 'Transaction confirmation timeout. Please check your wallet balance and try again if needed.',
+              code: 'CONFIRMATION_TIMEOUT',
+              transferId
+            },
+            { status: 408 }
+          );
         }
-      );
-      
+        
+        return NextResponse.json(
+          { 
+            error: 'Failed to process transaction',
+            details: transactionError instanceof Error ? transactionError.message : 'Unknown error',
+            transferId
+          },
+          { status: 500 }
+        );
+      }
+    } else {
+      // This shouldn't happen with proper logic
       return NextResponse.json(
-        { 
-          error: 'Failed to process transaction',
-          details: transactionError instanceof Error ? transactionError.message : 'Unknown error',
-          transferId
-        },
-        { status: 500 }
+        { error: 'Invalid request: unclear whether this is Step 1 or Step 2' },
+        { status: 400 }
       );
     }
     
@@ -464,21 +537,30 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   return NextResponse.json({
-    message: 'Privy to custodial transfer endpoint',
+    message: 'Privy to custodial transfer endpoint - FIXED VERSION',
     methods: ['POST'],
-    requiredFields: ['userId', 'amount'],
-    optionalFields: ['signedTransaction', 'autoSign'],
+    requiredFields: ['userId', 'amount', 'walletAddress'],
+    optionalFields: ['signedTransaction'],
     process: [
-      '1. First call without signedTransaction to get unsigned transaction',
-      '2. Sign transaction with Privy wallet on frontend',
-      '3. Second call with signedTransaction to complete transfer'
+      '1. STEP 1: Call without signedTransaction to get unsigned transaction',
+      '2. STEP 2: Sign transaction with Privy wallet on frontend',
+      '3. STEP 3: Call again with signedTransaction to complete transfer'
+    ],
+    fixes: [
+      'Removed autoSign parameter confusion',
+      'Clear step-based logic using signedTransaction presence',
+      'Better error handling and logging',
+      'Real-time balance update events',
+      'Proper database balance updates'
     ],
     features: [
       'Two-step process for security',
       'Daily withdrawal limits (20 SOL)',
       'Balance validation',
       'Transaction logging',
-      'Real-time balance updates'
+      'Real-time balance updates',
+      'Supabase database integration',
+      'Socket.io event emission'
     ],
     limits: {
       minAmount: MIN_WITHDRAWAL,
@@ -491,12 +573,12 @@ export async function GET() {
         body: {
           userId: 'user123',
           amount: 1.5,
-          autoSign: false
+          walletAddress: 'YourPrivyWalletAddress'
         },
         response: {
-          success: false,
+          success: true,
           unsignedTransaction: 'base64_transaction_string',
-          message: 'Transaction created - please sign with your Privy wallet'
+          message: 'Unsigned transaction created. Sign and submit to complete transfer.'
         }
       },
       step2: {
@@ -504,6 +586,7 @@ export async function GET() {
         body: {
           userId: 'user123',
           amount: 1.5,
+          walletAddress: 'YourPrivyWalletAddress',
           signedTransaction: 'base64_signed_transaction_string'
         },
         response: {

@@ -1,4 +1,4 @@
-// hooks/useSharedState.ts - ENHANCED VERSION
+// hooks/useSharedState.ts - FIXED TYPESCRIPT VERSION
 // Single file containing all shared hooks for game state management
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
@@ -24,9 +24,9 @@ export const useSharedCustodialBalance = (userId: string) => {
   const isUpdatingRef = useRef<boolean>(false);
   const retryCountRef = useRef<number>(0);
 
-  // 🔥 ENHANCED: Stable update function with retry logic and better error handling
-  const updateBalance = useCallback(async (force: boolean = false, retryCount: number = 0) => {
-    if (!userId || (isUpdatingRef.current && !force)) return;
+  // 🔥 FIXED: Stable update function with proper TypeScript return types
+  const updateBalance = useCallback(async (force: boolean = false, retryCount: number = 0): Promise<number | null> => {
+    if (!userId || (isUpdatingRef.current && !force)) return null;
     
     isUpdatingRef.current = true;
     setState(prev => ({ ...prev, loading: true, error: null }));
@@ -104,7 +104,7 @@ export const useSharedCustodialBalance = (userId: string) => {
           updateBalance(force, retryCount + 1);
         }, retryDelay);
         
-        return;
+        return null; // 🔥 FIXED: Return null instead of undefined
       }
       
       setState(prev => ({ 
@@ -114,14 +114,15 @@ export const useSharedCustodialBalance = (userId: string) => {
       }));
       
       retryCountRef.current = 0; // Reset retry count
+      return null; // 🔥 FIXED: Return null instead of undefined
     } finally {
       isUpdatingRef.current = false;
     }
   }, [userId, state.balance]);
 
-  // 🔥 ENHANCED: Force refresh with aggressive retry and multiple strategies
-  const forceRefresh = useCallback(async () => {
-    if (!userId) return;
+  // 🔥 FIXED: Force refresh with proper TypeScript return types
+  const forceRefresh = useCallback(async (): Promise<number | null> => {
+    if (!userId) return null;
     console.log(`🔄 [SHARED] Force refreshing custodial balance for ${userId}...`);
     
     try {
@@ -172,7 +173,7 @@ export const useSharedCustodialBalance = (userId: string) => {
       const result = await updateBalance(true, 0);
       
       // Strategy 3: If still no result, try direct socket emission
-      if (result === undefined) {
+      if (result === null) { // 🔥 FIXED: Check for null instead of undefined
         console.log(`📡 [SHARED] Strategy 3: Socket emission for balance refresh`);
         const socket = (window as any).gameSocket;
         if (socket) {
@@ -188,13 +189,13 @@ export const useSharedCustodialBalance = (userId: string) => {
         ...prev, 
         error: error instanceof Error ? error.message : 'Refresh failed' 
       }));
-      throw error;
+      return null; // 🔥 FIXED: Return null instead of throwing
     }
   }, [userId, updateBalance]);
 
-  // 🔥 ENHANCED: Add immediate balance sync for cashouts
-  const syncAfterCashout = useCallback(async (expectedIncrease?: number) => {
-    if (!userId) return;
+  // 🔥 FIXED: Add immediate balance sync for cashouts with proper return type
+  const syncAfterCashout = useCallback(async (expectedIncrease?: number): Promise<number | null> => {
+    if (!userId) return null;
     
     console.log(`💸 [SHARED] Syncing balance after cashout... Expected increase: ${expectedIncrease || 'unknown'}`);
     
@@ -210,7 +211,7 @@ export const useSharedCustodialBalance = (userId: string) => {
       try {
         const result = await updateBalance(true, 0);
         
-        if (result !== undefined) {
+        if (result !== null) { // 🔥 FIXED: Check for null instead of undefined
           const increase = result - startBalance;
           console.log(`💸 [SHARED] Balance sync result: ${startBalance.toFixed(3)} → ${result.toFixed(3)} (+${increase.toFixed(3)})`);
           
@@ -240,7 +241,7 @@ export const useSharedCustodialBalance = (userId: string) => {
           return attemptSync();
         }
         
-        throw error;
+        return null; // 🔥 FIXED: Return null instead of throwing
       }
     };
     

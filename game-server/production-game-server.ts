@@ -2210,9 +2210,20 @@ let multiplierControl: MultiplierControl = {
 // FIXED: Enhanced transaction monitoring with proper house balance updates
 // 🔧 ENHANCED: Updated transaction monitoring for user_profiles
 // COMPLETE FIXED VERSION: Replace your entire monitorAndUpdateDatabase function with this
+let isMonitoringActive = false;
+const processedTransactionSignatures = new Map<string, number>(); // signature -> timestamp
+
 async function monitorAndUpdateDatabase(): Promise<void> {
+    // 🔧 FIX 1: Prevent concurrent execution
+    if (isMonitoringActive) {
+        console.log('⚠️ Transaction monitoring already active, skipping this cycle');
+        return;
+    }
+    
+    isMonitoringActive = true;
+    
     try {
-        console.log('🔍 Monitoring house wallet transactions and updating database...');
+        console.log('🔍 [FIXED] Monitoring house wallet transactions...');
         
         const signatures = await solanaConnection.getSignaturesForAddress(
             housePublicKey,
@@ -2220,19 +2231,42 @@ async function monitorAndUpdateDatabase(): Promise<void> {
         );
 
         let balanceChanged = false;
+        let processedCount = 0;
+        let skippedCount = 0;
 
         for (const sigInfo of signatures) {
-            if (processedSignatures.has(sigInfo.signature)) {
+            // 🔧 FIX 2: Enhanced deduplication check
+            if (processedSignatures.has(sigInfo.signature) || 
+                processedTransactionSignatures.has(sigInfo.signature)) {
+                skippedCount++;
                 continue;
             }
 
             if (sigInfo.err) {
                 console.log(`⚠️ Skipping failed transaction: ${sigInfo.signature}`);
                 processedSignatures.add(sigInfo.signature);
+                processedTransactionSignatures.set(sigInfo.signature, Date.now());
                 continue;
             }
 
             try {
+                // 🔧 FIX 3: Check database for existing transaction FIRST
+                const { data: existingTransaction } = await supabaseService
+                    .from('balance_transactions')
+                    .select('id, transaction_id')
+                    .eq('transaction_id', sigInfo.signature)
+                    .limit(1);
+
+                if (existingTransaction && existingTransaction.length > 0) {
+                    console.log(`✅ Transaction ${sigInfo.signature} already processed in database, skipping`);
+                    processedSignatures.add(sigInfo.signature);
+                    processedTransactionSignatures.set(sigInfo.signature, Date.now());
+                    skippedCount++;
+                    continue;
+                }
+
+                console.log(`🔍 [FIXED] Processing new transaction: ${sigInfo.signature}`);
+                
                 const transaction = await solanaConnection.getTransaction(sigInfo.signature, {
                     commitment: 'confirmed'
                 });
@@ -2294,10 +2328,17 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                     const fromAddress = decoded.fromPubkey.toString();
                     const amount = decoded.lamports / LAMPORTS_PER_SOL;
                     
-                    console.log(`💰 Detected incoming deposit: ${amount} SOL from ${fromAddress}`);
+                    console.log(`💰 [FIXED] Detected incoming deposit: ${amount} SOL from ${fromAddress}`);
                     balanceChanged = true;
                     
-                    // ENHANCED: Try to find or create user
+                    // 🔧 FIX 4: Rate limiting check
+                    if (!checkDepositRateLimit(fromAddress, amount)) {
+                        console.warn(`🚨 Rate limit exceeded for ${fromAddress}, marking transaction as processed but not crediting`);
+                        processedSignatures.add(sigInfo.signature);
+                        processedTransactionSignatures.set(sigInfo.signature, Date.now());
+                        continue;
+                    }
+                    
                     let userFound = false;
                     let userId = null;
                     
@@ -2306,35 +2347,49 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                         userId = userResult.userId;
                         userFound = true;
                         
-                        console.log(`👤 ${userResult.isNewUser ? 'Created new' : 'Found existing'} user: ${userId}`);
+                        console.log(`👤 [FIXED] ${userResult.isNewUser ? 'Created new' : 'Found existing'} user: ${userId}`);
                         
-                        // Use the enhanced balance update system
+                        // 🔧 FIX 5: DOUBLE-CHECK database again before processing
+                        const { data: doubleCheckTransaction } = await supabaseService
+                            .from('balance_transactions')
+                            .select('id')
+                            .eq('transaction_id', sigInfo.signature)
+                            .eq('user_id', userId)
+                            .limit(1);
+
+                        if (doubleCheckTransaction && doubleCheckTransaction.length > 0) {
+                            console.log(`✅ Transaction ${sigInfo.signature} already processed for user ${userId}, skipping`);
+                            processedSignatures.add(sigInfo.signature);
+                            processedTransactionSignatures.set(sigInfo.signature, Date.now());
+                            continue;
+                        }
+                        
+                        // 🔧 FIX 6: Use actual transaction signature as transaction_id
                         const { data: balanceResult, error: balanceError } = await supabaseService
-                            .rpc('update_unified_user_balance', {  // ✅ Change function name
+                            .rpc('update_unified_user_balance', {
                                 p_user_id: userId,
                                 p_custodial_change: amount,
                                 p_privy_change: 0,
                                 p_embedded_change: 0,
                                 p_transaction_type: 'external_deposit',
-                                p_transaction_id: 'external_deposit',
+                                p_transaction_id: sigInfo.signature, // ✅ CRITICAL FIX: Use actual signature
                                 p_game_id: currentGame?.id,
-                                p_is_deposit: true,  // or true for deposits
-                                p_deposit_amount: amount   // or actual deposit amount
+                                p_is_deposit: true,
+                                p_deposit_amount: amount
                             });
 
                         if (balanceError) {
-                            console.error(`❌ Failed to update balance for user ${userId}:`, balanceError);
+                            console.error(`❌ [FIXED] Failed to update balance for user ${userId}:`, balanceError);
                             throw balanceError;
                         }
 
-                        // FIXED: Get all required variables from RPC response
                         const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
                         const newTotalBalance = parseFloat(balanceResult[0].new_total_balance || balanceResult[0].new_custodial_balance);
                         const newTotalDeposited = parseFloat(balanceResult[0].new_total_deposited || balanceResult[0].new_custodial_balance);
                         
-                        console.log(`✅ Balance updated: ${userId} - Custodial: ${newCustodialBalance.toFixed(3)} SOL`);
+                        console.log(`✅ [FIXED] Balance updated: ${userId} - Custodial: ${newCustodialBalance.toFixed(3)} SOL (Tx: ${sigInfo.signature})`);
 
-                        // FIXED: Broadcast balance update with proper variables
+                        // Broadcast balance update
                         io.emit('custodialBalanceUpdate', {
                             userId,
                             custodialBalance: newCustodialBalance,
@@ -2343,13 +2398,12 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                             depositAmount: amount,
                             transactionSignature: sigInfo.signature,
                             timestamp: Date.now(),
-                            source: 'external_deposit_auto_created',
+                            source: 'fixed_external_deposit',
                             isNewUser: userResult.isNewUser,
                             walletAddress: fromAddress,
-                            updateType: 'deposit_processed'
+                            updateType: 'fixed_deposit_processed'
                         });
 
-                        // FIXED: Also emit user-specific balance update
                         io.emit('userBalanceUpdate', {
                             userId,
                             walletAddress: fromAddress,
@@ -2360,11 +2414,13 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                             transactionType: 'deposit',
                             transactionSignature: sigInfo.signature,
                             timestamp: Date.now(),
-                            source: 'blockchain_deposit'
+                            source: 'fixed_blockchain_deposit'
                         });
 
+                        processedCount++;
+
                     } catch (userCreationError) {
-                        console.error(`❌ Failed to create/find user for deposit from ${fromAddress}:`, userCreationError);
+                        console.error(`❌ [FIXED] Failed to create/find user for deposit from ${fromAddress}:`, userCreationError);
                         userFound = false;
                     }
                     
@@ -2372,40 +2428,56 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                     if (!userFound) {
                         console.log(`⚠️ User creation failed for wallet ${fromAddress}, storing as pending deposit`);
                         
-                        const { error: pendingError } = await supabaseService
+                        // Check if pending deposit already exists
+                        const { data: existingPending } = await supabaseService
                             .from('pending_deposits')
-                            .insert({
-                                wallet_address: fromAddress,
-                                amount: amount,
-                                transaction_signature: sigInfo.signature,
-                                detected_at: new Date().toISOString(),
-                                status: 'pending'
-                            });
+                            .select('id')
+                            .eq('transaction_signature', sigInfo.signature)
+                            .limit(1);
 
-                        if (pendingError) {
-                            console.error('Failed to store pending deposit:', pendingError);
+                        if (!existingPending || existingPending.length === 0) {
+                            const { error: pendingError } = await supabaseService
+                                .from('pending_deposits')
+                                .insert({
+                                    wallet_address: fromAddress,
+                                    amount: amount,
+                                    transaction_signature: sigInfo.signature,
+                                    detected_at: new Date().toISOString(),
+                                    status: 'pending'
+                                });
+
+                            if (pendingError) {
+                                console.error('Failed to store pending deposit:', pendingError);
+                            } else {
+                                console.log(`📝 Stored pending deposit: ${amount} SOL from ${fromAddress}`);
+                            }
                         } else {
-                            console.log(`📝 Stored pending deposit: ${amount} SOL from ${fromAddress}`);
+                            console.log(`📝 Pending deposit already exists for transaction ${sigInfo.signature}`);
                         }
                     }
                 }
 
+                // Always mark as processed
                 processedSignatures.add(sigInfo.signature);
+                processedTransactionSignatures.set(sigInfo.signature, Date.now());
                 
             } catch (error) {
-                console.error(`❌ Error processing transaction ${sigInfo.signature}:`, error);
+                console.error(`❌ [FIXED] Error processing transaction ${sigInfo.signature}:`, error);
                 processedSignatures.add(sigInfo.signature);
+                processedTransactionSignatures.set(sigInfo.signature, Date.now());
             }
         }
 
+        console.log(`📊 [FIXED] Transaction monitoring complete: ${processedCount} processed, ${skippedCount} skipped`);
+
         // Update house balance if any changes detected
         if (balanceChanged) {
-            console.log('💰 Deposits detected, updating house balance...');
+            console.log('💰 [FIXED] Deposits detected, updating house balance...');
             const oldBalance = houseBalance;
             await updateHouseBalance();
             const change = houseBalance - oldBalance;
             
-            console.log(`🏛️ House balance updated: ${oldBalance.toFixed(3)} → ${houseBalance.toFixed(3)} SOL (${change >= 0 ? '+' : ''}${change.toFixed(3)})`);
+            console.log(`🏛️ [FIXED] House balance updated: ${oldBalance.toFixed(3)} → ${houseBalance.toFixed(3)} SOL (${change >= 0 ? '+' : ''}${change.toFixed(3)})`);
             
             io.to('admin_monitoring').emit('adminHouseBalanceUpdate', {
                 oldBalance,
@@ -2413,7 +2485,7 @@ async function monitorAndUpdateDatabase(): Promise<void> {
                 change,
                 maxPayoutCapacity: calculateMaxPayoutCapacity(),
                 timestamp: Date.now(),
-                source: 'deposit_processing'
+                source: 'fixed_deposit_processing'
             });
             
             if (currentGame) {
@@ -2428,15 +2500,72 @@ async function monitorAndUpdateDatabase(): Promise<void> {
             }
         }
 
-        // Clean up old processed signatures
+        // 🔧 FIX 7: Clean up old processed signatures with timestamp check
         if (processedSignatures.size > 1000) {
             const oldSignatures = Array.from(processedSignatures).slice(0, 500);
             oldSignatures.forEach(sig => processedSignatures.delete(sig));
         }
 
+        // Clean up old timestamped signatures (older than 24 hours)
+        const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+        for (const [signature, timestamp] of processedTransactionSignatures) {
+            if (timestamp < oneDayAgo) {
+                processedTransactionSignatures.delete(signature);
+            }
+        }
+
     } catch (error) {
-        console.error('❌ Error in transaction monitoring:', error);
+        console.error('❌ [FIXED] Error in fixed transaction monitoring:', error);
+    } finally {
+        isMonitoringActive = false;
     }
+}
+
+// 🔧 FIX 8: Add rate limiting function (place this near the top of your file)
+const depositHistory = new Map<string, Array<{amount: number, timestamp: number}>>();
+
+function checkDepositRateLimit(walletAddress: string, amount: number): boolean {
+    const now = Date.now();
+    const oneHour = 60 * 60 * 1000;
+    const oneMinute = 60 * 1000;
+    
+    let history = depositHistory.get(walletAddress) || [];
+    
+    // Clean old entries
+    history = history.filter(deposit => now - deposit.timestamp < oneHour);
+    
+    // Check for suspicious patterns
+    const recentDeposits = history.filter(deposit => now - deposit.timestamp < oneMinute);
+    
+    // Max 5 deposits per minute
+    if (recentDeposits.length >= 5) {
+        console.warn(`🚨 Rate limit: ${walletAddress} exceeded 5 deposits/minute`);
+        return false;
+    }
+    
+    // Max 20 SOL per hour
+    const hourlyTotal = history.reduce((sum, deposit) => sum + deposit.amount, 0);
+    if (hourlyTotal + amount > 20) {
+        console.warn(`🚨 Rate limit: ${walletAddress} would exceed 20 SOL/hour`);
+        return false;
+    }
+    
+    // Check for repeated 0.01 SOL deposits (your specific issue)
+    const smallDeposits = history.filter(deposit => 
+        Math.abs(deposit.amount - 0.01) < 0.001 && 
+        now - deposit.timestamp < (5 * 60 * 1000) // within 5 minutes
+    );
+    
+    if (smallDeposits.length >= 3 && Math.abs(amount - 0.01) < 0.001) {
+        console.warn(`🚨 Suspicious pattern: ${walletAddress} repeated 0.01 SOL deposits blocked`);
+        return false;
+    }
+    
+    // Add to history
+    history.push({ amount, timestamp: now });
+    depositHistory.set(walletAddress, history);
+    
+    return true;
 }
 // Function to resolve pending deposits when users register
 // 🔧 FIXED resolvePendingDeposits - Replace your existing function with this
@@ -2461,6 +2590,7 @@ async function resolvePendingDeposits(): Promise<void> {
             console.log('📝 FIXED: No pending deposits found');
             return;
         }
+        
 
         console.log(`📋 FIXED: Found ${pendingDeposits.length} pending deposits to check`);
 
@@ -2472,6 +2602,23 @@ async function resolvePendingDeposits(): Promise<void> {
                 let userId: string | null = null;
                 let userProfile: any = null;
                 let isNewUser = false;
+
+                if (deposit.transaction_signature && processedSignatures.has(deposit.transaction_signature)) {
+                    console.log(`⚠️ FIXED: Transaction already processed, skipping: ${deposit.transaction_signature}`);
+                    
+                    // Mark as resolved to prevent reprocessing
+                    await supabaseService
+                        .from('pending_deposits')
+                        .update({ 
+                            status: 'resolved',
+                            resolved_at: new Date().toISOString(),
+                            resolved_user_id: userId || 'unknown',
+                            resolution_method: 'duplicate_skipped'
+                        })
+                        .eq('id', deposit.id);
+                    
+                    continue; // Skip this deposit
+                }
 
                 // Step 1: Try to find existing user with multiple search patterns
                 console.log(`🔍 FIXED: Searching for existing user with wallet: ${deposit.wallet_address}`);
@@ -6524,6 +6671,56 @@ interface DebugWalletResult {
 }
 
 // Check pending deposits with detailed analysis
+// 🔧 FIXED DEBUG ENDPOINTS WITH PROPER UUID
+
+// Replace your debug endpoints with these fixed versions:
+
+// Simple RPC test with valid UUID
+app.get('/api/debug/rpc-test', async (req, res): Promise<void> => {
+    try {
+        console.log('🧪 Testing RPC function...');
+        
+        // Use a valid UUID format for testing
+        const testUUID = '12345678-1234-5678-9012-123456789012';
+        
+        const { data: testResult, error: testError } = await supabaseService
+            .rpc('update_unified_user_balance', {
+                p_user_id: testUUID, // Valid UUID format
+                p_custodial_change: 0,
+                p_privy_change: 0,
+                p_embedded_change: 0,
+                p_transaction_type: 'test',
+                p_transaction_id: 'test',
+                p_game_id: null,
+                p_is_deposit: false,
+                p_deposit_amount: 0
+            });
+        
+        res.json({
+            rpcTest: {
+                testUUID: testUUID,
+                error: testError ? {
+                    message: testError.message,
+                    code: testError.code,
+                    details: testError.details,
+                    hint: testError.hint
+                } : null,
+                result: testResult,
+                working: !testError
+            },
+            timestamp: Date.now()
+        });
+        
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        res.status(500).json({
+            error: 'RPC test failed',
+            details: errorMessage
+        });
+    }
+});
+
+// Also fix the check-pending debug endpoint
 app.get('/api/debug/check-pending', async (req, res): Promise<void> => {
     try {
         console.log('🔍 DEBUG: Checking pending deposits issue...');
@@ -6563,7 +6760,7 @@ app.get('/api/debug/check-pending', async (req, res): Promise<void> => {
 
                 depositResult.steps.userSearch = {
                     error: searchError?.message,
-                    found: Boolean(existingUser && existingUser.length > 0), // Fix: Convert to boolean
+                    found: Boolean(existingUser && existingUser.length > 0),
                     user: existingUser?.[0] || null
                 };
 
@@ -6574,7 +6771,6 @@ app.get('/api/debug/check-pending', async (req, res): Promise<void> => {
                     const userId = crypto.randomUUID();
                     const username = `test_${userId.slice(-8)}`;
                     
-                    // Don't actually create, just test the data structure
                     depositResult.steps.userCreation = {
                         wouldCreate: true,
                         testUserId: userId,
@@ -6593,13 +6789,13 @@ app.get('/api/debug/check-pending', async (req, res): Promise<void> => {
                     };
                 }
 
-                // Step 3: Test RPC function call (with dummy user)
-                const testUserId = existingUser?.[0]?.id || 'test-user-id';
+                // Step 3: Test RPC function call with proper UUID
+                const testUserId = existingUser?.[0]?.id || '12345678-1234-5678-9012-123456789012'; // Valid UUID fallback
                 
                 const { data: rpcResult, error: rpcError } = await supabaseService
                     .rpc('update_unified_user_balance', {
-                        p_user_id: testUserId,
-                        p_custodial_change: 0, // Test with 0 change
+                        p_user_id: testUserId, // Now using valid UUID
+                        p_custodial_change: 0,
                         p_privy_change: 0,
                         p_embedded_change: 0,
                         p_transaction_type: 'debug_test',
@@ -6723,6 +6919,37 @@ app.post('/api/debug/test-wallet', async (req, res): Promise<void> => {
     }
 });
 
+app.post('/api/debug/check-transaction-history', async (req, res): Promise<void> => {
+    try {
+        const { userId, transactionSignature } = req.body;
+        
+        // Check how many times this transaction appears
+        const { data: duplicates, error } = await supabaseService
+            .from('balance_transactions')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('transaction_id', transactionSignature);
+
+        const { data: pendingDuplicates } = await supabaseService
+            .from('pending_deposits')
+            .select('*')
+            .eq('transaction_signature', transactionSignature);
+
+        res.json({
+            userId,
+            transactionSignature,
+            balanceTransactionDuplicates: duplicates?.length || 0,
+            pendingDepositDuplicates: pendingDuplicates?.length || 0,
+            balanceTransactions: duplicates || [],
+            pendingDeposits: pendingDuplicates || []
+        });
+
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        res.status(500).json({ error: errorMessage });
+    }
+});
+
 // Force resolve specific pending deposit
 app.post('/api/debug/force-resolve-deposit', async (req, res): Promise<void> => {
     try {
@@ -6831,6 +7058,191 @@ app.post('/api/debug/force-resolve-deposit', async (req, res): Promise<void> => 
     }
 });
 
+// Emergency endpoint to find and fix duplicate transactions
+app.post('/api/emergency/cleanup-duplicates', async (req, res): Promise<void> => {
+    try {
+        const adminKey = req.headers['x-admin-key'] || req.query.adminKey;
+        
+        if (adminKey !== process.env.ADMIN_SECRET_KEY) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        console.log('🚨 EMERGENCY: Starting duplicate transaction cleanup...');
+        
+        // Step 1: Find transactions with 'external_deposit' as transaction_id (the bug)
+        const { data: duplicateTransactions, error: findError } = await supabaseService
+            .from('balance_transactions')
+            .select(`
+                id,
+                user_id,
+                amount,
+                transaction_type,
+                transaction_id,
+                created_at
+            `)
+            .eq('transaction_id', 'external_deposit') // This was your bug
+            .order('created_at', { ascending: true });
+
+        if (findError) {
+            throw findError;
+        }
+
+        console.log(`🔍 Found ${duplicateTransactions?.length || 0} transactions with duplicate transaction_id`);
+
+        if (!duplicateTransactions || duplicateTransactions.length === 0) {
+            res.json({
+                success: true,
+                message: 'No duplicate transactions found',
+                duplicatesFound: 0,
+                duplicatesRemoved: 0
+            });
+            return;
+        }
+
+        // Step 2: Group by user_id to identify multiple deposits per user
+        const userGroups = new Map<string, any[]>();
+        for (const tx of duplicateTransactions) {
+            const userId = tx.user_id;
+            if (!userGroups.has(userId)) {
+                userGroups.set(userId, []);
+            }
+            userGroups.get(userId)!.push(tx);
+        }
+
+        console.log(`📊 Found ${userGroups.size} users with potentially duplicate transactions`);
+
+        let totalCorrected = 0;
+        let totalRemoved = 0;
+        const correctionResults = [];
+
+        // Step 3: Process each user
+        for (const [userId, transactions] of userGroups) {
+            try {
+                if (transactions.length <= 1) continue; // Skip users with only 1 transaction
+
+                console.log(`🔧 Processing user ${userId} with ${transactions.length} duplicate transactions`);
+
+                // Sort by created_at to keep the first one
+                transactions.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+                const firstTransaction = transactions[0];
+                const duplicatesToRemove = transactions.slice(1);
+
+                console.log(`   Keeping first transaction: ${firstTransaction.id} (${firstTransaction.amount} SOL)`);
+                console.log(`   Removing ${duplicatesToRemove.length} duplicate transactions`);
+
+                // Calculate total amount to subtract
+                const amountToSubtract = duplicatesToRemove.reduce((sum, tx) => sum + parseFloat(tx.amount), 0);
+
+                // Get user info
+                const { data: userData } = await supabaseService
+                    .from('users_unified')
+                    .select('username, custodial_balance')
+                    .eq('id', userId)
+                    .single();
+
+                const currentBalance = parseFloat(userData?.custodial_balance || '0');
+                const correctedBalance = Math.max(0, currentBalance - amountToSubtract);
+
+                console.log(`   Current balance: ${currentBalance.toFixed(6)} SOL`);
+                console.log(`   Amount to subtract: ${amountToSubtract.toFixed(6)} SOL`);
+                console.log(`   Corrected balance: ${correctedBalance.toFixed(6)} SOL`);
+
+                // Apply correction if requested
+                if (req.body.applyCorrections === true) {
+                    // Update user balance
+                    const { error: balanceError } = await supabaseService
+                        .from('users_unified')
+                        .update({ 
+                            custodial_balance: correctedBalance,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', userId);
+
+                    if (balanceError) {
+                        console.error(`❌ Failed to correct balance for user ${userId}:`, balanceError);
+                        continue;
+                    }
+
+                    // Remove duplicate transactions
+                    for (const tx of duplicatesToRemove) {
+                        await supabaseService
+                            .from('balance_transactions')
+                            .delete()
+                            .eq('id', tx.id);
+                    }
+
+                    // Create correction record
+                    await supabaseService
+                        .from('balance_transactions')
+                        .insert({
+                            user_id: userId,
+                            amount: -amountToSubtract,
+                            transaction_type: 'duplicate_correction',
+                            transaction_id: `correction_${Date.now()}_${userId}`,
+                            game_id: null,
+                            notes: `Corrected ${duplicatesToRemove.length} duplicate external_deposit transactions`,
+                            created_at: new Date().toISOString()
+                        });
+
+                    // Broadcast correction
+                    io.emit('balanceCorrection', {
+                        userId,
+                        username: userData?.username,
+                        oldBalance: currentBalance,
+                        newBalance: correctedBalance,
+                        correction: -amountToSubtract,
+                        reason: 'Duplicate transaction removal',
+                        duplicatesRemoved: duplicatesToRemove.length,
+                        timestamp: Date.now()
+                    });
+
+                    totalCorrected += amountToSubtract;
+                    totalRemoved += duplicatesToRemove.length;
+
+                    console.log(`✅ Corrected user ${userId}: removed ${duplicatesToRemove.length} duplicates, subtracted ${amountToSubtract.toFixed(6)} SOL`);
+                }
+
+                correctionResults.push({
+                    userId,
+                    username: userData?.username || 'Unknown',
+                    duplicateCount: duplicatesToRemove.length,
+                    currentBalance,
+                    amountToSubtract,
+                    correctedBalance,
+                    applied: req.body.applyCorrections === true
+                });
+
+            } catch (error) {
+                console.error(`❌ Error processing user ${userId}:`, error);
+            }
+        }
+
+        res.json({
+            success: true,
+            message: req.body.applyCorrections 
+                ? `Cleanup completed: removed ${totalRemoved} duplicate transactions, corrected ${totalCorrected.toFixed(6)} SOL`
+                : `Analysis complete: ${totalRemoved} duplicates found (use applyCorrections=true to fix)`,
+            duplicatesFound: duplicateTransactions.length,
+            usersAffected: userGroups.size,
+            duplicatesRemoved: req.body.applyCorrections ? totalRemoved : 0,
+            totalCorrected: req.body.applyCorrections ? totalCorrected : 0,
+            correctionResults,
+            applyCorrections: req.body.applyCorrections === true,
+            timestamp: Date.now()
+        });
+
+    } catch (error) {
+        console.error('❌ Emergency cleanup failed:', error);
+        res.status(500).json({
+            error: 'Emergency cleanup failed',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+
+
 // Check database health - FIXED count query
 app.get('/api/debug/database-health', async (req, res): Promise<void> => {
     try {
@@ -6930,13 +7342,17 @@ app.get('/api/debug/database-health', async (req, res): Promise<void> => {
 });
 
 // Simple RPC test
+// Simple RPC test with valid UUID
 app.get('/api/debug/rpc-test', async (req, res): Promise<void> => {
     try {
         console.log('🧪 Testing RPC function...');
         
+        // Use a valid UUID format for testing
+        const testUUID = '12345678-1234-5678-9012-123456789012';
+        
         const { data: testResult, error: testError } = await supabaseService
             .rpc('update_unified_user_balance', {
-                p_user_id: 'test-user-123',
+                p_user_id: testUUID, // Valid UUID format
                 p_custodial_change: 0,
                 p_privy_change: 0,
                 p_embedded_change: 0,
@@ -6949,6 +7365,7 @@ app.get('/api/debug/rpc-test', async (req, res): Promise<void> => {
         
         res.json({
             rpcTest: {
+                testUUID: testUUID,
                 error: testError ? {
                     message: testError.message,
                     code: testError.code,
@@ -6969,6 +7386,7 @@ app.get('/api/debug/rpc-test', async (req, res): Promise<void> => {
         });
     }
 });
+
 
 // Get detailed pending deposits info
 app.get('/api/debug/pending-deposits-detailed', async (req, res): Promise<void> => {
@@ -8092,7 +8510,299 @@ async function cleanupRecoveryData(): Promise<void> {
         console.warn('⚠️ Error cleaning up recovery data:', error);
     }
 }
+// 🚨 ADD THESE EMERGENCY ENDPOINTS TO YOUR SERVER
+// Place this code BEFORE your server.listen() line
 
+// Endpoint to check current duplicate status
+app.get('/api/emergency/check-duplicates', async (req, res): Promise<void> => {
+    try {
+        const adminKey = req.headers['x-admin-key'] || req.query.adminKey;
+        
+        if (adminKey !== process.env.ADMIN_SECRET_KEY) {
+            res.status(401).json({ error: 'Unauthorized - Invalid admin key' });
+            return;
+        }
+
+        console.log('🔍 ADMIN: Checking for duplicate transactions...');
+
+        // Check for the specific bug (transaction_id = 'external_deposit')
+        const { data: bugTransactions } = await supabaseService
+            .from('balance_transactions')
+            .select('id, user_id, amount, created_at')
+            .eq('transaction_id', 'external_deposit');
+
+        // Check for other potential duplicates by grouping
+        const { data: potentialDuplicates } = await supabaseService
+            .from('balance_transactions')
+            .select('transaction_id, user_id, amount, created_at')
+            .not('transaction_id', 'is', null)
+            .order('created_at', { ascending: false })
+            .limit(1000);
+
+        // Group by transaction_id to find duplicates
+        const duplicateGroups = new Map();
+        if (potentialDuplicates) {
+            for (const tx of potentialDuplicates) {
+                const key = `${tx.transaction_id}-${tx.user_id}`;
+                if (!duplicateGroups.has(key)) {
+                    duplicateGroups.set(key, []);
+                }
+                duplicateGroups.get(key).push(tx);
+            }
+        }
+
+        const realDuplicates = Array.from(duplicateGroups.values()).filter(group => group.length > 1);
+
+        res.json({
+            success: true,
+            mainBug: {
+                description: "Transactions with transaction_id = 'external_deposit' (the main bug)",
+                count: bugTransactions?.length || 0,
+                totalAmount: bugTransactions?.reduce((sum, tx) => sum + parseFloat(tx.amount), 0) || 0,
+                affectedUsers: new Set(bugTransactions?.map(tx => tx.user_id) || []).size,
+                transactions: bugTransactions || []
+            },
+            otherDuplicates: {
+                description: "Other potential duplicate transactions",
+                duplicateGroups: realDuplicates.length,
+                examples: realDuplicates.slice(0, 5)
+            },
+            serverInfo: {
+                timestamp: Date.now(),
+                adminKeyValid: true,
+                databaseConnected: true
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Check duplicates failed:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Check failed',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+
+// Emergency endpoint to cleanup duplicate transactions
+app.post('/api/emergency/cleanup-duplicates', async (req, res): Promise<void> => {
+    try {
+        const adminKey = req.headers['x-admin-key'] || req.query.adminKey;
+        
+        if (adminKey !== process.env.ADMIN_SECRET_KEY) {
+            res.status(401).json({ error: 'Unauthorized - Invalid admin key' });
+            return;
+        }
+
+        console.log('🚨 ADMIN: Starting duplicate transaction cleanup...');
+        
+        // Step 1: Find transactions with 'external_deposit' as transaction_id (the main bug)
+        const { data: duplicateTransactions, error: findError } = await supabaseService
+            .from('balance_transactions')
+            .select(`
+                id,
+                user_id,
+                amount,
+                transaction_type,
+                transaction_id,
+                created_at
+            `)
+            .eq('transaction_id', 'external_deposit')
+            .order('created_at', { ascending: true });
+
+        if (findError) {
+            throw findError;
+        }
+
+        console.log(`🔍 Found ${duplicateTransactions?.length || 0} transactions with the bug`);
+
+        if (!duplicateTransactions || duplicateTransactions.length === 0) {
+            res.json({
+                success: true,
+                message: 'No duplicate transactions found with the main bug',
+                duplicatesFound: 0,
+                duplicatesRemoved: 0,
+                totalCorrected: 0
+            });
+            return;
+        }
+
+        // Step 2: Group by user_id to identify multiple deposits per user
+        const userGroups = new Map<string, any[]>();
+        for (const tx of duplicateTransactions) {
+            const userId = tx.user_id;
+            if (!userGroups.has(userId)) {
+                userGroups.set(userId, []);
+            }
+            userGroups.get(userId)!.push(tx);
+        }
+
+        console.log(`📊 Found ${userGroups.size} users with potentially duplicate transactions`);
+
+        let totalCorrected = 0;
+        let totalRemoved = 0;
+        const correctionResults = [];
+
+        // Step 3: Process each user
+        for (const [userId, transactions] of userGroups) {
+            try {
+                if (transactions.length <= 1) continue; // Skip users with only 1 transaction
+
+                console.log(`🔧 Processing user ${userId} with ${transactions.length} duplicate transactions`);
+
+                // Sort by created_at to keep the first one
+                transactions.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+                const firstTransaction = transactions[0];
+                const duplicatesToRemove = transactions.slice(1);
+
+                // Calculate total amount to subtract
+                const amountToSubtract = duplicatesToRemove.reduce((sum, tx) => sum + parseFloat(tx.amount), 0);
+
+                // Get current user balance
+                const { data: userData } = await supabaseService
+                    .from('users_unified')
+                    .select('username, custodial_balance')
+                    .eq('id', userId)
+                    .single();
+
+                const currentBalance = parseFloat(userData?.custodial_balance || '0');
+                const correctedBalance = Math.max(0, currentBalance - amountToSubtract);
+
+                console.log(`   User: ${userData?.username || userId}`);
+                console.log(`   Current balance: ${currentBalance.toFixed(6)} SOL`);
+                console.log(`   Amount to subtract: ${amountToSubtract.toFixed(6)} SOL`);
+                console.log(`   Corrected balance: ${correctedBalance.toFixed(6)} SOL`);
+
+                // Apply correction if requested
+                if (req.body.applyCorrections === true) {
+                    // Update user balance directly in database
+                    const { error: balanceError } = await supabaseService
+                        .from('users_unified')
+                        .update({ 
+                            custodial_balance: correctedBalance,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', userId);
+
+                    if (balanceError) {
+                        console.error(`❌ Failed to correct balance for user ${userId}:`, balanceError);
+                        continue;
+                    }
+
+                    // Remove duplicate transactions
+                    for (const tx of duplicatesToRemove) {
+                        await supabaseService
+                            .from('balance_transactions')
+                            .delete()
+                            .eq('id', tx.id);
+                    }
+
+                    // Create correction record
+                    await supabaseService
+                        .from('balance_transactions')
+                        .insert({
+                            user_id: userId,
+                            amount: -amountToSubtract,
+                            transaction_type: 'duplicate_correction',
+                            transaction_id: `correction_${Date.now()}_${userId}`,
+                            game_id: null,
+                            notes: `Corrected ${duplicatesToRemove.length} duplicate external_deposit transactions`,
+                            created_at: new Date().toISOString()
+                        });
+
+                    // Broadcast correction to connected clients
+                    io.emit('balanceCorrection', {
+                        userId,
+                        username: userData?.username,
+                        oldBalance: currentBalance,
+                        newBalance: correctedBalance,
+                        correction: -amountToSubtract,
+                        reason: 'Duplicate transaction removal',
+                        duplicatesRemoved: duplicatesToRemove.length,
+                        timestamp: Date.now()
+                    });
+
+                    totalCorrected += amountToSubtract;
+                    totalRemoved += duplicatesToRemove.length;
+
+                    console.log(`✅ Corrected user ${userId}: removed ${duplicatesToRemove.length} duplicates`);
+                }
+
+                correctionResults.push({
+                    userId,
+                    username: userData?.username || 'Unknown',
+                    duplicateCount: duplicatesToRemove.length,
+                    currentBalance,
+                    amountToSubtract,
+                    correctedBalance,
+                    applied: req.body.applyCorrections === true
+                });
+
+            } catch (error) {
+                console.error(`❌ Error processing user ${userId}:`, error);
+            }
+        }
+
+        res.json({
+            success: true,
+            message: req.body.applyCorrections 
+                ? `Cleanup completed: removed ${totalRemoved} duplicate transactions, corrected ${totalCorrected.toFixed(6)} SOL`
+                : `Analysis complete: ${totalRemoved} duplicates found (use applyCorrections=true to fix)`,
+            duplicatesFound: duplicateTransactions.length,
+            usersAffected: userGroups.size,
+            duplicatesRemoved: req.body.applyCorrections ? totalRemoved : 0,
+            totalCorrected: req.body.applyCorrections ? totalCorrected : 0,
+            correctionResults,
+            applyCorrections: req.body.applyCorrections === true,
+            timestamp: Date.now()
+        });
+
+    } catch (error) {
+        console.error('❌ Emergency cleanup failed:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Emergency cleanup failed',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+
+// Simple admin status endpoint
+app.get('/api/admin/status', async (req, res): Promise<void> => {
+    try {
+        const adminKey = req.headers['x-admin-key'] || req.query.adminKey;
+        
+        if (adminKey !== process.env.ADMIN_SECRET_KEY) {
+            res.status(401).json({ error: 'Unauthorized - Invalid admin key' });
+            return;
+        }
+
+        res.json({
+            success: true,
+            server: 'iRUGGED.FUN Game Server',
+            status: 'online',
+            adminAccess: 'authenticated',
+            timestamp: Date.now(),
+            environment: process.env.NODE_ENV || 'development',
+            houseBalance: houseBalance,
+            currentGame: currentGame ? {
+                id: currentGame.id,
+                gameNumber: currentGame.gameNumber,
+                status: currentGame.status,
+                totalBets: currentGame.totalBets,
+                totalPlayers: currentGame.totalPlayers
+            } : null
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: 'Status check failed',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
 // Add this to your enhanced server startup sequence
 // Replace the existing startup sequence with this:
 

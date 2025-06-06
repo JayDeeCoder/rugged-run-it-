@@ -792,64 +792,106 @@ export class UserAPI {
 
 // Keep existing APIs unchanged (LeaderboardAPI, ChartAPI, ChatAPI, SystemAPI)
 export class LeaderboardAPI {
+  /**
+   * Get leaderboard data from users_unified table
+   */
   static async getLeaderboard(period: 'daily' | 'weekly' | 'monthly' | 'all_time' = 'daily'): Promise<LeaderboardEntry[]> {
     try {
+      console.log(`📊 Fetching ${period} leaderboard data from users_unified...`);
+
+      // Define the profit column based on period
+      let profitColumn: string;
+      switch (period) {
+        case 'daily':
+          profitColumn = 'daily_profit';
+          break;
+        case 'weekly':
+          profitColumn = 'weekly_profit';
+          break;
+        case 'monthly':
+          profitColumn = 'monthly_profit';
+          break;
+        case 'all_time':
+        default:
+          profitColumn = 'net_profit';
+          break;
+      }
+
+      // Query users_unified directly and calculate ranks
       const { data, error } = await supabase
-        .from('leaderboard')
+        .from('users_unified')
         .select(`
-          *,
-          users:user_id (
-            username,
-            avatar,
-            level,
-            badge
-          )
+          id,
+          username,
+          wallet_address,
+          external_wallet_address,
+          ${profitColumn},
+          net_profit,
+          total_games_played,
+          best_multiplier,
+          avatar,
+          level,
+          badge,
+          total_wagered,
+          win_rate
         `)
-        .eq('period', period)
-        .order('rank', { ascending: true })
+        .gt(profitColumn, 0) // Only show users with positive profit
+        .gt('total_games_played', 0) // Only show users who have played games
+        .order(profitColumn, { ascending: false })
         .limit(100);
 
       if (error) {
-        logger.error('Error fetching leaderboard:', error);
+        console.error('❌ Error fetching leaderboard from users_unified:', error);
         throw error;
       }
 
-      return data?.map((entry: any) => ({
-        id: entry.id,
-        wallet_address: entry.wallet_address,
-        username: entry.users?.username || entry.username || 'Anonymous',
-        total_profit: entry.total_profit,
-        profit_percentage: entry.profit_percentage,
-        games_played: entry.games_played,
-        best_multiplier: entry.best_multiplier,
-        rank: entry.rank,
-        avatar: entry.users?.avatar,
-        level: entry.users?.level,
-        badge: entry.users?.badge
-      })) || [];
+      if (!data || data.length === 0) {
+        console.log('📊 No leaderboard data found');
+        return [];
+      }
+
+      // Transform data and add ranks
+      const leaderboardEntries: LeaderboardEntry[] = data.map((user: any, index: number) => {
+        const profit = parseFloat(user[profitColumn]) || 0;
+        const totalWagered = parseFloat(user.total_wagered) || 1; // Avoid division by zero
+        
+        // Calculate profit percentage: (profit / total_wagered) * 100
+        const profitPercentage = totalWagered > 0 ? (profit / totalWagered) * 100 : 0;
+
+        return {
+          id: user.id,
+          wallet_address: user.external_wallet_address || user.wallet_address,
+          username: user.username || 'Anonymous',
+          total_profit: profit,
+          profit_percentage: profitPercentage,
+          games_played: user.total_games_played || 0,
+          best_multiplier: parseFloat(user.best_multiplier) || 0,
+          rank: index + 1, // Rank based on order
+          avatar: user.avatar || '👤',
+          level: user.level || 1,
+          badge: user.badge,
+          win_rate: parseFloat(user.win_rate) || 0
+        };
+      });
+
+      console.log(`✅ Fetched ${leaderboardEntries.length} leaderboard entries for ${period}`);
+      return leaderboardEntries;
+
     } catch (error) {
-      logger.error('Error fetching leaderboard:', error);
+      console.error('❌ Error in LeaderboardAPI.getLeaderboard:', error);
       return [];
     }
   }
-
   static async getUserRank(walletAddress: string, period: 'daily' | 'weekly' | 'monthly' | 'all_time' = 'daily'): Promise<number | null> {
     try {
-      const { data, error } = await supabase
-        .from('leaderboard')
-        .select('rank')
-        .eq('wallet_address', walletAddress)
-        .eq('period', period)
-        .single();
-
-      if (error) {
-        logger.error('Error fetching user rank:', error);
-        return null;
-      }
-
-      return data?.rank || null;
+      const leaderboard = await this.getLeaderboard(period);
+      const userEntry = leaderboard.find(entry => 
+        entry.wallet_address.toLowerCase() === walletAddress.toLowerCase()
+      );
+      
+      return userEntry?.rank || null;
     } catch (error) {
-      logger.error('Error fetching user rank:', error);
+      console.error('❌ Error getting user rank:', error);
       return null;
     }
   }
@@ -875,7 +917,6 @@ export class LeaderboardAPI {
     }
   }
 }
-
 export class ChartAPI {
   static async getChartData(gameId: string): Promise<ChartData[]> {
     try {

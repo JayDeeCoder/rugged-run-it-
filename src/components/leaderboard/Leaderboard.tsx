@@ -3,7 +3,7 @@ import { LeaderboardAPI, LeaderboardEntry } from '../../services/api';
 import LeaderboardItem from './LeaderboardItem';
 
 interface LeaderboardProps {
-  entries?: LeaderboardEntry[]; // Make optional since we'll fetch from API
+  entries?: LeaderboardEntry[];
 }
 
 const Leaderboard: FC<LeaderboardProps> = ({ entries: propEntries }) => {
@@ -19,11 +19,21 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries: propEntries }) => {
       setError(null);
       
       try {
+        console.log(`📊 Fetching ${activeTimeframe} leaderboard...`);
+        
         const data = await LeaderboardAPI.getLeaderboard(activeTimeframe);
-        setEntries(data);
+        
+        if (data.length === 0) {
+          console.warn('⚠️ No leaderboard data found');
+          setError('No leaderboard data available for this period');
+        } else {
+          console.log(`✅ Loaded ${data.length} leaderboard entries`);
+          setEntries(data);
+        }
+        
       } catch (err) {
+        console.error('❌ Error fetching leaderboard:', err);
         setError('Failed to load leaderboard');
-        console.error('Error fetching leaderboard:', err);
       } finally {
         setLoading(false);
       }
@@ -107,12 +117,12 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries: propEntries }) => {
             <div className="animate-pulse text-gray-400 text-sm">Loading Ruggerboard...</div>
           </div>
         ) : error ? (
-          <div className="text-center py-8 text-red-500 text-sm">
-            {error}
+          <div className="text-center py-8">
+            <div className="text-red-500 text-sm">{error}</div>
           </div>
         ) : entries.length === 0 ? (
-          <div className="text-center py-8 text-gray-400 text-sm">
-            No entries for this period
+          <div className="text-center py-8">
+            <div className="text-gray-400 text-sm">No entries for this period</div>
           </div>
         ) : (
           entries.map((entry) => (
@@ -124,9 +134,14 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries: propEntries }) => {
                 level: entry.level || 1,
                 role: 'user',
                 avatar: entry.avatar || '👤',
-                badge: entry.badge as any || 'user'
+                badge: entry.badge as any || 'user',
+                gamesPlayed: entry.games_played,
+                bestMultiplier: entry.best_multiplier
               }}
-              profit={entry.total_profit}
+              profit={entry.profit_percentage} // Use profit_percentage for display
+              totalProfit={entry.total_profit} // Show absolute profit amount
+              showDetails={true} // Enable expandable details
+              onClick={() => console.log('Clicked user:', entry.username)} // Add click handler
             />
           ))
         )}

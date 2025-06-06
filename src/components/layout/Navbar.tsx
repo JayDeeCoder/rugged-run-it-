@@ -1,4 +1,4 @@
-// src/components/layout/Navbar.tsx - Using React Portal for dropdown
+// src/components/layout/Navbar.tsx - Updated with avatar and level progression
 import { FC, useState, useEffect, useRef, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
@@ -14,7 +14,7 @@ import { safeCreatePublicKey, isValidSolanaAddress } from '../../utils/walletUti
 const Navbar: FC = () => {
   const { authenticated, login, logout, user, ready } = usePrivy();
   const { wallets } = useSolanaWallets();
-  const { currentUser, experience, userLevel, crates, hasCustomUsername, setUsername } = useContext(UserContext);
+  const { currentUser, experience, userLevel, hasCustomUsername, setUsername } = useContext(UserContext);
 
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [showUserMenu, setShowUserMenu] = useState<boolean>(false);
@@ -158,6 +158,26 @@ const Navbar: FC = () => {
       console.error('Failed to set username:', error);
     }
   };
+
+  // Calculate experience progress for current level
+  const getExperienceProgress = () => {
+    // Use experience from UserContext if available, fallback to currentUser properties
+    const currentXP = experience || currentUser?.experience || 0;
+    const currentLevel = userLevel || currentUser?.level || 1;
+    
+    // Calculate experience needed for next level (100 XP per level)
+    const experienceNeeded = 100;
+    const experienceInLevel = currentXP % 100;
+    const progressPercentage = (experienceInLevel / experienceNeeded) * 100;
+    
+    return {
+      progress: Math.min(progressPercentage, 100),
+      current: experienceInLevel,
+      needed: experienceNeeded
+    };
+  };
+
+  const xpData = getExperienceProgress();
 
   // Dropdown component that renders using portal
   const DropdownMenu = () => {
@@ -329,26 +349,35 @@ const Navbar: FC = () => {
           <div className="flex items-center">
             {authenticated ? (
               <>
-                {/* User Stats */}
-                <div className="hidden md:flex items-center mr-3">
-                  {userLevel && (
-                    <div className="flex items-center bg-gray-800 rounded-full px-2 py-1 mr-2">
-                      <span className="text-xs text-gray-400 mr-1">Lv.</span>
-                      <span className="text-sm font-medium">{userLevel}</span>
-                    </div>
-                  )}
-                  <div className="hidden md:block h-2 w-20 bg-gray-800 rounded-full mr-2">
-                    <div 
-                      className="h-full bg-green-500 rounded-full transition-all duration-300" 
-                      style={{ width: `${Math.min(experience || 0, 100)}%` }}
-                    ></div>
+                {/* User Stats - Avatar + Level + Progress */}
+                <div className="hidden md:flex items-center mr-3 space-x-2">
+                  {/* User Avatar */}
+                  <div className="flex items-center">
+                    <span className="text-lg" title={`${getUserDisplayName()}'s avatar`}>
+                      {currentUser?.avatar || '👤'}
+                    </span>
                   </div>
-                  {crates > 0 && (
-                    <div className="flex items-center bg-yellow-900 rounded-full px-2 py-1 mr-2">
-                      <span className="text-xs text-yellow-500 mr-1">🎁</span>
-                      <span className="text-sm font-medium text-yellow-400">{crates}</span>
+
+                  {/* Level Display */}
+                  {userLevel && (
+                    <div className="flex items-center bg-gray-800 rounded-full px-2 py-1">
+                      <span className="text-xs text-gray-400 mr-1">Lv.</span>
+                      <span className="text-sm font-medium text-yellow-400">{userLevel}</span>
                     </div>
                   )}
+
+                  {/* Experience Progress Bar */}
+                  <div className="flex flex-col items-center">
+                    <div className="h-1.5 w-16 bg-gray-700 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500 ease-out" 
+                        style={{ width: `${xpData.progress}%` }}
+                      ></div>
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {xpData.current}/{xpData.needed} XP
+                    </div>
+                  </div>
                 </div>
 
                 {/* User Menu Button */}
@@ -401,6 +430,36 @@ const Navbar: FC = () => {
         {showMobileMenu && (
           <div className="md:hidden bg-gray-800 mt-3 rounded-md p-2">
             <nav className="flex flex-col">
+              {/* Mobile User Stats */}
+              {authenticated && currentUser && (
+                <div className="px-4 py-2 border-b border-gray-700 mb-2">
+                  <div className="flex items-center space-x-3">
+                    <span className="text-lg">{currentUser.avatar || '👤'}</span>
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-2 mb-1">
+                        <span className="text-sm font-medium">{getUserDisplayName()}</span>
+                        {userLevel && (
+                          <span className="text-xs bg-gray-700 text-yellow-400 px-2 py-0.5 rounded-full">
+                            Lv.{userLevel}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <div className="h-1.5 w-20 bg-gray-700 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500" 
+                            style={{ width: `${xpData.progress}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-xs text-gray-400">
+                          {xpData.current}/{xpData.needed}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               <Link 
                 href="/dashboard" 
                 className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm transition-colors"

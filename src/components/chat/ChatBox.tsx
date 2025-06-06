@@ -57,8 +57,8 @@ const ChatBox: FC = () => {
   const calculateTotalActiveUsers = () => {
     const chatUsers = activeUsers || 0;
     
-    // totalPlayers already includes boosted + real players
-    const totalGamePlayers = currentGame?.totalPlayers || 0;
+    // Use the same logic as ChartContainer: boostedPlayerCount || totalPlayers
+    const totalGamePlayers = currentGame?.boostedPlayerCount || currentGame?.totalPlayers || 0;
     
     // Combine chat users and total game players
     // Note: There might be overlap between chat users and game players,

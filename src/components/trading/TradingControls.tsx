@@ -1092,6 +1092,69 @@ const BettingSection: FC<{
   );
 });
 
+// 🛡️ BALANCE PROTECTION HOOK - Add this right before TradingControls component
+const useBalanceProtection = (custodialBalance: number, userId: string) => {
+  const lastValidBalanceRef = useRef<number>(0);
+  const balanceResetCountRef = useRef<number>(0);
+  const recentTransfersRef = useRef<Array<{timestamp: number, amount: number}>>([]);
+  
+  const validateBalanceUpdate = useCallback((newBalance: number, source: string) => {
+    const now = Date.now();
+    
+    console.log(`🛡️ PROTECTION: Validating balance update from ${source}`, {
+      current: custodialBalance,
+      new: newBalance,
+      lastValid: lastValidBalanceRef.current
+    });
+    
+    if (newBalance === 0 && lastValidBalanceRef.current > 0.001) {
+      const recentTransfers = recentTransfersRef.current.filter(
+        t => now - t.timestamp < 300000 // 5 minutes
+      );
+      
+      if (recentTransfers.length > 0) {
+        balanceResetCountRef.current++;
+        console.warn(`🚨 PROTECTION: Blocking suspicious reset to 0`, {
+          previousBalance: lastValidBalanceRef.current,
+          recentTransfers: recentTransfers.length,
+          resetCount: balanceResetCountRef.current,
+          source
+        });
+        
+        if (balanceResetCountRef.current <= 3) {
+          toast.error(`⚠️ Balance sync issue detected. Use refresh if needed.`, {
+            duration: 5000,
+            id: 'balance-protection'
+          });
+          return false;
+        }
+      }
+    }
+    
+    if (newBalance > 0) {
+      lastValidBalanceRef.current = newBalance;
+      balanceResetCountRef.current = 0;
+    }
+    
+    return true;
+  }, [custodialBalance]);
+  
+  const resetProtection = useCallback(() => {
+    console.log('🔄 PROTECTION: Resetting balance protection');
+    balanceResetCountRef.current = 0;
+    lastValidBalanceRef.current = custodialBalance > 0 ? custodialBalance : 0;
+  }, [custodialBalance]);
+
+  const updateRecentTransfers = useCallback((transfers: Array<{timestamp: number, amount: number}>) => {
+    recentTransfersRef.current = transfers.slice(-5);
+  }, []);
+  
+  return { validateBalanceUpdate, resetProtection, updateRecentTransfers };
+};
+
+// 🚀 MAIN COMPONENT - Enhanced with shared state hooks (your existing line)
+
+
 // 🚀 MAIN COMPONENT - Enhanced with shared state hooks
 const TradingControls: FC<TradingControlsProps> = ({ 
   onBuy, 
@@ -1218,6 +1281,11 @@ const TradingControls: FC<TradingControlsProps> = ({
 
   // Add this after your other hooks like useGameSocket, useCustodialBalance, etc.
   const { executeAutoTransfer, loading: transferLoading, error: transferError } = usePrivyAutoTransfer();
+  const { validateBalanceUpdate, resetProtection, updateRecentTransfers } = useBalanceProtection(custodialBalance, userId || '');
+
+  useEffect(() => {
+    updateRecentTransfers(transferAttempts.current);
+  }, [transferAttempts.current.length, updateRecentTransfers]);
 
   // Memoized calculations
   const gameState = useMemo(() => {
@@ -1300,57 +1368,50 @@ const TradingControls: FC<TradingControlsProps> = ({
 
   // Manual refresh function for all balances
   const refreshAllBalances = useCallback(async () => {
-    debugLog('Manual refresh triggered by user');
+  debugLog('Protected manual refresh triggered by user');
+  
+  // Reset protection before manual refresh
+  resetProtection();
+  
+  try {
+    toast.loading('Refreshing balances...', { id: 'refresh-all' });
     
-    try {
-      toast.loading('Refreshing balances...', { id: 'refresh-all' });
-      
-      const refreshPromises = [
-        Promise.race([
-          refreshEmbeddedBalance(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Embedded balance timeout')), 10000))
-        ]),
-        Promise.race([
-          refreshCustodialBalance(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Custodial balance timeout')), 10000))
-        ]),
-        Promise.race([
-          refreshRuggedBalance(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('RUGGED balance timeout')), 10000))
-        ])
-      ];
+    const refreshPromises = [
+      Promise.race([
+        refreshEmbeddedBalance(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Embedded balance timeout')), 10000))
+      ]),
+      Promise.race([
+        refreshCustodialBalance(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Custodial balance timeout')), 10000))
+      ]),
+      Promise.race([
+        refreshRuggedBalance(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('RUGGED balance timeout')), 10000))
+      ])
+    ];
 
-      const results = await Promise.allSettled(refreshPromises);
-      
-      results.forEach((result, index) => {
-        const balanceType = ['embedded', 'custodial', 'rugged'][index];
-        if (result.status === 'rejected') {
-          debugLog(`${balanceType} balance refresh failed`, result.reason);
-        } else {
-          debugLog(`${balanceType} balance refresh succeeded`);
-        }
-      });
-
-      
-
-      const successCount = results.filter(r => r.status === 'fulfilled').length;
-      
-      if (successCount === 3) {
-        debugLog('All balances refreshed successfully');
-        toast.success('All balances updated!', { id: 'refresh-all' });
-      } else if (successCount > 0) {
-        debugLog(`Partial refresh: ${successCount}/3 balances updated`);
-        toast.success(`${successCount}/3 balances updated`, { id: 'refresh-all' });
-      } else {
-        debugLog('All balance refreshes failed');
-        toast.error('Balance refresh failed - check connection', { id: 'refresh-all' });
-      }
-      
-    } catch (error) {
-      debugLog('Refresh all balances error', error);
-      toast.error('Failed to refresh balances', { id: 'refresh-all' });
+    const results = await Promise.allSettled(refreshPromises);
+    
+    const successCount = results.filter(r => r.status === 'fulfilled').length;
+    
+    if (successCount === 3) {
+      debugLog('All balances refreshed successfully');
+      toast.success('All balances updated!', { id: 'refresh-all' });
+    } else if (successCount > 0) {
+      debugLog(`Partial refresh: ${successCount}/3 balances updated`);
+      toast.success(`${successCount}/3 balances updated`, { id: 'refresh-all' });
+    } else {
+      debugLog('All balance refreshes failed');
+      toast.error('Balance refresh failed - check connection', { id: 'refresh-all' });
     }
-  }, [refreshEmbeddedBalance, refreshCustodialBalance, refreshRuggedBalance, debugLog]);
+    
+  } catch (error) {
+    debugLog('Protected refresh all balances error', error);
+    toast.error('Failed to refresh balances', { id: 'refresh-all' });
+  }
+}, [refreshEmbeddedBalance, refreshCustodialBalance, refreshRuggedBalance, debugLog, resetProtection]);
+
 
   // Enhanced auto transfer function
   const autoTransferToGameBalance = useCallback(async (amount: number) => {
@@ -1774,56 +1835,63 @@ setTimeout(async () => {
   }, [setSavedAmount]);
 
   // In your TradingControls component, update the handleQuickTransfer function
-const handleQuickTransfer = useCallback(async (amount: number) => {
-  if (!userId) {
-    toast.error('User not available for transfer');
-    return;
-  }
-
-  console.log(`💳 TRADING: Initiating quick transfer of ${amount} SOL for user ${userId}`);
-  
-  transferAttempts.current.push({
-    timestamp: Date.now(),
-    amount: amount
-  });
-  
-  transferAttempts.current = transferAttempts.current.slice(-10);
-  
-  debugLog('Quick transfer initiated', { amount, transferAttempts: transferAttempts.current.length });
-  
-  // 🔥 ENHANCED: Pass the balance refresh callback
-  const success = await executeAutoTransfer(
-    userId, 
-    amount,
-    // This callback will be called after successful transfer
-    async () => {
-      console.log('🔄 TRADING: Transfer success callback - refreshing custodial balance...');
-      await refreshCustodialBalance();
-      
-      // Additional safety refresh
-      setTimeout(() => {
-        console.log('🔄 TRADING: Safety refresh after transfer...');
-        refreshCustodialBalance();
-      }, 2000);
+  const handleQuickTransfer = useCallback(async (amount: number) => {
+    if (!userId) {
+      toast.error('User not available for transfer');
+      return;
     }
-  );
   
-  if (success.success) {
-    debugLog(`Quick transfer of ${amount} SOL completed successfully`);
-    setBalanceIssueDetected(false);
+    console.log(`💳 PROTECTED: Initiating transfer of ${amount} SOL for user ${userId}`);
     
-    // Show success toast with new balance
-    if (success.newBalance !== undefined) {
-      toast.success(`Transfer complete! New balance: ${success.newBalance.toFixed(3)} SOL`);
+    transferAttempts.current.push({
+      timestamp: Date.now(),
+      amount: amount
+    });
+    
+    transferAttempts.current = transferAttempts.current.slice(-10);
+    
+    debugLog('Protected quick transfer initiated', { amount, transferAttempts: transferAttempts.current.length });
+    
+    const success = await executeAutoTransfer(
+      userId, 
+      amount,
+      // 🛡️ ENHANCED: Protected callback
+      async () => {
+        console.log('🔄 PROTECTED: Transfer success - triggering protected balance refresh...');
+        
+        // Reset protection to allow the update
+        resetProtection();
+        
+        // Small delay then trigger update
+        setTimeout(() => {
+          console.log('💰 PROTECTED: Forcing balance update after transfer');
+          updateCustodialBalance();
+        }, 1000);
+        
+        // Safety refresh
+        setTimeout(() => {
+          refreshCustodialBalance();
+        }, 2500);
+      }
+    );
+    
+    if (success.success) {
+      debugLog(`Protected transfer of ${amount} SOL completed successfully`);
+      setBalanceIssueDetected(false);
+      
+      if (success.newBalance !== undefined) {
+        toast.success(`✅ Transfer complete! New balance: ${success.newBalance.toFixed(3)} SOL`, {
+          duration: 4000
+        });
+      } else {
+        toast.success(`✅ Transfer of ${amount} SOL completed!`);
+      }
     } else {
-      toast.success(`Transfer of ${amount} SOL completed!`);
+      debugLog(`Protected transfer of ${amount} SOL failed:`, success.error);
+      toast.error(success.error || 'Transfer failed');
     }
-  } else {
-    debugLog(`Quick transfer of ${amount} SOL failed:`, success.error);
-    toast.error(success.error || 'Transfer failed');
-  }
-}, [userId, executeAutoTransfer, refreshCustodialBalance, debugLog, setBalanceIssueDetected]);
-
+  }, [userId, executeAutoTransfer, refreshCustodialBalance, debugLog, setBalanceIssueDetected, resetProtection]);
+  
   const handleEmergencyBalanceSync = useCallback(async () => {
     if (!userId) {
       toast.error('User not available for sync');
@@ -2198,6 +2266,7 @@ const handleQuickTransfer = useCallback(async (amount: number) => {
     }
   }, [walletAddress]);
 
+  
   // 🚀 UPDATED: Enhanced socket listeners with shared state
   // 🔥 CONSOLIDATED: Replace the entire complex useEffect with this
 useEffect(() => {
@@ -2213,14 +2282,21 @@ useEffect(() => {
   let balanceUpdateTimeout: NodeJS.Timeout | null = null;
   
   // 🔥 Single consolidated balance update handler
-  const debouncedBalanceUpdate = () => {
+  const debouncedBalanceUpdate = (source: string = 'socket') => {
     if (balanceUpdateTimeout) clearTimeout(balanceUpdateTimeout);
     
     balanceUpdateTimeout = setTimeout(() => {
-      console.log('💰 CONSOLIDATED: Executing debounced balance update');
-      updateCustodialBalance();
-      lastBalanceUpdate = Date.now();
-    }, 800); // Single 800ms delay for all updates
+      // 🛡️ ADD PROTECTION: Validate before updating
+      const shouldUpdate = validateBalanceUpdate(custodialBalance, source);
+      
+      if (shouldUpdate) {
+        console.log(`💰 CONSOLIDATED: Executing protected balance update from ${source}`);
+        updateCustodialBalance();
+        lastBalanceUpdate = Date.now();
+      } else {
+        console.log(`🚫 CONSOLIDATED: Blocked balance update from ${source}`);
+      }
+    }, 800);
   };
   
   // 🔥 Consolidated balance event handler
@@ -2236,7 +2312,7 @@ useEffect(() => {
     
     console.log(`💰 CONSOLIDATED: Balance event ${eventType}:`, data);
     
-    // Handle notifications
+    // Handle notifications (keep your existing code)
     if (data.updateType === 'deposit_processed' || eventType === 'depositConfirmed') {
       const amount = data.depositAmount || data.amount;
       if (amount) {
@@ -2249,8 +2325,8 @@ useEffect(() => {
       }
     }
     
-    // Single debounced balance update
-    debouncedBalanceUpdate();
+    // 🛡️ CHANGE: Pass the event type as source
+    debouncedBalanceUpdate(eventType);
   };
   
   // 🔥 Game state handlers (separate from balance)
@@ -2261,8 +2337,8 @@ useEffect(() => {
       clearActiveBet();
       toast.error(`💥 Crashed at ${data.crashMultiplier?.toFixed(2)}x`);
       
-      // Only trigger balance update if we had an active bet
-      debouncedBalanceUpdate();
+      // 🛡️ CHANGE: Pass source
+      debouncedBalanceUpdate('game_crash');
     }
   };
   
@@ -2285,7 +2361,8 @@ useEffect(() => {
       toast.success(`🎉 Cashed out at ${multiplier.toFixed(2)}x! +${winAmount.toFixed(3)} SOL`);
     }
     
-    debouncedBalanceUpdate();
+    // 🛡️ CHANGE: Pass source
+    debouncedBalanceUpdate('cashout');
   };
   
   // 🔥 Register ONLY essential events

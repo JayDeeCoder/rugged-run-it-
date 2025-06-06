@@ -151,8 +151,19 @@ export interface LeaderboardEntry {
   best_multiplier: number;
   rank: number;
   avatar?: string;
-  level?: number;
+  level: number;
   badge?: string;
+  // NEW: Add XP and tier data to match dashboard
+  experience: number;
+  experience_points: number;
+  tier: number;
+  win_rate: number;
+  current_win_streak: number;
+  best_win_streak: number;
+  total_wagered: number;
+  total_won: number;
+  achievements: string[];
+  badges_earned: string[];
 }
 
 export interface UserStats {
@@ -885,7 +896,7 @@ static async getLeaderboardData(timeframe: 'daily' | 'weekly' | 'monthly' | 'all
 // Keep existing APIs unchanged (LeaderboardAPI, ChartAPI, ChatAPI, SystemAPI)
 export class LeaderboardAPI {
   /**
-   * Get leaderboard data from users_unified table
+   * Get leaderboard data from users_unified table with complete user info
    */
   static async getLeaderboard(period: 'daily' | 'weekly' | 'monthly' | 'all_time' = 'daily'): Promise<LeaderboardEntry[]> {
     try {
@@ -909,7 +920,7 @@ export class LeaderboardAPI {
           break;
       }
 
-      // Query users_unified directly and calculate ranks
+      // 🚀 ENHANCED: Query users_unified with ALL user data to match dashboard
       const { data, error } = await supabase
         .from('users_unified')
         .select(`
@@ -924,8 +935,17 @@ export class LeaderboardAPI {
           avatar,
           level,
           badge,
+          experience,
+          experience_points,
           total_wagered,
-          win_rate
+          total_won,
+          win_rate,
+          current_win_streak,
+          best_win_streak,
+          achievements,
+          badges_earned,
+          risk_score,
+          behavior_pattern
         `)
         .gt(profitColumn, 0) // Only show users with positive profit
         .gt('total_games_played', 0) // Only show users who have played games
@@ -942,13 +962,17 @@ export class LeaderboardAPI {
         return [];
       }
 
-      // Transform data and add ranks
+      // 🚀 ENHANCED: Transform data with complete user info
       const leaderboardEntries: LeaderboardEntry[] = data.map((user: any, index: number) => {
         const profit = parseFloat(user[profitColumn]) || 0;
         const totalWagered = parseFloat(user.total_wagered) || 1; // Avoid division by zero
         
         // Calculate profit percentage: (profit / total_wagered) * 100
         const profitPercentage = totalWagered > 0 ? (profit / totalWagered) * 100 : 0;
+
+        // Calculate tier based on level (same logic as dashboard)
+        const level = user.level || 1;
+        const tier = Math.ceil(level / 10); // Every 10 levels = new tier
 
         return {
           id: user.id,
@@ -960,13 +984,23 @@ export class LeaderboardAPI {
           best_multiplier: parseFloat(user.best_multiplier) || 0,
           rank: index + 1, // Rank based on order
           avatar: user.avatar || '👤',
-          level: user.level || 1,
+          level: level,
           badge: user.badge,
-          win_rate: parseFloat(user.win_rate) || 0
+          // NEW: XP and tier data matching dashboard
+          experience: user.experience || 0,
+          experience_points: user.experience_points || 0,
+          tier: tier,
+          win_rate: parseFloat(user.win_rate) || 0,
+          current_win_streak: user.current_win_streak || 0,
+          best_win_streak: user.best_win_streak || 0,
+          total_wagered: parseFloat(user.total_wagered) || 0,
+          total_won: parseFloat(user.total_won) || 0,
+          achievements: user.achievements || [],
+          badges_earned: user.badges_earned || []
         };
       });
 
-      console.log(`✅ Fetched ${leaderboardEntries.length} leaderboard entries for ${period}`);
+      console.log(`✅ Fetched ${leaderboardEntries.length} leaderboard entries for ${period} with complete user data`);
       return leaderboardEntries;
 
     } catch (error) {
@@ -974,6 +1008,84 @@ export class LeaderboardAPI {
       return [];
     }
   }
+
+  /**
+   * Get current user's full data from users_unified for leaderboard display
+   */
+  static async getCurrentUserData(userId: string): Promise<LeaderboardEntry | null> {
+    try {
+      console.log(`👤 Fetching current user data for leaderboard: ${userId}`);
+
+      const { data: user, error } = await supabase
+        .from('users_unified')
+        .select(`
+          id,
+          username,
+          wallet_address,
+          external_wallet_address,
+          net_profit,
+          daily_profit,
+          weekly_profit,
+          monthly_profit,
+          total_games_played,
+          best_multiplier,
+          avatar,
+          level,
+          badge,
+          experience,
+          experience_points,
+          total_wagered,
+          total_won,
+          win_rate,
+          current_win_streak,
+          best_win_streak,
+          achievements,
+          badges_earned
+        `)
+        .eq('id', userId)
+        .single();
+
+      if (error || !user) {
+        console.error('❌ Error fetching current user data:', error);
+        return null;
+      }
+
+      const totalWagered = parseFloat(user.total_wagered) || 1;
+      const netProfit = parseFloat(user.net_profit) || 0;
+      const profitPercentage = totalWagered > 0 ? (netProfit / totalWagered) * 100 : 0;
+      const level = user.level || 1;
+      const tier = Math.ceil(level / 10);
+
+      return {
+        id: user.id,
+        wallet_address: user.external_wallet_address || user.wallet_address,
+        username: user.username || 'Anonymous',
+        total_profit: netProfit,
+        profit_percentage: profitPercentage,
+        games_played: user.total_games_played || 0,
+        best_multiplier: parseFloat(user.best_multiplier) || 0,
+        rank: 0, // Will be calculated separately
+        avatar: user.avatar || '👤',
+        level: level,
+        badge: user.badge,
+        experience: user.experience || 0,
+        experience_points: user.experience_points || 0,
+        tier: tier,
+        win_rate: parseFloat(user.win_rate) || 0,
+        current_win_streak: user.current_win_streak || 0,
+        best_win_streak: user.best_win_streak || 0,
+        total_wagered: parseFloat(user.total_wagered) || 0,
+        total_won: parseFloat(user.total_won) || 0,
+        achievements: user.achievements || [],
+        badges_earned: user.badges_earned || []
+      };
+
+    } catch (error) {
+      console.error('❌ Error fetching current user data:', error);
+      return null;
+    }
+  }
+  
   static async getUserRank(walletAddress: string, period: 'daily' | 'weekly' | 'monthly' | 'all_time' = 'daily'): Promise<number | null> {
     try {
       const leaderboard = await this.getLeaderboard(period);

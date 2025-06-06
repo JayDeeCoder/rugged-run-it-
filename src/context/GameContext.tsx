@@ -3,6 +3,7 @@
 import React, { createContext, useState, useContext, useEffect, ReactNode, useCallback } from 'react';
 import { useSolanaWallets, usePrivy } from '@privy-io/react-auth';
 import { useRuggedGame } from '../app/dashboard/useRuggedGame';
+import { UserAPI } from '../services/api'; // 🚀 ADD: Import UserAPI
 import { toast } from 'react-hot-toast';
 
 // Define the types for our game state
@@ -45,13 +46,59 @@ const GameContext = createContext<GameContextType | undefined>(undefined);
 // Create a provider component
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { wallets } = useSolanaWallets();
-  const { authenticated } = usePrivy();
+  const { authenticated, user } = usePrivy(); // 🚀 ADD: Get user for debugging
   
   // Get the active wallet
   const activeWallet = wallets.length > 0 ? wallets[0] : null;
   const isConnected = wallets.length > 0 && authenticated;
   const walletAddress = activeWallet?.address;
   
+  // 🚀 ADD: Get correct userId like TradingControls does
+  const [userId, setUserId] = useState<string | null>(null);
+  
+  // 🚀 ADD: Initialize userId when wallet connects (like TradingControls)
+  useEffect(() => {
+    if (!authenticated || !walletAddress) {
+      console.log('🔍 GameContext: Not authenticated or no wallet');
+      return;
+    }
+    
+    if (userId) {
+      console.log('🔍 GameContext: Already have userId:', userId);
+      return;
+    }
+    
+    console.log(`🔗 GameContext: Getting userId for wallet: ${walletAddress}`);
+    
+    const initUser = async () => {
+      try {
+        console.log(`📡 GameContext: Getting user data for wallet: ${walletAddress}`);
+        const userData = await UserAPI.getUserOrCreate(walletAddress);
+        
+        console.log(`📡 GameContext: getUserOrCreate returned:`, userData);
+        
+        if (userData?.id) {
+          console.log(`👤 GameContext: Setting userId to: ${userData.id}`);
+          console.log(`👤 GameContext: userId analysis:`, {
+            id: userData.id,
+            type: typeof userData.id,
+            isUUID: userData.id?.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+            isPrivyID: userData.id?.startsWith('did:privy:'),
+            privyUserIdForComparison: user?.id
+          });
+          
+          setUserId(userData.id); // This should be UUID format
+        }
+      } catch (error) {
+        console.error('❌ GameContext: Could not initialize user:', error);
+        toast.error('Failed to initialize user');
+      }
+    };
+    
+    initUser();
+  }, [authenticated, walletAddress, userId, user?.id]);
+  
+  // 🚀 FIXED: Pass userId to useRuggedGame (was missing before!)
   const { 
     placeBet, 
     cashOut, 
@@ -60,7 +107,22 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     placeBetError, 
     cashOutError,
     currentGameId 
-  } = useRuggedGame();
+  } = useRuggedGame(userId || undefined); // 🚀 CRITICAL FIX: Pass userId!
+
+  // 🚀 ADD: Debug logging to see what useRuggedGame gets
+  useEffect(() => {
+    if (userId) {
+      console.log(`🎮 GameContext: useRuggedGame called with userId: ${userId}`);
+      console.log(`🎮 GameContext: userId validation:`, {
+        userId,
+        isUUID: userId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+        isPrivyID: userId.startsWith('did:privy:'),
+        shouldWork: true
+      });
+    } else {
+      console.log(`🎮 GameContext: useRuggedGame called with userId: ${userId} (undefined)`);
+    }
+  }, [userId]);
 
   // Game state
   const [gameState, setGameState] = useState<GameState>({
@@ -154,9 +216,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
 
+    // 🚀 ADD: Ensure we have userId before betting
+    if (!userId) {
+      toast.error('User not initialized - please wait');
+      console.error('❌ GameContext: Cannot start game without userId');
+      return;
+    }
+
     try {
       setIsLoading(true);
       setError(null);
+
+      // 🚀 ADD: Debug logging
+      console.log(`🎮 GameContext: Starting game with userId: ${userId}, amount: ${amount}`);
 
       // Place bet through smart contract
       await placeBet(amount);
@@ -190,6 +262,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const errorObj = err instanceof Error ? err : new Error('Failed to start game');
       setError(errorObj);
       toast.error('Failed to start game!');
+      console.error('❌ GameContext: Start game failed:', err);
     } finally {
       setIsLoading(false);
     }
@@ -207,9 +280,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
 
+    // 🚀 ADD: Ensure we have userId before cashing out
+    if (!userId) {
+      toast.error('User not initialized - please wait');
+      console.error('❌ GameContext: Cannot cashout without userId');
+      return;
+    }
+
     try {
       setIsLoading(true);
       setError(null);
+
+      // 🚀 ADD: Debug logging
+      console.log(`🎮 GameContext: Cashing out with userId: ${userId}`);
 
       // Cash out through smart contract
       await cashOut(gameState.gameId, gameState.currentMultiplier);
@@ -245,10 +328,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const errorObj = err instanceof Error ? err : new Error('Failed to RUG');
       setError(errorObj);
       toast.error('Failed to RUG!');
+      console.error('❌ GameContext: Cashout failed:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [isConnected, gameState, cashOut]);
+  }, [isConnected, gameState, cashOut, userId]);
 
   // Clear active game (used for resets)
   const clearActiveGame = () => {

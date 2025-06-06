@@ -3704,29 +3704,35 @@ async function placeBetFromCustodialBalance(
         return { success: false, reason: 'Too late to place bet' };
     }
 
-    // 🔧 NEW: Get FRESH user profile from unified table (single source of truth)
+    // 🔧 FIXED: Get FRESH user profile from unified table (single source of truth)
     let userProfile;
     try {
         console.log(`🔄 Loading user profile from unified table for ${userId}...`);
         
         const { data: profileData, error } = await supabaseService
-    .from('users_unified')
-    .select('id, username, custodial_balance, privy_balance, total_balance, external_wallet_address, level')
-    .eq('id', userId)
-    .single();
-
+            .from('users_unified')
+            .select('id, username, custodial_balance, privy_balance, embedded_balance, external_wallet_address, level')
+            .eq('id', userId)
+            .single();
 
         if (error || !profileData) {
             console.error(`❌ User profile not found for ${userId}:`, error);
             return { success: false, reason: 'User profile not found - please register first' };
         }
 
+        // 🔧 FIXED: Calculate total balance instead of accessing non-existent column
+        const custodialBalance = parseFloat(profileData.custodial_balance) || 0;
+        const privyBalance = parseFloat(profileData.privy_balance) || 0;
+        const embeddedBalance = parseFloat(profileData.embedded_balance) || 0;
+        const totalBalance = custodialBalance + privyBalance + embeddedBalance;
+
         userProfile = {
-            userId: profileData.id, // ✅ Changed from user_id to id
+            userId: profileData.id,
             username: profileData.username,
-            custodialBalance: parseFloat(profileData.custodial_balance) || 0,
-            privyBalance: parseFloat(profileData.privy_balance) || 0,
-            totalBalance: parseFloat(profileData.total_balance) || 0,
+            custodialBalance: custodialBalance,
+            privyBalance: privyBalance,
+            embeddedBalance: embeddedBalance,
+            totalBalance: totalBalance, // ✅ Now calculated correctly
             externalWalletAddress: profileData.external_wallet_address,
             level: profileData.level || 1
         };
@@ -3755,20 +3761,18 @@ async function placeBetFromCustodialBalance(
 
     // Check if user already has active bet
     const existingBet = currentGame.activeBets.get(userProfile.externalWalletAddress);
-if (existingBet && !existingBet.cashedOut && existingBet.isValid) {
-    return { success: false, reason: 'Already has active bet' };
-}
+    if (existingBet && !existingBet.cashedOut && existingBet.isValid) {
+        return { success: false, reason: 'Already has active bet' };
+    }
 
     try {
         // INSTANT RUG PULL CHECK
         if (betAmount > config.INSTANT_RUG_THRESHOLD) {
             console.log(`🚨💥 CUSTODIAL INSTANT RUG: ${betAmount} SOL > ${config.INSTANT_RUG_THRESHOLD} SOL!`);
             
-            // 🔧 NEW: Use atomic balance update function
+            // 🔧 Use atomic balance update function
             const { data: balanceResult, error: balanceError } = await supabaseService
-            
-        
-                .rpc('update_unified_user_balance', {  // ✅ Change function name
+                .rpc('update_unified_user_balance', {
                     p_user_id: userId,
                     p_custodial_change: -betAmount,
                     p_privy_change: 0,
@@ -3776,15 +3780,16 @@ if (existingBet && !existingBet.cashedOut && existingBet.isValid) {
                     p_transaction_type: 'instant_rug_bet',
                     p_transaction_id: 'instant_rug_bet',
                     p_game_id: currentGame?.id,
-                    p_is_deposit: false,  // or true for deposits
-                    p_deposit_amount: 0   // or actual deposit amount
+                    p_is_deposit: false,
+                    p_deposit_amount: 0
                 });
-                if (balanceError || !balanceResult || balanceResult.length === 0) {
-                    console.error(`❌ Failed to update balance for instant rug bet ${userId}:`, balanceError);
-                    return { success: false, reason: 'Failed to process bet' };
-                }
                 
-                const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
+            if (balanceError || !balanceResult || balanceResult.length === 0) {
+                console.error(`❌ Failed to update balance for instant rug bet ${userId}:`, balanceError);
+                return { success: false, reason: 'Failed to process bet' };
+            }
+            
+            const newCustodialBalance = parseFloat(balanceResult[0].new_custodial_balance);
             
             // Add bet to game
             const entryMultiplier = currentGame.status === 'waiting' ? 1.0 : currentGame.currentMultiplier;
@@ -3803,17 +3808,14 @@ if (existingBet && !existingBet.cashedOut && existingBet.isValid) {
 
             currentGame.activeBets.set(userProfile.externalWalletAddress, bet);
             currentGame.totalBets += betAmount;
-currentGame.boostedTotalBets = currentGame.totalBets + artificialLiquidity;
-
-// 🎭 Simulate additional betting activity
-simulateBetActivity(betAmount);
-console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFixed(3)} SOL artificial = ${currentGame.boostedTotalBets.toFixed(3)} SOL total display`);
-            currentGame.totalPlayers = currentGame.activeBets.size;
             currentGame.boostedTotalBets = currentGame.totalBets + artificialLiquidity;
 
+            // 🎭 Simulate additional betting activity
             simulateBetActivity(betAmount);
+            console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFixed(3)} SOL artificial = ${currentGame.boostedTotalBets.toFixed(3)} SOL total display`);
+            
+            currentGame.totalPlayers = currentGame.activeBets.size;
 
-console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFixed(3)} SOL artificial = ${currentGame.boostedTotalBets.toFixed(3)} SOL total display`);
             // Update game stats in unified table
             await supabaseService.rpc('update_user_game_stats', {
                 p_user_id: userId,
@@ -3825,10 +3827,10 @@ console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFi
             
             // Crash game immediately
             // 🎭 Update artificial count after crash (simulate players leaving/joining)
-setTimeout(() => {
-    updateArtificialCounts();
-
-}, 2000);
+            setTimeout(() => {
+                updateArtificialCounts();
+            }, 2000);
+            
             setTimeout(() => {
                 if (currentGame) crashGame();
             }, 1000);
@@ -3844,10 +3846,9 @@ setTimeout(() => {
         // NORMAL CUSTODIAL BET
         const entryMultiplier = currentGame.status === 'waiting' ? 1.0 : currentGame.currentMultiplier;
         
-        // 🔧 NEW: Use atomic balance update function for normal bet
+        // 🔧 Use atomic balance update function for normal bet
         const { data: balanceResult, error: balanceError } = await supabaseService
-            
-            .rpc('update_unified_user_balance', {  // ✅ Change function name
+            .rpc('update_unified_user_balance', {
                 p_user_id: userId,
                 p_custodial_change: -betAmount,
                 p_privy_change: 0,
@@ -3855,9 +3856,10 @@ setTimeout(() => {
                 p_transaction_type: 'custodial_bet',
                 p_transaction_id: 'custodial_bet',
                 p_game_id: currentGame?.id,
-                p_is_deposit: true,  // or true for deposits
-                p_deposit_amount: 0   // or actual deposit amount
+                p_is_deposit: false, // ✅ Fixed: this should be false for bets
+                p_deposit_amount: 0
             });
+            
         if (balanceError || !balanceResult || balanceResult.length === 0) {
             console.error(`❌ Failed to update balance for bet ${userId}:`, balanceError);
             return { success: false, reason: 'Failed to process bet' };
@@ -3882,14 +3884,11 @@ setTimeout(() => {
 
         currentGame.activeBets.set(userProfile.externalWalletAddress, bet);
         currentGame.totalBets += betAmount;
-        // After: currentGame.totalBets += betAmount;
-currentGame.boostedTotalBets = currentGame.totalBets + artificialLiquidity;
+        currentGame.boostedTotalBets = currentGame.totalBets + artificialLiquidity;
 
-// 🎭 Simulate additional betting activity
-simulateBetActivity(betAmount);
-
-console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFixed(3)} SOL artificial = ${currentGame.boostedTotalBets.toFixed(3)} SOL total display`);
-
+        // 🎭 Simulate additional betting activity
+        simulateBetActivity(betAmount);
+        console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFixed(3)} SOL artificial = ${currentGame.boostedTotalBets.toFixed(3)} SOL total display`);
 
         // Update trading state
         tradingState.totalBetsSinceStart += betAmount;
@@ -3900,8 +3899,8 @@ console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFi
 
         console.log(`⚡ CUSTODIAL BET PLACED: ${betAmount} SOL, entry ${entryMultiplier}x, remaining: ${newCustodialBalance.toFixed(3)} SOL`);
 
-         // Save bet to database
-         try {
+        // Save bet to database
+        try {
             await supabaseService
                 .from('player_bets')
                 .insert({
@@ -3920,41 +3919,41 @@ console.log(`💰 Bet placed: ${betAmount} SOL real + ${artificialLiquidity.toFi
             console.warn('Bet database save failed (non-critical):', dbError);
         }
 
-        // 🔧 FIXED: Return the proper response format
+        // 🔧 Return the proper response format
         return { 
-        success: true, 
-        entryMultiplier,
-        custodialBalance: newCustodialBalance,
-        reason: 'Bet placed successfully'
-    };
+            success: true, 
+            entryMultiplier,
+            custodialBalance: newCustodialBalance,
+            reason: 'Bet placed successfully'
+        };
 
-} catch (error) {
-    console.error('❌ Custodial bet failed:', error);
-    
+    } catch (error) {
+        console.error('❌ Custodial bet failed:', error);
         
-    try {
-        await supabaseService.rpc('update_unified_user_balance', {
-            p_user_id: userId,
-            p_custodial_change: betAmount, // Refund
-            p_privy_change: 0,
-            p_embedded_change: 0,
-            p_transaction_type: 'bet_refund',
-            p_transaction_id: 'bet_refund',
-            p_game_id: currentGame?.id,
-            p_is_deposit: false,
-            p_deposit_amount: 0
-        });
-        console.log(`💰 Refunded ${betAmount} SOL to user ${userId} due to error`);
-    } catch (refundError) {
-        console.error(`❌ Failed to refund ${userId}:`, refundError);
+        // Try to refund the bet amount
+        try {
+            await supabaseService.rpc('update_unified_user_balance', {
+                p_user_id: userId,
+                p_custodial_change: betAmount, // Refund
+                p_privy_change: 0,
+                p_embedded_change: 0,
+                p_transaction_type: 'bet_refund',
+                p_transaction_id: 'bet_refund',
+                p_game_id: currentGame?.id,
+                p_is_deposit: false,
+                p_deposit_amount: 0
+            });
+            console.log(`💰 Refunded ${betAmount} SOL to user ${userId} due to error`);
+        } catch (refundError) {
+            console.error(`❌ Failed to refund ${userId}:`, refundError);
+        }
+        
+        return { 
+            success: false, 
+            reason: error instanceof Error ? error.message : 'Server error processing bet',
+            custodialBalance: userProfile.custodialBalance 
+        };
     }
-    
-    return { 
-        success: false, 
-        reason: error instanceof Error ? error.message : 'Server error processing bet',
-        custodialBalance: userProfile.custodialBalance 
-    };
-}
 }
 
 // ===== INSTANT CUSTODIAL CASHOUT =====

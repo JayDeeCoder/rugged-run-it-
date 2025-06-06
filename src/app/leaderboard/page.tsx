@@ -1,13 +1,13 @@
 // src/app/leaderboard/page.tsx
 'use client';
 
-import { FC, useState, useEffect, useContext } from 'react';
+import { FC, useState, useEffect } from 'react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import Layout from '../../components/layout/Layout';
 import Leaderboard from '../../components/leaderboard/Leaderboard';
-import { UserContext } from '../../context/UserContext';
+import { useUser } from '../../context/UserContext';
 import { Trophy, RefreshCw, TrendingUp, Users, Award, Crown, Medal, Target } from 'lucide-react';
-import { LeaderboardAPI, LeaderboardEntry, supabase } from '../../services/api';
+import { LeaderboardAPI, LeaderboardEntry } from '../../services/api';
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'all_time';
 
@@ -23,7 +23,7 @@ const LeaderboardPage: FC = () => {
   // Hooks
   const { authenticated } = usePrivy();
   const { wallets } = useSolanaWallets();
-  const { currentUser } = useContext(UserContext);
+  const { currentUser, isAuthenticated } = useUser();
   
   // State
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
@@ -53,24 +53,24 @@ const LeaderboardPage: FC = () => {
 
       console.log(`🏆 Fetching ${period} leaderboard data...`);
 
-      // Use the LeaderboardAPI instead of manual queries
+      // Use the LeaderboardAPI
       const data = await LeaderboardAPI.getLeaderboard(period);
       
       if (data.length === 0) {
         console.warn('⚠️ No leaderboard data found for period:', period);
         setError(`No players found for ${getPeriodDisplayName(period).toLowerCase()}. Players need games and profit to appear.`);
         setLeaderboardData([]);
+        setStats({
+          totalPlayers: 0,
+          totalGames: 0,
+          totalVolume: 0,
+          averageProfit: 0,
+          topPlayerProfit: 0
+        });
         return;
       }
 
-      // Mark current user in the data
-      const enrichedData = data.map(entry => ({
-        ...entry,
-        isCurrentUser: authenticated && 
-          (entry.wallet_address.toLowerCase() === currentUserWallet.toLowerCase())
-      }));
-
-      setLeaderboardData(enrichedData);
+      setLeaderboardData(data);
 
       // Calculate stats from leaderboard data
       const totalPlayers = data.length;
@@ -88,9 +88,14 @@ const LeaderboardPage: FC = () => {
       });
 
       // Get current user's rank if they're authenticated
-      if (authenticated && currentUserWallet) {
-        const rank = await LeaderboardAPI.getUserRank(currentUserWallet, period);
-        setUserRank(rank);
+      if (isAuthenticated && currentUserWallet) {
+        try {
+          const rank = await LeaderboardAPI.getUserRank(currentUserWallet, period);
+          setUserRank(rank);
+        } catch (rankError) {
+          console.warn('Could not fetch user rank:', rankError);
+          setUserRank(null);
+        }
       }
 
       console.log(`✅ Loaded ${data.length} leaderboard entries`);
@@ -105,45 +110,14 @@ const LeaderboardPage: FC = () => {
     }
   };
 
-  // Fetch additional stats from database
-  const fetchDatabaseStats = async () => {
-    try {
-      // Get overall statistics from users_unified table
-      const { data: userStats, error: statsError } = await supabase
-        .from('users_unified')
-        .select('total_games_played, total_wagered, net_profit')
-        .gt('total_games_played', 0);
-
-      if (!statsError && userStats) {
-        const totalGames = userStats.reduce((sum, user) => sum + (user.total_games_played || 0), 0);
-        const totalVolume = userStats.reduce((sum, user) => sum + (user.total_wagered || 0), 0);
-        
-        // Update stats with database values
-        setStats(prev => ({
-          ...prev,
-          totalGames,
-          totalVolume: Number(totalVolume.toFixed(2))
-        }));
-      }
-    } catch (error) {
-      console.warn('Could not fetch additional stats:', error);
-    }
-  };
-
   // Effect to fetch data when period changes
   useEffect(() => {
-    const loadData = async () => {
-      await fetchLeaderboardData();
-      await fetchDatabaseStats();
-    };
-
-    loadData();
-  }, [period, authenticated, currentUserWallet]);
+    fetchLeaderboardData();
+  }, [period, isAuthenticated, currentUserWallet]);
 
   // Refresh function
   const handleRefresh = () => {
     fetchLeaderboardData(true);
-    fetchDatabaseStats();
   };
 
   // Get period display name
@@ -188,12 +162,20 @@ const LeaderboardPage: FC = () => {
           </div>
           
           <div className="flex items-center gap-3">
-            {/* User Rank Badge */}
-            {authenticated && userRank && (
+            {/* User Info & Rank Badge */}
+            {isAuthenticated && currentUser && (
               <div className="bg-blue-900/30 border border-blue-700 rounded-lg px-3 py-2">
                 <div className="flex items-center text-blue-300">
-                  <Crown size={16} className="mr-2" />
-                  <span className="text-sm">Your Rank: #{userRank}</span>
+                  <span className="mr-2">{currentUser.avatar}</span>
+                  <div className="text-sm">
+                    <div className="font-medium">{currentUser.username}</div>
+                    {userRank && (
+                      <div className="flex items-center text-xs">
+                        <Crown size={12} className="mr-1" />
+                        Rank #{userRank}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -208,6 +190,35 @@ const LeaderboardPage: FC = () => {
             </button>
           </div>
         </div>
+
+        {/* User Level Info (if authenticated) */}
+        {isAuthenticated && currentUser && (
+          <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-800/30 rounded-lg p-4 mb-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <div className="mr-4">
+                  <span className="text-2xl">{currentUser.avatar}</span>
+                </div>
+                <div>
+                  <h3 className="text-white font-semibold">{currentUser.username}</h3>
+                  <div className="flex items-center gap-4 text-sm text-gray-400">
+                    <span>Level {currentUser.level || 1}</span>
+                    <span>•</span>
+                    <span>{currentUser.experience || 0} XP</span>
+                    <span>•</span>
+                    <span>Tier {currentUser.tier || 1}</span>
+                  </div>
+                </div>
+              </div>
+              {userRank && (
+                <div className="text-right">
+                  <div className="text-2xl font-bold text-yellow-400">#{userRank}</div>
+                  <div className="text-xs text-gray-400">Current Rank</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Stats Overview */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">

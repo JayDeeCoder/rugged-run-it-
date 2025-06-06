@@ -11,6 +11,18 @@ export type UserBadge =
   | 'moderator'
   | 'admin';
 
+// Basic User type for backwards compatibility
+export interface User {
+  id: string;
+  username: string;
+  wallet_address: string;
+  avatar?: string;
+  level: number;
+  badge?: UserBadge;
+  created_at: string;
+  updated_at: string;
+}
+
 export type UserRole = 'user' | 'moderator' | 'admin';
 
 export interface UserProfile {

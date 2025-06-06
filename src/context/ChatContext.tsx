@@ -82,7 +82,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
       ws.close();
     };
   }, []);
-  
+
   const sendMessage = (text: string): boolean => {
     if (!socket || socket.readyState !== WebSocket.OPEN || !currentUser) {
       return false;
@@ -98,10 +98,10 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
             username: currentUser.username,
             avatar: currentUser.avatar,
             level: currentUser.level,
-            badge: currentUser.badge
+            badge: currentUser.badge || 'none' // Safely handle undefined badge
           },
           timestamp: new Date().toISOString(),
-          isVerified: currentUser.badge === 'verified'
+          isVerified: currentUser.badge === 'verified' // Safe comparison
         }
       };
       
@@ -114,10 +114,10 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <ChatContext.Provider value={{ 
-      messages, 
-      sendMessage, 
-      isConnected, 
+    <ChatContext.Provider value={{
+      messages,
+      sendMessage,
+      isConnected,
       activeUsers,
       isLoading
     }}>

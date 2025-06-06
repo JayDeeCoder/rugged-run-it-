@@ -1,9 +1,22 @@
 // src/context/UserContext.tsx
 'use client';
 
-import React, { createContext, useState, useEffect, ReactNode } from 'react';
-import { User } from '../types/user';
+import React, { createContext, useState, useEffect, ReactNode, useContext } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
+
+// Define User type directly here to avoid import conflicts
+interface User {
+  id: string;
+  username: string;
+  email: string;
+  avatar: string;
+  level: number;
+  experience: number;
+  balance: number;
+  tier: number;
+  joinedAt: string;
+  badge?: string; // Added optional badge property
+}
 
 interface UserContextType {
   currentUser: User | null;
@@ -28,12 +41,22 @@ const defaultContext: UserContextType = {
   userLevel: 2,
   experience: 67,
   crates: 4,
-  isLoggedIn: false, // Changed to false by default
+  isLoggedIn: false,
   setUsername: () => {},
   hasCustomUsername: false,
 };
 
+// Create and export the context
 export const UserContext = createContext<UserContextType>(defaultContext);
+
+// Export a hook to use the context
+export const useUser = () => {
+  const context = useContext(UserContext);
+  if (context === undefined) {
+    throw new Error('useUser must be used within a UserProvider');
+  }
+  return context;
+};
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -63,9 +86,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         avatar: '👑',
         level: 2,
         experience: 67,
-        balance: 0, // Remove hardcoded balance - this should come from blockchain
+        balance: 0,
         tier: 2,
         joinedAt: new Date().toISOString(),
+        badge: 'verified', // Added badge property - you can set logic for different badge types
       };
       
       setCurrentUser(demoUser);
@@ -108,9 +132,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         avatar: '👑',
         level: 2,
         experience: 67,
-        balance: 0, // Remove hardcoded balance
+        balance: 0,
         tier: 2,
         joinedAt: new Date().toISOString(),
+        badge: 'verified', // Added badge property
       };
       
       setCurrentUser(user);
@@ -137,9 +162,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         avatar: '👤',
         level: 1,
         experience: 0,
-        balance: 0, // Remove hardcoded balance
+        balance: 0,
         tier: 1,
         joinedAt: new Date().toISOString(),
+        badge: 'new', // Added badge property - new users get 'new' badge
       };
       
       setCurrentUser(user);

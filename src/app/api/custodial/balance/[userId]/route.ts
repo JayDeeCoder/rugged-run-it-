@@ -1,4 +1,4 @@
-// app/api/custodial/balance/[userId]/route.ts - USERS_UNIFIED VERSION
+// app/api/custodial/balance/[userId]/route.ts - FIXED VERSION
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -25,7 +25,7 @@ export async function GET(
     
     console.log('🔍 Getting balance from users_unified for user:', userId);
     
-    // ✅ FIXED: Use users_unified table with correct column names
+    // ✅ FIXED: Only select columns that actually exist
     const { data: userProfile, error: profileError } = await supabase
       .from('users_unified')
       .select(`
@@ -34,7 +34,6 @@ export async function GET(
         custodial_balance,
         privy_balance,
         embedded_balance,
-        total_balance,
         external_wallet_address,
         wallet_address,
         custodial_total_deposited,
@@ -42,10 +41,11 @@ export async function GET(
         embedded_wallet_id,
         total_transfers_to_embedded,
         total_transfers_to_custodial,
+        total_deposited,
         updated_at,
         created_at
       `)
-      .eq('id', userId)  // ✅ Changed from 'user_id' to 'id'
+      .eq('id', userId)
       .single();
     
     if (profileError || !userProfile) {
@@ -67,14 +67,14 @@ export async function GET(
       });
     }
     
-    // ✅ Parse balances from users_unified
-    const custodialBalance = parseFloat(userProfile.custodial_balance) || 0;
-    const privyBalance = parseFloat(userProfile.privy_balance) || 0;
-    const embeddedBalance = parseFloat(userProfile.embedded_balance) || 0;
-    const totalBalance = parseFloat(userProfile.total_balance) || 0;
-    const totalDeposited = parseFloat(userProfile.custodial_total_deposited) || 0;
+    // ✅ Parse balances and calculate total manually
+    const custodialBalance = parseFloat(userProfile.custodial_balance || '0') || 0;
+    const privyBalance = parseFloat(userProfile.privy_balance || '0') || 0;
+    const embeddedBalance = parseFloat(userProfile.embedded_balance || '0') || 0;
+    const totalBalance = custodialBalance + privyBalance + embeddedBalance; // Calculate manually
+    const totalDeposited = parseFloat(userProfile.total_deposited || userProfile.custodial_total_deposited || '0') || 0;
     
-    console.log(`💰 Found user ${userId} with balance: ${custodialBalance.toFixed(9)} SOL`);
+    console.log(`💰 Found user ${userId} with balance: ${custodialBalance.toFixed(9)} SOL (custodial), ${privyBalance.toFixed(9)} SOL (privy), ${embeddedBalance.toFixed(9)} SOL (embedded)`);
     
     return NextResponse.json({
       userId,
@@ -89,8 +89,8 @@ export async function GET(
       canBet: custodialBalance >= 0.001,
       canWithdraw: custodialBalance > 0,
       embeddedWalletId: userProfile.embedded_wallet_id,
-      totalTransfersToEmbedded: parseFloat(userProfile.total_transfers_to_embedded) || 0,
-      totalTransfersToCustodial: parseFloat(userProfile.total_transfers_to_custodial) || 0,
+      totalTransfersToEmbedded: parseFloat(userProfile.total_transfers_to_embedded || '0') || 0,
+      totalTransfersToCustodial: parseFloat(userProfile.total_transfers_to_custodial || '0') || 0,
       lastActivity: userProfile.updated_at,
       source: 'users_unified_fixed',
       timestamp: Date.now()

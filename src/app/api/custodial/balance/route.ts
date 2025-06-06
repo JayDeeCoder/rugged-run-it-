@@ -1,4 +1,4 @@
-// app/api/custodial/balance/route.ts - UPDATED FOR USERS_UNIFIED
+// app/api/custodial/balance/route.ts - FIXED FOR USERS_UNIFIED
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     
     console.log('💰 Getting custodial balance for user:', userId);
     
-    // 🔧 FIXED: Read from users_unified table
+    // 🔧 FIXED: Only select columns that exist, calculate total manually
     const { data: userProfile, error: profileError } = await supabase
       .from('users_unified')
       .select(`
@@ -38,9 +38,10 @@ export async function GET(request: NextRequest) {
         custodial_balance,
         privy_balance,
         embedded_balance,
-        total_balance,
         external_wallet_address,
+        wallet_address,
         custodial_total_deposited,
+        total_deposited,
         last_custodial_deposit,
         embedded_wallet_id,
         total_transfers_to_embedded,
@@ -48,15 +49,18 @@ export async function GET(request: NextRequest) {
         updated_at,
         created_at
       `)
-      .eq('id', userId)  // ✅ Changed from 'user_id' to 'id'
+      .eq('id', userId)
       .single();
     
     if (profileError || !userProfile) {
-      console.log('📭 No user found in users_unified table');
+      console.log('📭 No user found in users_unified table:', profileError?.message);
       return NextResponse.json({
         success: true,
         balance: '0.000000',
         balanceSOL: 0,
+        privyBalance: 0,
+        embeddedBalance: 0,
+        totalBalance: 0,
         message: 'No wallet found - make a deposit to create your account',
         walletExists: false,
         mode: 'custodial',
@@ -64,13 +68,13 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // ✅ Return data from users_unified table
-    const custodialBalance = parseFloat(userProfile.custodial_balance || '0');
-    const privyBalance = parseFloat(userProfile.privy_balance || '0');
-    const embeddedBalance = parseFloat(userProfile.embedded_balance || '0');
-    const totalBalance = parseFloat(userProfile.total_balance || '0');
+    // ✅ Calculate balances manually since total_balance column doesn't exist
+    const custodialBalance = parseFloat(userProfile.custodial_balance || '0') || 0;
+    const privyBalance = parseFloat(userProfile.privy_balance || '0') || 0;
+    const embeddedBalance = parseFloat(userProfile.embedded_balance || '0') || 0;
+    const totalBalance = custodialBalance + privyBalance + embeddedBalance; // Calculate manually
     
-    console.log(`💰 User ${userId} balance from users_unified: ${custodialBalance} SOL (custodial), ${privyBalance} SOL (privy)`);
+    console.log(`💰 User ${userId} balance from users_unified: ${custodialBalance} SOL (custodial), ${privyBalance} SOL (privy), ${embeddedBalance} SOL (embedded). Total: ${totalBalance} SOL`);
 
     return NextResponse.json({
       success: true,
@@ -78,7 +82,7 @@ export async function GET(request: NextRequest) {
       balanceSOL: custodialBalance,
       privyBalance: privyBalance,
       embeddedBalance: embeddedBalance,
-      totalBalance: totalBalance,
+      totalBalance: totalBalance, // Now calculated correctly
       lastUpdated: userProfile.updated_at,
       walletCreated: userProfile.created_at,
       walletExists: true,
@@ -125,7 +129,7 @@ export async function POST(request: NextRequest) {
     
     console.log('💰 POST: Getting custodial balance for user:', userId);
     
-    // 🔧 FIXED: Read from users_unified table
+    // 🔧 FIXED: Only select existing columns
     const { data: userProfile, error: profileError } = await supabase
       .from('users_unified')
       .select(`
@@ -134,20 +138,23 @@ export async function POST(request: NextRequest) {
         custodial_balance,
         privy_balance,
         embedded_balance,
-        total_balance,
         external_wallet_address,
+        wallet_address,
         updated_at,
         created_at
       `)
-      .eq('id', userId)  // ✅ Changed from 'user_id' to 'id'
+      .eq('id', userId)
       .single();
 
     if (profileError || !userProfile) {
-      console.log('📭 POST: No user found in users_unified table');
+      console.log('📭 POST: No user found in users_unified table:', profileError?.message);
       return NextResponse.json({
         success: true,
         balance: '0.000000',
         balanceSOL: 0,
+        privyBalance: 0,
+        embeddedBalance: 0,
+        totalBalance: 0,
         message: 'No wallet found - make a deposit to create your account',
         walletExists: false,
         mode: 'custodial',
@@ -155,17 +162,21 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const custodialBalance = parseFloat(userProfile.custodial_balance || '0');
+    // ✅ Calculate balances manually
+    const custodialBalance = parseFloat(userProfile.custodial_balance || '0') || 0;
+    const privyBalance = parseFloat(userProfile.privy_balance || '0') || 0;
+    const embeddedBalance = parseFloat(userProfile.embedded_balance || '0') || 0;
+    const totalBalance = custodialBalance + privyBalance + embeddedBalance;
     
-    console.log(`💰 POST: User ${userId} balance from users_unified: ${custodialBalance} SOL`);
+    console.log(`💰 POST: User ${userId} balance from users_unified: ${custodialBalance} SOL (total: ${totalBalance} SOL)`);
 
     return NextResponse.json({
       success: true,
       balance: custodialBalance.toFixed(6),
       balanceSOL: custodialBalance,
-      privyBalance: parseFloat(userProfile.privy_balance || '0'),
-      embeddedBalance: parseFloat(userProfile.embedded_balance || '0'),
-      totalBalance: parseFloat(userProfile.total_balance || '0'),
+      privyBalance: privyBalance,
+      embeddedBalance: embeddedBalance,
+      totalBalance: totalBalance, // Now calculated correctly
       lastUpdated: userProfile.updated_at,
       walletExists: true,
       mode: 'custodial',

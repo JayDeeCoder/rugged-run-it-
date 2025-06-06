@@ -1,4 +1,4 @@
-// hooks/useSharedState.ts - FIXED FOR USERS_UNIFIED TABLE
+// hooks/useSharedState.ts - FIXED: Single source for balance updates
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 
@@ -50,7 +50,6 @@ export const useSharedCustodialBalance = (userId: string) => {
     console.log(`💰 [SHARED] Fetching balance for userId: ${userId} (force: ${force})`);
     
     try {
-      // ✅ FIXED: Use the correct API endpoint format
       const url = `/api/custodial/balance/${userId}?t=${Date.now()}${force ? '&force=true' : ''}`;
       console.log(`📡 [SHARED] Fetching from: ${url}`);
       
@@ -83,7 +82,6 @@ export const useSharedCustodialBalance = (userId: string) => {
       const data = await response.json();
       console.log(`📦 [SHARED] API Response:`, data);
       
-      // ✅ ENHANCED: Better handling of different response formats
       let newBalance = 0;
       let source = 'unknown';
       
@@ -101,7 +99,6 @@ export const useSharedCustodialBalance = (userId: string) => {
         throw new Error('Invalid response format - no balance field found');
       }
       
-      // ✅ ENHANCED: Better validation and logging
       if (newBalance < 0) {
         console.warn('⚠️ [SHARED] Negative balance detected:', newBalance);
       }
@@ -127,7 +124,6 @@ export const useSharedCustodialBalance = (userId: string) => {
       
       lastUpdateTimeRef.current = Date.now();
       
-      // ✅ NEW: Emit event for other components
       if (changed) {
         window.dispatchEvent(new CustomEvent('custodialBalanceUpdate', {
           detail: { 
@@ -156,7 +152,6 @@ export const useSharedCustodialBalance = (userId: string) => {
     }
   }, [userId, state.balance]);
 
-  // ✅ ENHANCED: Force refresh with immediate execution
   const forceRefresh = useCallback(async (): Promise<number | null> => {
     if (!userId) {
       console.log('🚫 [SHARED] Cannot force refresh - no userId');
@@ -165,7 +160,6 @@ export const useSharedCustodialBalance = (userId: string) => {
     
     console.log(`🔄 [SHARED] Force refreshing balance for ${userId}`);
     
-    // Clear any existing timeouts
     if (updateIntervalRef.current) {
       clearInterval(updateIntervalRef.current);
     }
@@ -176,7 +170,6 @@ export const useSharedCustodialBalance = (userId: string) => {
       if (result !== null) {
         console.log(`✅ [SHARED] Force refresh successful: ${result.toFixed(6)} SOL`);
         
-        // Restart polling after force refresh
         updateIntervalRef.current = setInterval(() => {
           if (!isUpdatingRef.current) {
             updateBalance();
@@ -196,7 +189,6 @@ export const useSharedCustodialBalance = (userId: string) => {
     }
   }, [userId, updateBalance]);
 
-  // ✅ ENHANCED: Better cashout sync with retry logic
   const syncAfterCashout = useCallback(async (): Promise<number | null> => {
     if (!userId) {
       console.log('🚫 [SHARED] Cannot sync after cashout - no userId');
@@ -205,10 +197,8 @@ export const useSharedCustodialBalance = (userId: string) => {
     
     console.log(`💸 [SHARED] Syncing after cashout for ${userId}`);
     
-    // Wait for backend to process
     await new Promise(resolve => setTimeout(resolve, 1500));
     
-    // Try up to 3 times with increasing delays
     for (let attempt = 1; attempt <= 3; attempt++) {
       console.log(`💸 [SHARED] Cashout sync attempt ${attempt}/3`);
       
@@ -228,7 +218,6 @@ export const useSharedCustodialBalance = (userId: string) => {
     return null;
   }, [userId, updateBalance]);
 
-  // ✅ ENHANCED: Better userId change handling
   useEffect(() => {
     if (!userId) {
       console.log('🚫 [SHARED] No userId provided, stopping polling');
@@ -251,12 +240,10 @@ export const useSharedCustodialBalance = (userId: string) => {
       console.log(`🎯 [SHARED] User changed: ${lastUserIdRef.current} → ${userId}`);
       lastUserIdRef.current = userId;
       
-      // Clear existing interval
       if (updateIntervalRef.current) {
         clearInterval(updateIntervalRef.current);
       }
       
-      // Reset state for new user
       setState(prev => ({
         ...prev,
         loading: true,
@@ -265,9 +252,7 @@ export const useSharedCustodialBalance = (userId: string) => {
         source: 'user_changed'
       }));
       
-      // Immediate update for new user
       updateBalance(true).then(() => {
-        // Start polling after initial update
         updateIntervalRef.current = setInterval(() => {
           if (!isUpdatingRef.current) {
             updateBalance();
@@ -284,7 +269,7 @@ export const useSharedCustodialBalance = (userId: string) => {
     };
   }, [userId, updateBalance]);
 
-  // ✅ ENHANCED: Better socket listeners with more events
+  // ✅ FIXED: Keep existing custodial socket events, exclude userBalanceUpdate from custodial
   useEffect(() => {
     if (!userId || socketListenersRef.current) return;
     
@@ -294,7 +279,7 @@ export const useSharedCustodialBalance = (userId: string) => {
       return;
     }
     
-    console.log(`🔌 [SHARED] Setting up socket listeners for: ${userId}`);
+    console.log(`🔌 [SHARED] Setting up custodial socket listeners for: ${userId}`);
     socketListenersRef.current = true;
     
     const handleCustodialBalanceUpdate = (data: any) => {
@@ -303,14 +288,14 @@ export const useSharedCustodialBalance = (userId: string) => {
       if (data.userId === userId && data.custodialBalance !== undefined) {
         const newBalance = parseFloat(data.custodialBalance) || 0;
         
-        console.log(`💰 [SHARED] Socket balance update: ${newBalance.toFixed(6)} SOL`);
+        console.log(`💰 [SHARED] Custodial balance update: ${newBalance.toFixed(6)} SOL`);
         
         setState(prev => ({
           ...prev,
           balance: newBalance,
           lastUpdated: Date.now(),
           error: null,
-          source: 'socket_update'
+          source: 'socket_custodial_update'
         }));
       }
     };
@@ -328,7 +313,7 @@ export const useSharedCustodialBalance = (userId: string) => {
           balance: newBalance,
           lastUpdated: Date.now(),
           error: null,
-          source: 'socket_bet'
+          source: 'socket_bet_result'
         }));
       }
     };
@@ -347,7 +332,7 @@ export const useSharedCustodialBalance = (userId: string) => {
             balance: newBalance,
             lastUpdated: Date.now(),
             error: null,
-            source: 'socket_cashout'
+            source: 'socket_cashout_success'
           }));
         } else {
           console.log(`💸 [SHARED] Cashout failed, will refresh in 2s`);
@@ -356,41 +341,24 @@ export const useSharedCustodialBalance = (userId: string) => {
       }
     };
 
-    const handleUserBalanceUpdate = (data: any) => {
-      console.log(`📡 [SHARED] Socket userBalanceUpdate:`, data);
-      
-      if (data.userId === userId && data.balanceType === 'custodial' && data.newBalance !== undefined) {
-        const newBalance = parseFloat(data.newBalance) || 0;
-        
-        console.log(`💰 [SHARED] User balance update: ${newBalance.toFixed(6)} SOL`);
-        
-        setState(prev => ({
-          ...prev,
-          balance: newBalance,
-          lastUpdated: Date.now(),
-          error: null,
-          source: 'socket_user_update'
-        }));
-      }
-    };
+    // ✅ REMOVED: userBalanceUpdate listener (now handles embedded wallet only)
+    // This allows userBalanceUpdate to handle embedded wallet balance separately
+    // without interfering with custodial balance updates
 
-    // Register all relevant socket events
+    // Register custodial-specific socket events
     socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
     socket.on('custodialBetResult', handleCustodialBetResult);
     socket.on('custodialCashOutResult', handleCustodialCashoutResult);
-    socket.on('userBalanceUpdate', handleUserBalanceUpdate);
     
     return () => {
-      console.log(`🔌 [SHARED] Cleaning up socket listeners for: ${userId}`);
+      console.log(`🔌 [SHARED] Cleaning up custodial socket listeners for: ${userId}`);
       socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
       socket.off('custodialBetResult', handleCustodialBetResult);
       socket.off('custodialCashOutResult', handleCustodialCashoutResult);
-      socket.off('userBalanceUpdate', handleUserBalanceUpdate);
       socketListenersRef.current = false;
     };
   }, [userId, forceRefresh]);
 
-  // ✅ NEW: Debug effect to log state changes
   useEffect(() => {
     console.log(`📊 [SHARED] State changed:`, {
       userId: state.userId,

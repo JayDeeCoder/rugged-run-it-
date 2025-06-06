@@ -1,4 +1,4 @@
-// app/api/custodial/balance/[userId]/route.ts - FIXED VERSION
+// app/api/custodial/balance/[userId]/route.ts - ENHANCED WITH PRIVY SUPPORT
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -25,31 +25,72 @@ export async function GET(
     
     console.log('🔍 Getting balance from users_unified for user:', userId);
     
-    // ✅ FIXED: Only select columns that actually exist
-    const { data: userProfile, error: profileError } = await supabase
-      .from('users_unified')
-      .select(`
-        id,
-        username,
-        custodial_balance,
-        privy_balance,
-        embedded_balance,
-        external_wallet_address,
-        wallet_address,
-        custodial_total_deposited,
-        last_custodial_deposit,
-        embedded_wallet_id,
-        total_transfers_to_embedded,
-        total_transfers_to_custodial,
-        total_deposited,
-        updated_at,
-        created_at
-      `)
-      .eq('id', userId)
-      .single();
+    // ✅ FIXED: Handle UUID vs Privy DID format properly
+    let userProfile, profileError;
+    
+    if (userId.startsWith('did:privy:')) {
+      // Search by Privy DID only
+      console.log('🔍 Searching by Privy DID:', userId);
+      const result = await supabase
+        .from('users_unified')
+        .select(`
+          id,
+          username,
+          custodial_balance,
+          privy_balance,
+          embedded_balance,
+          external_wallet_address,
+          wallet_address,
+          custodial_total_deposited,
+          last_custodial_deposit,
+          embedded_wallet_id,
+          total_transfers_to_embedded,
+          total_transfers_to_custodial,
+          total_deposited,
+          privy_user_id,
+          updated_at,
+          created_at
+        `)
+        .eq('privy_user_id', userId)
+        .single();
+      
+      userProfile = result.data;
+      profileError = result.error;
+    } else {
+      // Search by UUID only
+      console.log('🔍 Searching by UUID:', userId);
+      const result = await supabase
+        .from('users_unified')
+        .select(`
+          id,
+          username,
+          custodial_balance,
+          privy_balance,
+          embedded_balance,
+          external_wallet_address,
+          wallet_address,
+          custodial_total_deposited,
+          last_custodial_deposit,
+          embedded_wallet_id,
+          total_transfers_to_embedded,
+          total_transfers_to_custodial,
+          total_deposited,
+          privy_user_id,
+          updated_at,
+          created_at
+        `)
+        .eq('id', userId)
+        .single();
+      
+      userProfile = result.data;
+      profileError = result.error;
+    }
     
     if (profileError || !userProfile) {
       console.log(`❌ User ${userId} not found in users_unified:`, profileError?.message);
+      
+      // ✅ ENHANCED: Better error handling for Privy DIDs
+      const userType = userId.startsWith('did:privy:') ? 'Privy DID' : 'UUID';
       
       return NextResponse.json({
         userId,
@@ -60,8 +101,9 @@ export async function GET(
         totalDeposited: 0,
         lastDeposit: 0,
         hasWallet: false,
-        message: 'User not found in users_unified table',
+        message: `User not found in users_unified table (searched by ${userType})`,
         source: 'users_unified_not_found',
+        userType,
         error: profileError?.message,
         timestamp: Date.now()
       });
@@ -71,13 +113,14 @@ export async function GET(
     const custodialBalance = parseFloat(userProfile.custodial_balance || '0') || 0;
     const privyBalance = parseFloat(userProfile.privy_balance || '0') || 0;
     const embeddedBalance = parseFloat(userProfile.embedded_balance || '0') || 0;
-    const totalBalance = custodialBalance + privyBalance + embeddedBalance; // Calculate manually
+    const totalBalance = custodialBalance + privyBalance + embeddedBalance;
     const totalDeposited = parseFloat(userProfile.total_deposited || userProfile.custodial_total_deposited || '0') || 0;
     
-    console.log(`💰 Found user ${userId} with balance: ${custodialBalance.toFixed(9)} SOL (custodial), ${privyBalance.toFixed(9)} SOL (privy), ${embeddedBalance.toFixed(9)} SOL (embedded)`);
+    console.log(`💰 Found user ${userProfile.id} (searched by ${userId}) with balance: ${custodialBalance.toFixed(9)} SOL`);
     
     return NextResponse.json({
-      userId,
+      userId: userProfile.id, // ✅ Always return the database UUID
+      searchedUserId: userId, // ✅ Include what was searched for
       custodialBalance,
       totalBalance,
       privyBalance,
@@ -92,7 +135,8 @@ export async function GET(
       totalTransfersToEmbedded: parseFloat(userProfile.total_transfers_to_embedded || '0') || 0,
       totalTransfersToCustodial: parseFloat(userProfile.total_transfers_to_custodial || '0') || 0,
       lastActivity: userProfile.updated_at,
-      source: 'users_unified_fixed',
+      privyUserId: userProfile.privy_user_id, // ✅ Include Privy ID if available
+      source: 'users_unified_enhanced',
       timestamp: Date.now()
     });
     

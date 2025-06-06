@@ -303,6 +303,13 @@ const Dashboard: FC = () => {
     gamesPlayed: 0,
     profitLoss: 0
   });
+
+  const [enhancedUserStats, setEnhancedUserStats] = useState({
+    winRate: 0,
+    bestMultiplier: 0,
+    currentWinStreak: 0,
+    bestWinStreak: 0
+  });
   const [isLoadingStats, setIsLoadingStats] = useState<boolean>(false);
   const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false); // 🚀 FIX: Separate manual refresh state
   
@@ -502,102 +509,88 @@ const Dashboard: FC = () => {
     };
   }, [isValidWallet, walletAddress]);
 
-  // 🚀 OPTIMIZED: Fetch user stats from Supabase with timeout protection
-  useEffect(() => {
-    const fetchUserStats = async () => {
-      if (!userId) {
-        console.log('🔍 Dashboard: No userId available for stats fetch');
-        setUserStats({
-          totalWagered: 0,
-          totalPayouts: 0,
-          gamesPlayed: 0,
-          profitLoss: 0
-        });
-        return;
-      }
+  // 🚀 FIXED: Updated Dashboard to use users_unified table for stats
+// Replace the fetchUserStats useEffect in your Dashboard component with this:
 
-      setIsLoadingStats(true);
+useEffect(() => {
+  const fetchUserStats = async () => {
+    if (!userId) {
+      console.log('🔍 Dashboard: No userId available for stats fetch');
+      setUserStats({
+        totalWagered: 0,
+        totalPayouts: 0,
+        gamesPlayed: 0,
+        profitLoss: 0
+      });
+      return;
+    }
+
+    setIsLoadingStats(true);
+    
+    const statsTimeout = setTimeout(() => {
+      console.log('⏰ Dashboard: Stats loading timeout - forcing completion');
+      setIsLoadingStats(false);
+    }, 10000);
+    
+    try {
+      console.log(`📊 Dashboard: Fetching user stats from users_unified for userId: ${userId}`);
       
-      // 🚀 FIX: Add timeout protection for stats loading
-      const statsTimeout = setTimeout(() => {
-        console.log('⏰ Dashboard: Stats loading timeout - forcing completion');
-        setIsLoadingStats(false);
-      }, 10000); // 10 second timeout
+      // 🚀 FIX: Use UserAPI.getUserStats() which reads from users_unified table
+      const userStats = await UserAPI.getUserStats(userId);
       
-      try {
-        console.log(`📊 Dashboard: Fetching user stats for userId: ${userId}`);
+      if (userStats) {
+        console.log('✅ Dashboard: Got unified stats:', userStats);
         
-        // 🚀 FIX: Remove bet_type from query since it doesn't exist
-        const { data: bets, error } = await supabase
-          .from('player_bets')
-          .select('bet_amount, profit_loss, cashout_amount, cashout_multiplier, status')
-          .eq('user_id', userId); // Use user_id instead of wallet_address
-
-        if (error) {
-          console.error('❌ Dashboard: Supabase query error:', error);
-          throw error;
-        }
-
-        console.log(`📊 Dashboard: Retrieved ${bets?.length || 0} bets for user ${userId}`);
-
-        // Calculate statistics from bet data
-        let totalWagered = 0;
-        let totalPayouts = 0;
-        let gamesPlayed = 0;
-        let profitLoss = 0;
-
-        if (bets && bets.length > 0) {
-          bets.forEach((bet: PlayerBet) => {
-            // 🚀 FIX: Count all bets since bet_type doesn't exist
-            gamesPlayed++;
-            
-            // Sum all bet amounts
-            totalWagered += bet.bet_amount || 0;
-            
-            // Sum payouts (only for cashed out bets)
-            if (bet.status === 'cashed_out' && bet.cashout_amount) {
-              totalPayouts += bet.cashout_amount;
-            }
-            
-            // Sum profit/loss (negative for losses, positive for wins)
-            profitLoss += bet.profit_loss || 0;
-          });
-        }
-
-        const newStats = {
-          totalWagered: Number(totalWagered.toFixed(6)),
-          totalPayouts: Number(totalPayouts.toFixed(6)),
-          gamesPlayed,
-          profitLoss: Number(profitLoss.toFixed(6))
-        };
-
-        setUserStats(newStats);
-        
-        console.log(`📊 Dashboard: Stats updated for ${userId}:`, {
-          totalWagered: newStats.totalWagered.toFixed(3),
-          totalPayouts: newStats.totalPayouts.toFixed(3),
-          gamesPlayed: newStats.gamesPlayed,
-          profitLoss: newStats.profitLoss.toFixed(3)
-        });
-        
-      } catch (error) {
-        console.error('❌ Dashboard: Failed to fetch user stats:', error);
-        // Set zeros on error
         setUserStats({
-          totalWagered: 0,
-          totalPayouts: 0,
-          gamesPlayed: 0,
-          profitLoss: 0
+          totalWagered: userStats.total_wagered,
+          totalPayouts: userStats.total_won,
+          gamesPlayed: userStats.games_played,
+          profitLoss: userStats.net_profit
         });
-      } finally {
-        clearTimeout(statsTimeout);
-        // 🚀 FIX: Always set loading to false with small delay
-        setTimeout(() => setIsLoadingStats(false), 100);
-      }
-    };
 
-    fetchUserStats();
-  }, [userId, supabase]); // Use userId instead of walletAddress
+        setEnhancedUserStats({
+          winRate: userStats.win_rate || 0,
+          bestMultiplier: userStats.best_multiplier || 0,
+          currentWinStreak: userStats.current_win_streak || 0,
+          bestWinStreak: userStats.best_win_streak || 0
+        });
+        
+        console.log(`📊 Dashboard: Stats updated from users_unified for ${userId}`);
+      }
+      
+    } catch (error) {
+      console.error('❌ Dashboard: Failed to fetch user stats from users_unified:', error);
+      
+      // 🚀 FIX: Properly handle unknown error type
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorDetails = error instanceof Error && 'details' in error ? (error as any).details : 'No details';
+      
+      // Show detailed error information
+      console.log('🔍 Debug info:', {
+        userId,
+        walletAddress,
+        errorMessage,
+        errorDetails
+      });
+      
+      // Set zeros on error
+      setUserStats({
+        totalWagered: 0,
+        totalPayouts: 0,
+        gamesPlayed: 0,
+        profitLoss: 0
+      });
+      
+      // Show helpful error message
+      toast.error(`Stats loading failed: ${errorMessage}`);
+    } finally {
+      clearTimeout(statsTimeout);
+      setTimeout(() => setIsLoadingStats(false), 100);
+    }
+  };
+
+  fetchUserStats();
+}, [userId, walletAddress]);
 
   // 🚀 OPTIMIZED: Refresh data function with separate manual loading state
   const refreshData = useCallback(async () => {
@@ -607,13 +600,12 @@ const Dashboard: FC = () => {
     }
     
     console.log('🔄 Dashboard: Manual refresh triggered by user');
-    setIsManualRefreshing(true); // 🚀 FIX: Use separate manual refresh state
+    setIsManualRefreshing(true);
     
-    // 🚀 FIX: Add timeout protection for manual refresh
     const refreshTimeout = setTimeout(() => {
       console.log('⏰ Dashboard: Manual refresh timeout - forcing completion');
       setIsManualRefreshing(false);
-    }, 10000); // 10 second timeout
+    }, 10000);
     
     try {
       // Show loading toast
@@ -644,39 +636,35 @@ const Dashboard: FC = () => {
         console.error('❌ Dashboard: Failed to refresh embedded wallet balance:', error);
       }
       
-      // Refresh user stats
+      // 🚀 FIX: Refresh user stats using UserAPI instead of manual calculation
       try {
-        // 🚀 FIX: Remove bet_type from query since it doesn't exist
-        const { data: bets, error } = await supabase
-          .from('player_bets')
-          .select('bet_amount, profit_loss, cashout_amount, status')
-          .eq('user_id', userId); // Use user_id instead of wallet_address
-
-        if (!error && bets) {
-          let totalWagered = 0, totalPayouts = 0, gamesPlayed = 0, profitLoss = 0;
-          
-          // 🚀 FIX: Add proper type annotation for bet parameter
-          bets.forEach((bet: PlayerBet) => {
-            // 🚀 FIX: Count all bets since bet_type doesn't exist
-            gamesPlayed++;
-            totalWagered += bet.bet_amount || 0;
-            if (bet.status === 'cashed_out' && bet.cashout_amount) {
-              totalPayouts += bet.cashout_amount;
-            }
-            profitLoss += bet.profit_loss || 0;
-          });
-
+        console.log('📊 Dashboard: Refreshing stats from users_unified...');
+        const userStats = await UserAPI.getUserStats(userId);
+        
+        if (userStats) {
           setUserStats({
-            totalWagered: Number(totalWagered.toFixed(6)),
-            totalPayouts: Number(totalPayouts.toFixed(6)),
-            gamesPlayed,
-            profitLoss: Number(profitLoss.toFixed(6))
+            totalWagered: userStats.total_wagered,
+            totalPayouts: userStats.total_won,
+            gamesPlayed: userStats.games_played,
+            profitLoss: userStats.net_profit
           });
           
-          console.log(`📊 Dashboard: Stats refreshed for ${userId}`);
+          // 🚀 NEW: Also refresh enhanced stats
+          setEnhancedUserStats({
+            winRate: userStats.win_rate || 0,
+            bestMultiplier: userStats.best_multiplier || 0,
+            currentWinStreak: userStats.current_win_streak || 0,
+            bestWinStreak: userStats.best_win_streak || 0
+          });
+          
+          console.log(`📊 Dashboard: Stats refreshed from users_unified for ${userId}`);
+        } else {
+          console.log('⚠️ Dashboard: No stats found during refresh');
         }
       } catch (error) {
-        console.error('❌ Dashboard: Failed to refresh stats:', error);
+        // 🚀 FIX: Properly handle unknown error type
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('❌ Dashboard: Failed to refresh stats from users_unified:', errorMessage);
       }
       
       // Success toast
@@ -687,9 +675,9 @@ const Dashboard: FC = () => {
       toast.error('Failed to refresh dashboard data', { id: 'dashboard-refresh' });
     } finally {
       clearTimeout(refreshTimeout);
-      setIsManualRefreshing(false); // 🚀 FIX: Always clear manual refresh state
+      setIsManualRefreshing(false);
     }
-  }, [isValidWallet, userId, walletAddress, refreshCustodialBalance, supabase]);
+  }, [isValidWallet, userId, walletAddress, refreshCustodialBalance]);
 
   // 🚀 OPTIMIZED: Real-time socket listeners WITHOUT automatic stats refresh
   useEffect(() => {
@@ -941,53 +929,86 @@ const Dashboard: FC = () => {
           />
         )}
 
-        {/* Game Stats */}
-        {isValidWallet && (
-          <div className="bg-gray-900 rounded-lg p-6 mb-8">
-            <h2 className="text-xl font-bold text-white mb-4 flex items-center">
-              <TrendingUp size={20} className="mr-2" />
-              Game Statistics
-            </h2>
-            
-            {isLoadingStats ? (
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} className="animate-pulse">
-                    <div className="h-4 bg-gray-700 rounded w-24 mb-2"></div>
-                    <div className="h-8 bg-gray-700 rounded w-20"></div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div>
-                  <div className="text-gray-400 mb-1">Total Wagered</div>
-                  <div className="text-2xl font-bold text-white">
-                    {userStats.totalWagered.toFixed(2)} SOL
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-400 mb-1">Total Payouts</div>
-                  <div className="text-2xl font-bold text-white">
-                    {userStats.totalPayouts.toFixed(2)} SOL
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-400 mb-1">Games Played</div>
-                  <div className="text-2xl font-bold text-white">
-                    {userStats.gamesPlayed}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-400 mb-1">Profit/Loss</div>
-                  <div className={`text-2xl font-bold ${userStats.profitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {userStats.profitLoss >= 0 ? '+' : ''}{userStats.profitLoss.toFixed(2)} SOL
-                  </div>
-                </div>
-              </div>
-            )}
+        {/* Enhanced Game Stats with more data from users_unified */}
+{isValidWallet && (
+  <div className="bg-gray-900 rounded-lg p-6 mb-8">
+    <h2 className="text-xl font-bold text-white mb-4 flex items-center">
+      <TrendingUp size={20} className="mr-2" />
+      Game Statistics
+    </h2>
+    
+    {isLoadingStats ? (
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="animate-pulse">
+            <div className="h-4 bg-gray-700 rounded w-24 mb-2"></div>
+            <div className="h-8 bg-gray-700 rounded w-20"></div>
           </div>
-        )}
+        ))}
+      </div>
+    ) : (
+      <>
+        {/* Primary Stats Row */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+          <div>
+            <div className="text-gray-400 mb-1">Total Wagered</div>
+            <div className="text-2xl font-bold text-white">
+              {userStats.totalWagered.toFixed(3)} SOL
+            </div>
+          </div>
+          <div>
+            <div className="text-gray-400 mb-1">Total Won</div>
+            <div className="text-2xl font-bold text-green-400">
+              {userStats.totalPayouts.toFixed(3)} SOL
+            </div>
+          </div>
+          <div>
+            <div className="text-gray-400 mb-1">Games Played</div>
+            <div className="text-2xl font-bold text-white">
+              {userStats.gamesPlayed}
+            </div>
+          </div>
+          <div>
+            <div className="text-gray-400 mb-1">Net Profit/Loss</div>
+            <div className={`text-2xl font-bold ${userStats.profitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {userStats.profitLoss >= 0 ? '+' : ''}{userStats.profitLoss.toFixed(3)} SOL
+            </div>
+          </div>
+        </div>
+
+        {/* 🚀 FIXED: Additional Stats using enhancedUserStats instead of currentUser */}
+        {enhancedUserStats.winRate > 0 || enhancedUserStats.bestMultiplier > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 border-t border-gray-700">
+            <div>
+              <div className="text-gray-400 mb-1">Win Rate</div>
+              <div className="text-lg font-bold text-blue-400">
+                {(enhancedUserStats.winRate * 100).toFixed(1)}%
+              </div>
+            </div>
+            <div>
+              <div className="text-gray-400 mb-1">Best Multiplier</div>
+              <div className="text-lg font-bold text-purple-400">
+                {enhancedUserStats.bestMultiplier.toFixed(2)}x
+              </div>
+            </div>
+            <div>
+              <div className="text-gray-400 mb-1">Current Streak</div>
+              <div className="text-lg font-bold text-yellow-400">
+                {enhancedUserStats.currentWinStreak} wins
+              </div>
+            </div>
+            <div>
+              <div className="text-gray-400 mb-1">Best Streak</div>
+              <div className="text-lg font-bold text-orange-400">
+                {enhancedUserStats.bestWinStreak} wins
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </>
+    )}
+  </div>
+)}
 
         {/* Quick Actions */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">

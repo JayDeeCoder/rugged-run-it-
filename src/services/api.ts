@@ -3,6 +3,19 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { io, Socket } from 'socket.io-client';
 import logger from '../utils/logger';
 
+// Helper function to generate UUID
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback UUID generation
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 // Supabase client configuration
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -85,6 +98,47 @@ export interface GameState {
   totalBets: number;
   totalPlayers: number;
   startTime: number;
+}
+
+export interface ChartData {
+  timestamp: string;
+  open_price: number;
+  high_price: number;
+  low_price: number;
+  close_price: number;
+  volume: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  wallet_address: string;
+  username: string;
+  message: string;
+  message_type: 'user' | 'system' | 'announcement';
+  created_at: string;
+  avatar?: string;
+  level?: number;
+  badge?: string;
+}
+
+export interface SystemSetting {
+  key: string;
+  value: string;
+  description?: string;
+  updated_at: string;
+}
+
+// Type for partial system setting data from queries
+export interface SystemSettingData {
+  key: string;
+  value: string;
+}
+
+// Type for partial bet data from Supabase queries
+export interface BetStatsData {
+  bet_amount: number;
+  profit_loss?: number;
+  cashout_multiplier?: number;
 }
 
 export interface LeaderboardEntry {
@@ -349,7 +403,7 @@ export class UserAPI {
         // User doesn't exist, create new one
         console.log(`👤 Creating new user in users_unified for wallet: ${walletAddress}`);
         
-        const userId = crypto.randomUUID();
+        const userId = generateUUID();
         const username = `user_${userId.slice(-8)}`;
         
         const { data: newUser, error: createError } = await supabase
@@ -659,6 +713,41 @@ export class UserAPI {
   }
 
   /**
+   * Record a bet (this might be handled by the server now, but keeping for compatibility)
+   */
+  static async recordBet(
+    gameId: string,
+    walletAddress: string,
+    betAmount: number,
+    userId?: string,
+    cashoutMultiplier?: number,
+    profitLoss?: number
+  ): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('player_bets')
+        .insert({
+          game_id: gameId,
+          user_id: userId,
+          wallet_address: walletAddress,
+          bet_amount: betAmount,
+          cashout_multiplier: cashoutMultiplier,
+          profit_loss: profitLoss
+        });
+
+      if (error) {
+        logger.error('Error recording bet:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Error recording bet:', error);
+      return false;
+    }
+  }
+
+  /**
    * Authenticate user and register if needed
    */
   static async authenticateUser(walletAddress: string, privyUserId?: string, privyWalletAddress?: string): Promise<{
@@ -764,10 +853,31 @@ export class LeaderboardAPI {
       return null;
     }
   }
+
+  static async updateLeaderboard(walletAddress: string, profit: number, multiplier: number): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .rpc('update_leaderboard_entry', {
+          wallet_addr: walletAddress,
+          profit_amount: profit,
+          multiplier_value: multiplier
+        });
+
+      if (error) {
+        logger.error('Error updating leaderboard:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Error updating leaderboard:', error);
+      return false;
+    }
+  }
 }
 
 export class ChartAPI {
-  static async getChartData(gameId: string): Promise<any[]> {
+  static async getChartData(gameId: string): Promise<ChartData[]> {
     try {
       const { data, error } = await supabase
         .from('chart_data')
@@ -814,10 +924,28 @@ export class ChartAPI {
       return [];
     }
   }
+
+  static async insertChartData(gameId: string, chartData: ChartData[]): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('chart_data')
+        .insert(chartData.map(data => ({ ...data, game_id: gameId })));
+
+      if (error) {
+        logger.error('Error inserting chart data:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Error inserting chart data:', error);
+      return false;
+    }
+  }
 }
 
 export class ChatAPI {
-  static async getChatHistory(limit: number = 50): Promise<any[]> {
+  static async getChatHistory(limit: number = 50): Promise<ChatMessage[]> {
     try {
       const { data, error } = await supabase
         .from('chat_messages')
@@ -860,13 +988,13 @@ export class ChatAPI {
     }
   }
 
-  static subscribeToMessages(callback: (message: any) => void): () => void {
+  static subscribeToMessages(callback: (message: ChatMessage) => void): () => void {
     const subscription = supabase
       .channel('chat_messages')
       .on('postgres_changes', 
         { event: 'INSERT', schema: 'public', table: 'chat_messages' },
         (payload) => {
-          callback(payload.new);
+          callback(payload.new as ChatMessage);
         }
       )
       .subscribe();
@@ -898,6 +1026,24 @@ export class SystemAPI {
     } catch (error) {
       logger.error('Error fetching system settings:', error);
       return {};
+    }
+  }
+
+  static async updateSetting(key: string, value: string): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('system_settings')
+        .upsert({ key, value, updated_at: new Date().toISOString() });
+
+      if (error) {
+        logger.error('Error updating setting:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Error updating setting:', error);
+      return false;
     }
   }
 }

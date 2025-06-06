@@ -28,17 +28,17 @@ export const useSharedCustodialBalance = (userId: string) => {
   const updateBalance = useCallback(async (force: boolean = false, retryCount: number = 0): Promise<number | null> => {
     if (!userId || (isUpdatingRef.current && !force)) return null;
     
+    // 🔥 NEW: Prevent rapid conflicting updates
+    if (!force && Date.now() - lastUpdateTime < 2000) {
+      console.log('🚫 [SHARED] Skipping update - too frequent');
+      return state.balance;
+    }
+    
     isUpdatingRef.current = true;
     setState(prev => ({ ...prev, loading: true, error: null }));
     
-    const maxRetries = 3;
-    const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 5000); // Exponential backoff
-    
     try {
-      console.log(`🔄 [SHARED] Fetching custodial balance for user ${userId}... (attempt ${retryCount + 1})`);
-      
-      // 🔥 Add cache busting and force parameter
-      const url = `/api/custodial/balance/${userId}?t=${Date.now()}&force=${force ? 'true' : 'false'}&retry=${retryCount}`;
+      const url = `/api/custodial/balance/${userId}?t=${Date.now()}&force=${force}&retry=${retryCount}`;
       const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -49,7 +49,6 @@ export const useSharedCustodialBalance = (userId: string) => {
       
       if (!response.ok) {
         if (response.status === 404) {
-          console.log(`👤 [SHARED] User ${userId} not found - balance remains 0`);
           setState(prev => ({ 
             ...prev, 
             balance: 0, 
@@ -65,9 +64,18 @@ export const useSharedCustodialBalance = (userId: string) => {
       
       if (data.custodialBalance !== undefined) {
         const newBalance = parseFloat(data.custodialBalance) || 0;
-        const prevBalance = state.balance;
         
-        console.log(`💰 [SHARED] Custodial balance updated: ${prevBalance.toFixed(3)} → ${newBalance.toFixed(3)} SOL`);
+        // 🔥 NEW: Validate balance makes sense
+        if (newBalance < 0 || newBalance > 1000) {
+          console.warn('⚠️ [SHARED] Suspicious balance value:', newBalance);
+          if (!force) {
+            isUpdatingRef.current = false;
+            return state.balance; // Keep current balance if suspicious
+          }
+        }
+        
+        const prevBalance = state.balance;
+        console.log(`💰 [SHARED] Balance update: ${prevBalance.toFixed(6)} → ${newBalance.toFixed(6)} SOL`);
         
         setState(prev => ({
           ...prev,
@@ -77,48 +85,27 @@ export const useSharedCustodialBalance = (userId: string) => {
           error: null
         }));
         
-        // 🔥 ENHANCED: Emit custom event for other components to listen
-        window.dispatchEvent(new CustomEvent('custodialBalanceUpdate', {
-          detail: { 
-            userId, 
-            newBalance, 
-            prevBalance, 
-            timestamp: Date.now(),
-            source: 'updateBalance'
-          }
-        }));
+        lastUpdateTime = Date.now(); // Track update time
         
-        retryCountRef.current = 0; // Reset retry count on success
         return newBalance;
       } else {
-        throw new Error('Invalid response format - custodialBalance missing');
+        throw new Error('Invalid response format');
       }
     } catch (error) {
-      console.error(`❌ [SHARED] Failed to fetch custodial balance (attempt ${retryCount + 1}):`, error);
-      
-      // 🔥 ENHANCED: Retry logic for failed requests
-      if (retryCount < maxRetries && force) {
-        console.log(`🔄 [SHARED] Retrying balance fetch in ${retryDelay}ms...`);
-        
-        setTimeout(() => {
-          updateBalance(force, retryCount + 1);
-        }, retryDelay);
-        
-        return null; // 🔥 FIXED: Return null instead of undefined
-      }
-      
+      console.error(`❌ [SHARED] Balance update failed:`, error);
       setState(prev => ({ 
         ...prev, 
         loading: false, 
         error: error instanceof Error ? error.message : 'Unknown error' 
       }));
-      
-      retryCountRef.current = 0; // Reset retry count
-      return null; // 🔥 FIXED: Return null instead of undefined
+      return null;
     } finally {
       isUpdatingRef.current = false;
     }
   }, [userId, state.balance]);
+  
+  // Add this variable at the top of useSharedCustodialBalance
+  let lastUpdateTime = 0;
 
   // 🔥 FIXED: Force refresh with proper TypeScript return types
   const forceRefresh = useCallback(async (): Promise<number | null> => {

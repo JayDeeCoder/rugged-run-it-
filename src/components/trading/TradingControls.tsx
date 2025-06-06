@@ -95,6 +95,24 @@ const useWalletBalance = (walletAddress: string) => {
     await updateBalance();
   }, [walletAddress, updateBalance]);
 
+  // Add this BEFORE your useEffect hooks, around line 800
+const balanceUpdateRef = useRef(false);
+const preventBalanceConflicts = useCallback((newBalance: number, source: string) => {
+  if (balanceUpdateRef.current) {
+    console.log(`⚠️ BLOCKED: Balance update from ${source} - update in progress`);
+    return false;
+  }
+  
+  balanceUpdateRef.current = true;
+  console.log(`✅ ALLOWED: Balance update from ${source} - ${newBalance.toFixed(6)} SOL`);
+  
+  setTimeout(() => {
+    balanceUpdateRef.current = false;
+  }, 1000);
+  
+  return true;
+}, []);
+
   // Polling setup
   useEffect(() => {
     if (walletAddress && walletAddress !== lastWalletRef.current) {
@@ -123,6 +141,7 @@ const useWalletBalance = (walletAddress: string) => {
       };
     }
   }, [walletAddress, updateBalance]);
+  
 
   // 🚀 ENHANCED REAL-TIME SOCKET LISTENERS FOR WALLET BALANCE
   useEffect(() => {
@@ -195,6 +214,8 @@ const useWalletBalance = (walletAddress: string) => {
 
   return { balance, loading, lastUpdated, updateBalance, forceRefresh };
 };
+
+
 
 // 🚀 ENHANCED: RUGGED balance hook with socket listeners
 const useRuggedBalance = (walletAddress: string) => {
@@ -2143,7 +2164,7 @@ const handleQuickTransfer = useCallback(async (amount: number) => {
       }
     };
   }, [userId, user?.id, walletAddress, custodialBalance, trackedSetUserId, refreshCustodialBalance]);
-  
+
   // 🔍 ENHANCED: Check for other places where userId might get set
   useEffect(() => {
     // Look for any other code that might be calling setUserId
@@ -2178,201 +2199,129 @@ const handleQuickTransfer = useCallback(async (amount: number) => {
   }, [walletAddress]);
 
   // 🚀 UPDATED: Enhanced socket listeners with shared state
-  useEffect(() => {
-    if (!userId || !walletAddress) return;
+  // 🔥 CONSOLIDATED: Replace the entire complex useEffect with this
+useEffect(() => {
+  if (!userId || !walletAddress) return;
+  
+  const socket = (window as any).gameSocket;
+  if (!socket) return;
+  
+  console.log(`🔌 Setting up CONSOLIDATED socket listeners for: ${userId}`);
+  
+  // 🔥 Rate limiting to prevent rapid balance flipping
+  let lastBalanceUpdate = 0;
+  let balanceUpdateTimeout: NodeJS.Timeout | null = null;
+  
+  // 🔥 Single consolidated balance update handler
+  const debouncedBalanceUpdate = () => {
+    if (balanceUpdateTimeout) clearTimeout(balanceUpdateTimeout);
     
-    const socket = (window as any).gameSocket;
-    if (socket) {
-      console.log(`🔌 Setting up SHARED TradingControls real-time listeners for user: ${userId}`);
-      
-      const handleCustodialBalanceUpdate = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`💰 REAL-TIME: Enhanced custodial balance update - ${data.custodialBalance?.toFixed(6)} SOL`);
-          
-          updateCustodialBalance();
-          
-          if (data.updateType === 'deposit_processed') {
-            toast.success(`✅ Deposit processed: +${data.depositAmount?.toFixed(3)} SOL`);
-          } else if (data.updateType === 'bet_placed') {
-            toast(`🎯 Bet placed: -${Math.abs(data.change || 0).toFixed(3)} SOL`, { icon: '🎯' });
-          } else if (data.updateType === 'cashout_processed') {
-            toast.success(`💸 Cashout: +${data.change?.toFixed(3)} SOL`);
-          }
-        }
-      };
-
-      const handleCustodialCashout = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`💸 REAL-TIME: Enhanced custodial cashout - ${data.amount?.toFixed(6)} SOL`);
-          
-          clearActiveBet(); // Use shared state setter
-          updateCustodialBalance();
-          
-          if (data.payout && data.betAmount) {
-            const winAmount = data.payout - data.betAmount;
-            const multiplier = data.cashoutMultiplier || data.multiplier || 0;
-            toast.success(`🎉 Cashed out at ${multiplier.toFixed(2)}x! Win: +${winAmount.toFixed(3)} SOL`);
-          }
-        }
-      };
-
-      const handleGameCrashed = (data: any) => {
-        console.log(`💥 REAL-TIME: Enhanced game crashed at ${data.crashMultiplier?.toFixed(2)}x`);
-        
-        if (activeBet) {
-          console.log('🗑️ REAL-TIME: Clearing active bet due to game crash');
-          clearActiveBet(); // Use shared state setter
-          
-          toast.error(`💥 Game crashed at ${data.crashMultiplier?.toFixed(2)}x`, {
-            duration: 3000,
-            icon: '💥'
-          });
-          
-          if (activeBet.tokenType === 'SOL') {
-            updateCustodialBalance();
-          } else {
-            updateRuggedBalance();
-          }
-        }
-      };
-
-      const handleGameEnded = (data: any) => {
-      
-        
-        if (activeBet) {
-          console.log('🗑️ REAL-TIME: Clearing active bet - game ended, ready for new round');
-          clearActiveBet(); // Use shared state setter
-        }
-      };
-
-      const handleGameWaiting = (data: any) => {
-
-        
-        if (activeBet) {
-          console.log('🗑️ REAL-TIME: Clearing stuck active bet - new game starting');
-          clearActiveBet(); // Use shared state setter
-        }
-      };
-
-      const handleCustodialBetPlaced = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`🎯 REAL-TIME: Enhanced custodial bet placed - ${data.betAmount} SOL at ${data.entryMultiplier}x`);
-          
-          updateCustodialBalance();
-          
-          toast.success(`🎯 Bet placed: ${data.betAmount} SOL at ${data.entryMultiplier?.toFixed(2)}x`);
-        }
-      };
-
-      const handleDepositConfirmed = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`💰 REAL-TIME: Enhanced deposit confirmed for ${userId}`, data);
-          
-          setTimeout(refreshAllBalances, 1500);
-          
-          if (data.depositAmount) {
-            toast.success(`💰 Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL!`, {
-              duration: 5000,
-              icon: '💰'
-            });
-          }
-        }
-      };
-
-      const handleTransactionConfirmed = (data: any) => {
-        if (data.userId === userId || data.walletAddress === walletAddress) {
-          console.log(`🔗 REAL-TIME: Enhanced transaction confirmed`, data);
-          
-          setTimeout(refreshAllBalances, 2500);
-        }
-      };
-
-      const handleEmbeddedTransferConfirmed = (data: any) => {
-        if (data.userId === userId || data.walletAddress === walletAddress) {
-          console.log(`💳 REAL-TIME: Embedded wallet transfer confirmed`, data);
-          
-          if (data.amount && data.type === 'embedded_to_custodial') {
-            expectedBalance.current = custodialBalance + parseFloat(data.amount);
-            
-            setTimeout(() => refreshCustodialBalance(), 500);
-            setTimeout(refreshAllBalances, 1000);
-            
-            toast.success(`✅ Transfer processed: +${parseFloat(data.amount).toFixed(3)} SOL to game balance!`);
-          }
-        }
-      };
-
-      const handleBalanceSync = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`🔄 REAL-TIME: Balance sync event received`, data);
-          
-          if (data.custodialBalance !== undefined) {
-            refreshCustodialBalance();
-            
-            if (data.reason) {
-              toast(`Balance synced: ${data.reason}`, { icon: '🔄' });
-            }
-          }
-        }
-      };
-
-      const handleBalanceRefreshResponse = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`🔄 REAL-TIME: Manual balance refresh response`, data);
-          
-          if (data.success && data.custodialBalance !== undefined) {
-            refreshCustodialBalance();
-            toast.success('Balance refreshed successfully!');
-          } else {
-            toast.error('Balance refresh failed');
-          }
-        }
-      };
-
-      const handleGameStateChange = (data: any) => {
-        if (data.status === 'waiting' && activeBet) {
-          console.log('🔄 REAL-TIME: Game state changed to waiting, clearing active bet if stale');
-          
-          if (activeBet.gameId !== data.gameId) {
-            clearActiveBet(); // Use shared state setter
-          }
-        }
-      };
-
-      // Register listeners
-      socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-      socket.on('custodialCashout', handleCustodialCashout);
-      socket.on('gameCrashed', handleGameCrashed);
-      socket.on('gameEnded', handleGameEnded);
-      socket.on('gameWaiting', handleGameWaiting);
-      socket.on('custodialBetPlaced', handleCustodialBetPlaced);
-      socket.on('depositConfirmed', handleDepositConfirmed);
-      socket.on('transactionConfirmed', handleTransactionConfirmed);
-      socket.on('embeddedTransferConfirmed', handleEmbeddedTransferConfirmed);
-      socket.on('balanceSync', handleBalanceSync);
-      socket.on('balanceRefreshResponse', handleBalanceRefreshResponse);
-      socket.on('gameStarted', handleGameStateChange);
-      socket.on('gameState', handleGameStateChange);
-
-      return () => {
-        console.log(`🔌 Cleaning up SHARED TradingControls real-time listeners for user: ${userId}`);
-        socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-        socket.off('custodialCashout', handleCustodialCashout);
-        socket.off('gameCrashed', handleGameCrashed);
-        socket.off('gameEnded', handleGameEnded);
-        socket.off('gameWaiting', handleGameWaiting);
-        socket.off('custodialBetPlaced', handleCustodialBetPlaced);
-        socket.off('depositConfirmed', handleDepositConfirmed);
-        socket.off('transactionConfirmed', handleTransactionConfirmed);
-        socket.off('embeddedTransferConfirmed', handleEmbeddedTransferConfirmed);
-        socket.off('balanceSync', handleBalanceSync);
-        socket.off('balanceRefreshResponse', handleBalanceRefreshResponse);
-        socket.off('gameStarted', handleGameStateChange);
-        socket.off('gameState', handleGameStateChange);
-      };
+    balanceUpdateTimeout = setTimeout(() => {
+      console.log('💰 CONSOLIDATED: Executing debounced balance update');
+      updateCustodialBalance();
+      lastBalanceUpdate = Date.now();
+    }, 800); // Single 800ms delay for all updates
+  };
+  
+  // 🔥 Consolidated balance event handler
+  const handleBalanceEvent = (data: any, eventType: string) => {
+    if (data.userId !== userId) return;
+    
+    // Rate limit rapid updates
+    const now = Date.now();
+    if (now - lastBalanceUpdate < 1000) {
+      console.log(`🚫 CONSOLIDATED: Rate limiting ${eventType} - too rapid`);
+      return;
     }
-  }, [userId, walletAddress, activeBet, clearActiveBet, updateCustodialBalance, updateRuggedBalance, refreshAllBalances, refreshCustodialBalance]);
-
+    
+    console.log(`💰 CONSOLIDATED: Balance event ${eventType}:`, data);
+    
+    // Handle notifications
+    if (data.updateType === 'deposit_processed' || eventType === 'depositConfirmed') {
+      const amount = data.depositAmount || data.amount;
+      if (amount) {
+        toast.success(`✅ Deposit: +${parseFloat(amount).toFixed(3)} SOL`);
+      }
+    } else if (data.updateType === 'cashout_processed' || eventType === 'custodialCashout') {
+      const amount = data.change || data.amount;
+      if (amount) {
+        toast.success(`💸 Cashout: +${parseFloat(amount).toFixed(3)} SOL`);
+      }
+    }
+    
+    // Single debounced balance update
+    debouncedBalanceUpdate();
+  };
+  
+  // 🔥 Game state handlers (separate from balance)
+  const handleGameCrash = (data: any) => {
+    console.log(`💥 CONSOLIDATED: Game crashed at ${data.crashMultiplier?.toFixed(2)}x`);
+    
+    if (activeBet) {
+      clearActiveBet();
+      toast.error(`💥 Crashed at ${data.crashMultiplier?.toFixed(2)}x`);
+      
+      // Only trigger balance update if we had an active bet
+      debouncedBalanceUpdate();
+    }
+  };
+  
+  const handleGameEnd = (data: any) => {
+    if (activeBet) {
+      console.log('🎯 CONSOLIDATED: Clearing bet - game ended');
+      clearActiveBet();
+    }
+  };
+  
+  const handleCashout = (data: any) => {
+    if (data.userId !== userId) return;
+    
+    console.log(`💸 CONSOLIDATED: Cashout processed`, data);
+    clearActiveBet();
+    
+    if (data.payout && data.betAmount) {
+      const winAmount = data.payout - data.betAmount;
+      const multiplier = data.cashoutMultiplier || data.multiplier || 0;
+      toast.success(`🎉 Cashed out at ${multiplier.toFixed(2)}x! +${winAmount.toFixed(3)} SOL`);
+    }
+    
+    debouncedBalanceUpdate();
+  };
+  
+  // 🔥 Register ONLY essential events
+  const balanceEvents = [
+    'custodialBalanceUpdate',
+    'depositConfirmed', 
+    'balanceSync',
+    'embeddedTransferConfirmed'
+  ];
+  
+  const gameEvents = [
+    { name: 'gameCrashed', handler: handleGameCrash },
+    { name: 'gameEnded', handler: handleGameEnd },
+    { name: 'gameWaiting', handler: handleGameEnd },
+    { name: 'custodialCashout', handler: handleCashout }
+  ];
+  
+  // Register balance events with consolidated handler
+  balanceEvents.forEach(eventName => {
+    socket.on(eventName, (data: any) => handleBalanceEvent(data, eventName));
+  });
+  
+  // Register game events with specific handlers
+  gameEvents.forEach(({ name, handler }) => {
+    socket.on(name, handler);
+  });
+  
+  return () => {
+    console.log(`🔌 CONSOLIDATED: Cleaning up socket listeners`);
+    
+    if (balanceUpdateTimeout) clearTimeout(balanceUpdateTimeout);
+    
+    balanceEvents.forEach(eventName => socket.off(eventName));
+    gameEvents.forEach(({ name }) => socket.off(name));
+  };
+}, [userId, walletAddress, activeBet, clearActiveBet, updateCustodialBalance]); // Simplified dependencies
   // Auto cashout effect
   useEffect(() => {
     if (

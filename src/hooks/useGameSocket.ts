@@ -331,6 +331,42 @@ export function useGameSocket(walletAddress: string, userId?: string) {
       }
     });
 
+    // 🔥 ENHANCED: Better user initialization with timeout handling
+newSocket.on('connect', () => {
+  console.log('✅ Connected to enhanced game server');
+  setIsConnected(true);
+  setConnectionError(null);
+  setConnectionAttempts(0);
+  
+  // 🔥 NEW: Enhanced game sync with user check
+  newSocket.emit('requestGameSync');
+  
+  // If we have user info, try to initialize immediately
+  if (userId && walletAddress) {
+    console.log('🔧 Auto-initializing user on connect...');
+    newSocket.emit('initializeUser', { 
+      userId, 
+      walletAddress,
+      autoInit: true,
+      timestamp: Date.now()
+    });
+    
+    // Set timeout for initialization
+    const initTimeout = setTimeout(() => {
+      console.warn('⚠️ User initialization timeout - trying emergency init');
+      newSocket.emit('emergencyUserInit', { 
+        userId, 
+        walletAddress,
+        force: true
+      });
+    }, 10000);
+    
+    // Clear timeout if we get response
+    newSocket.once('userInitializeResult', () => {
+      clearTimeout(initTimeout);
+    });
+  }
+});
     // 🚀 ENHANCED: Server sync with liquidity data
     newSocket.on('serverSync', (data: any) => {
       

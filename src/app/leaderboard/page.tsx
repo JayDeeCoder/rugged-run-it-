@@ -1,4 +1,4 @@
-// src/app/leaderboard/page.tsx
+// src/app/leaderboard/page.tsx - UPDATED FOR USERS_UNIFIED CONSISTENCY
 'use client';
 
 import { FC, useState, useEffect } from 'react';
@@ -6,8 +6,8 @@ import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import Layout from '../../components/layout/Layout';
 import Leaderboard from '../../components/leaderboard/Leaderboard';
 import { useUser } from '../../context/UserContext';
-import { Trophy, RefreshCw, TrendingUp, Users, Award, Crown, Medal, Target } from 'lucide-react';
-import { LeaderboardAPI, LeaderboardEntry } from '../../services/api';
+import { Trophy, RefreshCw, TrendingUp, Users, Award, Crown, Medal, Target, Star, Zap } from 'lucide-react';
+import { LeaderboardAPI, LeaderboardEntry, UserAPI } from '../../services/api';
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'all_time';
 
@@ -23,7 +23,7 @@ const LeaderboardPage: FC = () => {
   // Hooks
   const { authenticated } = usePrivy();
   const { wallets } = useSolanaWallets();
-  const { currentUser, isAuthenticated } = useUser();
+  const { isAuthenticated } = useUser(); // Only use for auth status, not user data
   
   // State
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
@@ -39,21 +39,77 @@ const LeaderboardPage: FC = () => {
     topPlayerProfit: 0
   });
   const [userRank, setUserRank] = useState<number | null>(null);
+  
+  // 🚀 NEW: Current user data from users_unified (not UserContext)
+  const [currentUserData, setCurrentUserData] = useState<LeaderboardEntry | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   // Get current user's wallet
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   const currentUserWallet = embeddedWallet?.address || '';
 
-  // Fetch leaderboard data using the API
+  // 🚀 NEW: Initialize user and get userId from users_unified
+  useEffect(() => {
+    const initUser = async () => {
+      if (!authenticated || !currentUserWallet) {
+        setUserId(null);
+        setCurrentUserData(null);
+        return;
+      }
+
+      try {
+        console.log(`🔍 Getting user ID for wallet: ${currentUserWallet}`);
+        const userData = await UserAPI.getUserOrCreate(currentUserWallet);
+        
+        if (userData) {
+          setUserId(userData.id);
+          console.log(`✅ User ID set: ${userData.id}`);
+          
+          // Get current user's leaderboard data from users_unified
+          const userLeaderboardData = await LeaderboardAPI.getCurrentUserData(userData.id);
+          setCurrentUserData(userLeaderboardData);
+        }
+      } catch (error) {
+        console.error('❌ Error initializing user for leaderboard:', error);
+      }
+    };
+
+    initUser();
+  }, [authenticated, currentUserWallet]);
+
+  // Calculate level progress for current user (same logic as dashboard)
+  const calculateLevelProgress = (user: LeaderboardEntry) => {
+    const currentLevel = user.level;
+    const currentXP = user.experience_points;
+    
+    // Calculate XP needed for next level
+    const baseXP = 100;
+    const xpForNextLevel = baseXP * Math.pow(1.5, currentLevel - 1);
+    const xpForCurrentLevel = currentLevel > 1 ? baseXP * Math.pow(1.5, currentLevel - 2) : 0;
+    const xpNeededThisLevel = xpForNextLevel - xpForCurrentLevel;
+    const xpProgressThisLevel = currentXP - xpForCurrentLevel;
+    
+    const progressPercentage = Math.min(100, Math.max(0, (xpProgressThisLevel / xpNeededThisLevel) * 100));
+    const xpToNextLevel = Math.ceil(xpForNextLevel - currentXP);
+
+    return {
+      progressPercentage,
+      xpToNextLevel,
+      xpNeededThisLevel,
+      xpProgressThisLevel
+    };
+  };
+
+  // Fetch leaderboard data using the enhanced API
   const fetchLeaderboardData = async (showRefreshing = false) => {
     try {
       if (showRefreshing) setRefreshing(true);
       else setLoading(true);
       setError(null);
 
-      console.log(`🏆 Fetching ${period} leaderboard data...`);
+      console.log(`🏆 Fetching ${period} leaderboard data from users_unified...`);
 
-      // Use the LeaderboardAPI
+      // Use the enhanced LeaderboardAPI
       const data = await LeaderboardAPI.getLeaderboard(period);
       
       if (data.length === 0) {
@@ -98,7 +154,17 @@ const LeaderboardPage: FC = () => {
         }
       }
 
-      console.log(`✅ Loaded ${data.length} leaderboard entries`);
+      // Refresh current user data as well
+      if (userId) {
+        try {
+          const userLeaderboardData = await LeaderboardAPI.getCurrentUserData(userId);
+          setCurrentUserData(userLeaderboardData);
+        } catch (error) {
+          console.warn('Could not refresh current user data:', error);
+        }
+      }
+
+      console.log(`✅ Loaded ${data.length} leaderboard entries with complete user data`);
 
     } catch (err) {
       console.error('❌ Leaderboard fetch error:', err);
@@ -113,7 +179,7 @@ const LeaderboardPage: FC = () => {
   // Effect to fetch data when period changes
   useEffect(() => {
     fetchLeaderboardData();
-  }, [period, isAuthenticated, currentUserWallet]);
+  }, [period, isAuthenticated, currentUserWallet, userId]);
 
   // Refresh function
   const handleRefresh = () => {
@@ -162,24 +228,6 @@ const LeaderboardPage: FC = () => {
           </div>
           
           <div className="flex items-center gap-3">
-            {/* User Info & Rank Badge */}
-            {isAuthenticated && currentUser && (
-              <div className="bg-blue-900/30 border border-blue-700 rounded-lg px-3 py-2">
-                <div className="flex items-center text-blue-300">
-                  <span className="mr-2">{currentUser.avatar}</span>
-                  <div className="text-sm">
-                    <div className="font-medium">{currentUser.username}</div>
-                    {userRank && (
-                      <div className="flex items-center text-xs">
-                        <Crown size={12} className="mr-1" />
-                        Rank #{userRank}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-            
             <button
               onClick={handleRefresh}
               disabled={loading || refreshing}
@@ -191,31 +239,116 @@ const LeaderboardPage: FC = () => {
           </div>
         </div>
 
-        {/* User Level Info (if authenticated) */}
-        {isAuthenticated && currentUser && (
-          <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-800/30 rounded-lg p-4 mb-6">
-            <div className="flex items-center justify-between">
+        {/* 🚀 ENHANCED: User Level Info using users_unified data */}
+        {isAuthenticated && currentUserData && (
+          <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-800/30 rounded-lg p-6 mb-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* User Basic Info */}
               <div className="flex items-center">
                 <div className="mr-4">
-                  <span className="text-2xl">{currentUser.avatar}</span>
+                  <span className="text-3xl">{currentUserData.avatar}</span>
                 </div>
-                <div>
-                  <h3 className="text-white font-semibold">{currentUser.username}</h3>
+                <div className="flex-1">
+                  <h3 className="text-white font-semibold text-lg">{currentUserData.username}</h3>
                   <div className="flex items-center gap-4 text-sm text-gray-400">
-                    <span>Level {currentUser.level || 1}</span>
+                    <span className="flex items-center">
+                      <Crown size={14} className="mr-1 text-purple-400" />
+                      Level {currentUserData.level}
+                    </span>
                     <span>•</span>
-                    <span>{currentUser.experience || 0} XP</span>
+                    <span className="flex items-center">
+                      <Star size={14} className="mr-1 text-blue-400" />
+                      {currentUserData.experience_points} XP
+                    </span>
                     <span>•</span>
-                    <span>Tier {currentUser.tier || 1}</span>
+                    <span className="flex items-center">
+                      <Medal size={14} className="mr-1 text-yellow-400" />
+                      Tier {currentUserData.tier}
+                    </span>
                   </div>
+                  
+                  {/* Enhanced badges display */}
+                  {currentUserData.badge && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <span className="text-xs bg-blue-600/20 text-blue-300 px-2 py-1 rounded border border-blue-600/30">
+                        {currentUserData.badge}
+                      </span>
+                      {currentUserData.badges_earned.length > 1 && (
+                        <span className="text-xs text-gray-400">
+                          +{currentUserData.badges_earned.length - 1} more
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
+                
+                {/* Current Rank */}
+                {userRank && (
+                  <div className="text-center bg-gray-800/50 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-yellow-400">#{userRank}</div>
+                    <div className="text-xs text-gray-400">Current Rank</div>
+                  </div>
+                )}
               </div>
-              {userRank && (
-                <div className="text-right">
-                  <div className="text-2xl font-bold text-yellow-400">#{userRank}</div>
-                  <div className="text-xs text-gray-400">Current Rank</div>
-                </div>
-              )}
+
+              {/* Level Progress (same as dashboard) */}
+              <div className="space-y-3">
+                {(() => {
+                  const progress = calculateLevelProgress(currentUserData);
+                  return (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-gray-400">
+                          Level {currentUserData.level} Progress
+                        </span>
+                        <span className="text-sm text-purple-400">
+                          {progress.xpToNextLevel > 0 
+                            ? `${progress.xpToNextLevel} XP to Level ${currentUserData.level + 1}`
+                            : "Max Level!"
+                          }
+                        </span>
+                      </div>
+                      
+                      <div className="relative">
+                        <div className="w-full bg-gray-700 rounded-full h-3">
+                          <div 
+                            className="bg-gradient-to-r from-purple-500 via-blue-500 to-purple-600 h-3 rounded-full transition-all duration-700 ease-out relative"
+                            style={{ width: `${Math.max(5, progress.progressPercentage)}%` }}
+                          >
+                            <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-blue-400 rounded-full blur-sm opacity-60"></div>
+                          </div>
+                        </div>
+                        <div className="flex justify-between mt-1 text-xs text-gray-400">
+                          <span>{progress.progressPercentage.toFixed(1)}% Complete</span>
+                          <span>Next Level</span>
+                        </div>
+                      </div>
+
+                      {/* Quick Stats */}
+                      <div className="grid grid-cols-3 gap-3 mt-4">
+                        <div className="text-center">
+                          <div className="text-lg font-bold text-green-400">
+                            {(currentUserData.win_rate * 100).toFixed(1)}%
+                          </div>
+                          <div className="text-xs text-gray-400">Win Rate</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-lg font-bold text-purple-400">
+                            {currentUserData.best_multiplier.toFixed(2)}x
+                          </div>
+                          <div className="text-xs text-gray-400">Best Multi</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-lg font-bold text-orange-400">
+                            {currentUserData.current_win_streak}
+                          </div>
+                          <div className="text-xs text-gray-400">Win Streak</div>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         )}
@@ -308,7 +441,7 @@ const LeaderboardPage: FC = () => {
               <div className="text-center py-16">
                 <div className="animate-spin h-8 w-8 border-2 border-blue-400 border-t-transparent rounded-full mx-auto mb-4"></div>
                 <p className="text-gray-400">Loading RUGGER board...</p>
-                <p className="text-xs text-gray-500 mt-2">Fetching {getPeriodDisplayName(period).toLowerCase()} rankings</p>
+                <p className="text-xs text-gray-500 mt-2">Fetching {getPeriodDisplayName(period).toLowerCase()} rankings from users_unified</p>
               </div>
             )}
             
@@ -360,6 +493,7 @@ const LeaderboardPage: FC = () => {
               <li>Players must have completed games to qualify</li>
               <li>Real-time updates as games are played</li>
               <li>Rankings reset based on selected timeframe</li>
+              <li>Level and XP data synced with dashboard</li>
               <li>Top performers earn exclusive recognition</li>
             </ul>
           </div>
@@ -368,14 +502,14 @@ const LeaderboardPage: FC = () => {
           <div className="bg-gray-900 rounded-lg p-6 border border-gray-800">
             <h2 className="text-xl font-bold text-white mb-4 flex items-center">
               <TrendingUp className="mr-2 text-green-400" size={20} />
-              How Rankings Work
+              Level & XP System
             </h2>
             <ul className="list-disc list-inside text-gray-400 space-y-2 text-sm">
-              <li><strong className="text-white">Daily:</strong> Last 24 hours of performance</li>
-              <li><strong className="text-white">Weekly:</strong> Current week performance</li>
-              <li><strong className="text-white">Monthly:</strong> Current month performance</li>
-              <li><strong className="text-white">All Time:</strong> Total lifetime performance</li>
-              <li>Higher profit percentages rank higher</li>
+              <li><strong className="text-white">XP:</strong> Earned by playing games and achieving wins</li>
+              <li><strong className="text-white">Levels:</strong> Unlock new features and recognition</li>
+              <li><strong className="text-white">Tiers:</strong> Every 10 levels advances your tier</li>
+              <li><strong className="text-white">Badges:</strong> Special achievements and milestones</li>
+              <li>All progression synced across dashboard and leaderboard</li>
             </ul>
           </div>
         </div>

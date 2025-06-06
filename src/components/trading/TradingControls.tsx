@@ -95,24 +95,7 @@ const useWalletBalance = (walletAddress: string) => {
     await updateBalance();
   }, [walletAddress, updateBalance]);
 
-  // Add this BEFORE your useEffect hooks, around line 800
-const balanceUpdateRef = useRef(false);
-const preventBalanceConflicts = useCallback((newBalance: number, source: string) => {
-  if (balanceUpdateRef.current) {
-    console.log(`⚠️ BLOCKED: Balance update from ${source} - update in progress`);
-    return false;
-  }
-  
-  balanceUpdateRef.current = true;
-  console.log(`✅ ALLOWED: Balance update from ${source} - ${newBalance.toFixed(6)} SOL`);
-  
-  setTimeout(() => {
-    balanceUpdateRef.current = false;
-  }, 1000);
-  
-  return true;
-}, []);
-
+ 
   // Polling setup
   useEffect(() => {
     if (walletAddress && walletAddress !== lastWalletRef.current) {
@@ -1093,65 +1076,14 @@ const BettingSection: FC<{
 });
 
 // 🛡️ BALANCE PROTECTION HOOK - Add this right before TradingControls component
+// 🔧 DISABLED: Remove problematic balance protection
 const useBalanceProtection = (custodialBalance: number, userId: string) => {
-  const lastValidBalanceRef = useRef<number>(0);
-  const balanceResetCountRef = useRef<number>(0);
-  const recentTransfersRef = useRef<Array<{timestamp: number, amount: number}>>([]);
-  
-  const validateBalanceUpdate = useCallback((newBalance: number, source: string) => {
-    const now = Date.now();
-    
-    console.log(`🛡️ PROTECTION: Validating balance update from ${source}`, {
-      current: custodialBalance,
-      new: newBalance,
-      lastValid: lastValidBalanceRef.current
-    });
-    
-    if (newBalance === 0 && lastValidBalanceRef.current > 0.001) {
-      const recentTransfers = recentTransfersRef.current.filter(
-        t => now - t.timestamp < 300000 // 5 minutes
-      );
-      
-      if (recentTransfers.length > 0) {
-        balanceResetCountRef.current++;
-        console.warn(`🚨 PROTECTION: Blocking suspicious reset to 0`, {
-          previousBalance: lastValidBalanceRef.current,
-          recentTransfers: recentTransfers.length,
-          resetCount: balanceResetCountRef.current,
-          source
-        });
-        
-        if (balanceResetCountRef.current <= 3) {
-          toast.error(`⚠️ Balance sync issue detected. Use refresh if needed.`, {
-            duration: 5000,
-            id: 'balance-protection'
-          });
-          return false;
-        }
-      }
-    }
-    
-    if (newBalance > 0) {
-      lastValidBalanceRef.current = newBalance;
-      balanceResetCountRef.current = 0;
-    }
-    
-    return true;
-  }, [custodialBalance]);
-  
-  const resetProtection = useCallback(() => {
-    console.log('🔄 PROTECTION: Resetting balance protection');
-    balanceResetCountRef.current = 0;
-    lastValidBalanceRef.current = custodialBalance > 0 ? custodialBalance : 0;
-  }, [custodialBalance]);
-
-  const updateRecentTransfers = useCallback((transfers: Array<{timestamp: number, amount: number}>) => {
-    recentTransfersRef.current = transfers.slice(-5);
-  }, []);
-  
-  return { validateBalanceUpdate, resetProtection, updateRecentTransfers };
+  return { 
+    validateBalanceUpdate: () => true, // Always allow updates
+    resetProtection: () => {}, // No-op
+    updateRecentTransfers: () => {} // No-op
+  };
 };
-
 // 🚀 MAIN COMPONENT - Enhanced with shared state hooks (your existing line)
 
 
@@ -1281,11 +1213,15 @@ const TradingControls: FC<TradingControlsProps> = ({
 
   // Add this after your other hooks like useGameSocket, useCustodialBalance, etc.
   const { executeAutoTransfer, loading: transferLoading, error: transferError } = usePrivyAutoTransfer();
-  const { validateBalanceUpdate, resetProtection, updateRecentTransfers } = useBalanceProtection(custodialBalance, userId || '');
+// ✅ REPLACE WITH SIMPLE NO-OP FUNCTIONS:
+const validateBalanceUpdate = () => true;
+const resetProtection = () => {};
+const updateRecentTransfers = () => {};
 
-  useEffect(() => {
-    updateRecentTransfers(transferAttempts.current);
-  }, [transferAttempts.current.length, updateRecentTransfers]);
+  const updateBalance = useCallback((newBalance: number, source: string) => {
+    console.log(`💰 Balance update from ${source}: ${newBalance.toFixed(3)} SOL`);
+    // Let the shared hook handle the update without interference
+  }, []);
 
   // Memoized calculations
   const gameState = useMemo(() => {
@@ -1368,49 +1304,25 @@ const TradingControls: FC<TradingControlsProps> = ({
 
   // Manual refresh function for all balances
   const refreshAllBalances = useCallback(async () => {
-  debugLog('Protected manual refresh triggered by user');
-  
-  // Reset protection before manual refresh
-  resetProtection();
-  
-  try {
-    toast.loading('Refreshing balances...', { id: 'refresh-all' });
+    console.log('🔄 Manual refresh triggered');
     
-    const refreshPromises = [
-      Promise.race([
+    try {
+      toast.loading('Refreshing...', { id: 'refresh' });
+      
+      // Simple parallel refresh - no timeouts or complex logic
+      await Promise.all([
         refreshEmbeddedBalance(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Embedded balance timeout')), 10000))
-      ]),
-      Promise.race([
         refreshCustodialBalance(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Custodial balance timeout')), 10000))
-      ]),
-      Promise.race([
-        refreshRuggedBalance(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('RUGGED balance timeout')), 10000))
-      ])
-    ];
-
-    const results = await Promise.allSettled(refreshPromises);
-    
-    const successCount = results.filter(r => r.status === 'fulfilled').length;
-    
-    if (successCount === 3) {
-      debugLog('All balances refreshed successfully');
-      toast.success('All balances updated!', { id: 'refresh-all' });
-    } else if (successCount > 0) {
-      debugLog(`Partial refresh: ${successCount}/3 balances updated`);
-      toast.success(`${successCount}/3 balances updated`, { id: 'refresh-all' });
-    } else {
-      debugLog('All balance refreshes failed');
-      toast.error('Balance refresh failed - check connection', { id: 'refresh-all' });
+        refreshRuggedBalance()
+      ]);
+      
+      toast.success('Balances updated!', { id: 'refresh' });
+      
+    } catch (error) {
+      console.error('Refresh error:', error);
+      toast.error('Refresh failed', { id: 'refresh' });
     }
-    
-  } catch (error) {
-    debugLog('Protected refresh all balances error', error);
-    toast.error('Failed to refresh balances', { id: 'refresh-all' });
-  }
-}, [refreshEmbeddedBalance, refreshCustodialBalance, refreshRuggedBalance, debugLog, resetProtection]);
+  }, [refreshEmbeddedBalance, refreshCustodialBalance, refreshRuggedBalance]);
 
 
   // Enhanced auto transfer function
@@ -1716,19 +1628,9 @@ const TradingControls: FC<TradingControlsProps> = ({
           clearActiveBet(); // Use shared state setter
           
           // Multiple update strategies
-setTimeout(async () => {
-  console.log('🔄 Strategy 1: updateCustodialBalance');
-  await updateCustodialBalance();
-}, 100);
-
-setTimeout(async () => {
-  console.log('🔄 Strategy 2: refreshCustodialBalance');
-  await refreshCustodialBalance();
-}, 500);
-
-setTimeout(async () => {
-  console.log('🔄 Strategy 3: force refresh all');
-  await refreshAllBalances();
+          // ✅ SIMPLE single update:
+setTimeout(() => {
+  refreshCustodialBalance();
 }, 1000);
           
         } else {
@@ -1834,63 +1736,38 @@ setTimeout(async () => {
     setSavedAmount(amtStr);
   }, [setSavedAmount]);
 
-  // In your TradingControls component, update the handleQuickTransfer function
-  const handleQuickTransfer = useCallback(async (amount: number) => {
-    if (!userId) {
-      toast.error('User not available for transfer');
-      return;
-    }
-  
-    console.log(`💳 PROTECTED: Initiating transfer of ${amount} SOL for user ${userId}`);
-    
-    transferAttempts.current.push({
-      timestamp: Date.now(),
-      amount: amount
-    });
-    
-    transferAttempts.current = transferAttempts.current.slice(-10);
-    
-    debugLog('Protected quick transfer initiated', { amount, transferAttempts: transferAttempts.current.length });
-    
-    const success = await executeAutoTransfer(
-      userId, 
-      amount,
-      // 🛡️ ENHANCED: Protected callback
-      async () => {
-        console.log('🔄 PROTECTED: Transfer success - triggering protected balance refresh...');
-        
-        // Reset protection to allow the update
-        resetProtection();
-        
-        // Small delay then trigger update
-        setTimeout(() => {
-          console.log('💰 PROTECTED: Forcing balance update after transfer');
-          updateCustodialBalance();
-        }, 1000);
-        
-        // Safety refresh
-        setTimeout(() => {
-          refreshCustodialBalance();
-        }, 2500);
+  // In your TradingControls component, update the handleQuickTransfer functionconst handleQuickTransfer = useCallback(async (amount: number) => {
+    const handleQuickTransfer = useCallback(async (amount: number) => {
+      if (!userId) {
+        toast.error('User not available for transfer');
+        return;
       }
-    );
     
-    if (success.success) {
-      debugLog(`Protected transfer of ${amount} SOL completed successfully`);
-      setBalanceIssueDetected(false);
+      console.log(`💳 Transfer: ${amount} SOL for user ${userId}`);
       
-      if (success.newBalance !== undefined) {
-        toast.success(`✅ Transfer complete! New balance: ${success.newBalance.toFixed(3)} SOL`, {
-          duration: 4000
-        });
-      } else {
-        toast.success(`✅ Transfer of ${amount} SOL completed!`);
+      try {
+        const result = await executeAutoTransfer(
+          userId, 
+          amount,
+          // Simple success callback - no complex logic
+          async () => {
+            console.log('🔄 Transfer complete - refreshing balance');
+            setTimeout(() => refreshCustodialBalance(), 500);
+          }
+        );
+    
+        if (result.success) {
+          console.log(`✅ Transfer successful`);
+          toast.success(`Transfer complete: ${amount} SOL`);
+        } else {
+          console.error(`❌ Transfer failed:`, result.error);
+          toast.error(result.error || 'Transfer failed');
+        }
+      } catch (error) {
+        console.error('Transfer error:', error);
+        toast.error('Transfer failed');
       }
-    } else {
-      debugLog(`Protected transfer of ${amount} SOL failed:`, success.error);
-      toast.error(success.error || 'Transfer failed');
-    }
-  }, [userId, executeAutoTransfer, refreshCustodialBalance, debugLog, setBalanceIssueDetected, resetProtection]);
+    }, [userId, executeAutoTransfer, refreshCustodialBalance]);
   
   const handleEmergencyBalanceSync = useCallback(async () => {
     if (!userId) {
@@ -2002,38 +1879,6 @@ setTimeout(async () => {
   }, [userId, walletAddress, custodialBalance, embeddedWalletBalance, ruggedBalance, isConnected, authenticated, isWalletReady, gameState, activeBet, custodialLastUpdated, debugLog, refreshAllBalances]);
 
   // Automatic issue detection system
-  useEffect(() => {
-    const issueDetectionInterval = setInterval(() => {
-      if (!userId || !authenticated) return;
-      
-      const now = Date.now();
-      const recentTransfers = transferAttempts.current.filter(t => now - t.timestamp < 300000);
-      
-      if (recentTransfers.length > 0) {
-        const totalExpectedIncrease = recentTransfers.reduce((sum, t) => sum + t.amount, 0);
-        const timeSinceLastTransfer = now - Math.max(...recentTransfers.map(t => t.timestamp));
-        
-        if (timeSinceLastTransfer > 120000 && totalExpectedIncrease > 0.001) {
-          debugLog('Potential balance issue detected', {
-            expectedIncrease: totalExpectedIncrease,
-            currentBalance: custodialBalance,
-            recentTransfers: recentTransfers.length,
-            timeSinceLastTransfer
-          });
-          
-          if (!balanceIssueDetected) {
-            setBalanceIssueDetected(true);
-            toast('Transfer delay detected. Use refresh buttons if needed.', {
-              icon: '⚠️',
-              duration: 8000
-            });
-          }
-        }
-      }
-    }, 30000);
-    
-    return () => clearInterval(issueDetectionInterval);
-  }, [userId, authenticated, custodialBalance, balanceIssueDetected, debugLog]);
 
   // User initialization effect
   useEffect(() => {
@@ -2189,6 +2034,27 @@ setTimeout(async () => {
     }
   }, [userId]);
   
+// ✅ REPLACE the entire useEffect with this NULL-SAFE version:
+useEffect(() => {
+  if (userId) {
+    const isValidUUID = userId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    
+    if (!isValidUUID) {
+      console.error(`🚨 Invalid userId format: ${userId} (expected UUID, got ${userId.startsWith('did:privy:') ? 'Privy ID' : 'unknown format'})`);
+      // Try to get the correct UUID
+      if (walletAddress) {
+        UserAPI.getUserOrCreate(walletAddress).then(userData => {
+          // ✅ ADD NULL CHECK HERE:
+          if (userData && userData.id !== userId) {
+            console.log(`🔧 Correcting userId: ${userId} → ${userData.id}`);
+            trackedSetUserId(userData.id);
+          }
+        }).catch(console.error);
+      }
+    }
+  }
+}, [userId, walletAddress, trackedSetUserId]);
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as any).debugUserIdFlow = () => {
@@ -2269,136 +2135,27 @@ setTimeout(async () => {
   
   // 🚀 UPDATED: Enhanced socket listeners with shared state
   // 🔥 CONSOLIDATED: Replace the entire complex useEffect with this
+// 🔥 SIMPLIFIED: Remove conflicting socket listeners
+// ✅ SIMPLIFIED SOCKET LISTENERS:
 useEffect(() => {
   if (!userId || !walletAddress) return;
   
   const socket = (window as any).gameSocket;
   if (!socket) return;
   
-  console.log(`🔌 Setting up CONSOLIDATED socket listeners for: ${userId}`);
-  
-  // 🔥 Rate limiting to prevent rapid balance flipping
-  let lastBalanceUpdate = 0;
-  let balanceUpdateTimeout: NodeJS.Timeout | null = null;
-  
-  // 🔥 Single consolidated balance update handler
-  const debouncedBalanceUpdate = (source: string = 'socket') => {
-    if (balanceUpdateTimeout) clearTimeout(balanceUpdateTimeout);
-    
-    balanceUpdateTimeout = setTimeout(() => {
-      // 🛡️ ADD PROTECTION: Validate before updating
-      const shouldUpdate = validateBalanceUpdate(custodialBalance, source);
-      
-      if (shouldUpdate) {
-        console.log(`💰 CONSOLIDATED: Executing protected balance update from ${source}`);
-        updateCustodialBalance();
-        lastBalanceUpdate = Date.now();
-      } else {
-        console.log(`🚫 CONSOLIDATED: Blocked balance update from ${source}`);
-      }
-    }, 800);
-  };
-  
-  // 🔥 Consolidated balance event handler
-  const handleBalanceEvent = (data: any, eventType: string) => {
-    if (data.userId !== userId) return;
-    
-    // Rate limit rapid updates
-    const now = Date.now();
-    if (now - lastBalanceUpdate < 1000) {
-      console.log(`🚫 CONSOLIDATED: Rate limiting ${eventType} - too rapid`);
-      return;
-    }
-    
-    console.log(`💰 CONSOLIDATED: Balance event ${eventType}:`, data);
-    
-    // Handle notifications (keep your existing code)
-    if (data.updateType === 'deposit_processed' || eventType === 'depositConfirmed') {
-      const amount = data.depositAmount || data.amount;
-      if (amount) {
-        toast.success(`✅ Deposit: +${parseFloat(amount).toFixed(3)} SOL`);
-      }
-    } else if (data.updateType === 'cashout_processed' || eventType === 'custodialCashout') {
-      const amount = data.change || data.amount;
-      if (amount) {
-        toast.success(`💸 Cashout: +${parseFloat(amount).toFixed(3)} SOL`);
-      }
-    }
-    
-    // 🛡️ CHANGE: Pass the event type as source
-    debouncedBalanceUpdate(eventType);
-  };
-  
-  // 🔥 Game state handlers (separate from balance)
-  const handleGameCrash = (data: any) => {
-    console.log(`💥 CONSOLIDATED: Game crashed at ${data.crashMultiplier?.toFixed(2)}x`);
-    
-    if (activeBet) {
-      clearActiveBet();
-      toast.error(`💥 Crashed at ${data.crashMultiplier?.toFixed(2)}x`);
-      
-      // 🛡️ CHANGE: Pass source
-      debouncedBalanceUpdate('game_crash');
+  const handleCustodialBalanceUpdate = (data: any) => {
+    if (data.userId === userId) {
+      console.log(`💰 Balance update for ${userId}:`, data.balance);
+      // Let the shared hook handle it automatically - no interference
     }
   };
   
-  const handleGameEnd = (data: any) => {
-    if (activeBet) {
-      console.log('🎯 CONSOLIDATED: Clearing bet - game ended');
-      clearActiveBet();
-    }
-  };
-  
-  const handleCashout = (data: any) => {
-    if (data.userId !== userId) return;
-    
-    console.log(`💸 CONSOLIDATED: Cashout processed`, data);
-    clearActiveBet();
-    
-    if (data.payout && data.betAmount) {
-      const winAmount = data.payout - data.betAmount;
-      const multiplier = data.cashoutMultiplier || data.multiplier || 0;
-      toast.success(`🎉 Cashed out at ${multiplier.toFixed(2)}x! +${winAmount.toFixed(3)} SOL`);
-    }
-    
-    // 🛡️ CHANGE: Pass source
-    debouncedBalanceUpdate('cashout');
-  };
-  
-  // 🔥 Register ONLY essential events
-  const balanceEvents = [
-    'custodialBalanceUpdate',
-    'depositConfirmed', 
-    'balanceSync',
-    'embeddedTransferConfirmed'
-  ];
-  
-  const gameEvents = [
-    { name: 'gameCrashed', handler: handleGameCrash },
-    { name: 'gameEnded', handler: handleGameEnd },
-    { name: 'gameWaiting', handler: handleGameEnd },
-    { name: 'custodialCashout', handler: handleCashout }
-  ];
-  
-  // Register balance events with consolidated handler
-  balanceEvents.forEach(eventName => {
-    socket.on(eventName, (data: any) => handleBalanceEvent(data, eventName));
-  });
-  
-  // Register game events with specific handlers
-  gameEvents.forEach(({ name, handler }) => {
-    socket.on(name, handler);
-  });
+  socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
   
   return () => {
-    console.log(`🔌 CONSOLIDATED: Cleaning up socket listeners`);
-    
-    if (balanceUpdateTimeout) clearTimeout(balanceUpdateTimeout);
-    
-    balanceEvents.forEach(eventName => socket.off(eventName));
-    gameEvents.forEach(({ name }) => socket.off(name));
+    socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
   };
-}, [userId, walletAddress, activeBet, clearActiveBet, updateCustodialBalance]); // Simplified dependencies
+}, [userId, walletAddress]);
   // Auto cashout effect
   useEffect(() => {
     if (

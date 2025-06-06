@@ -1,4 +1,4 @@
-// src/components/layout/Navbar.tsx - Updated with avatar and level progression
+// src/components/layout/Navbar.tsx - Updated with Settings in main navigation
 import { FC, useState, useEffect, useRef, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
@@ -161,9 +161,9 @@ const Navbar: FC = () => {
 
   // Calculate experience progress for current level
   const getExperienceProgress = () => {
-    // Use experience from UserContext if available, fallback to currentUser properties
-    const currentXP = experience || currentUser?.experience || 0;
-    const currentLevel = userLevel || currentUser?.level || 1;
+    // Use real data from currentUser, checking available fields
+    const currentLevel = currentUser?.level || 1;
+    const currentXP = (currentUser as any)?.experience_points || currentUser?.experience || 0;
     
     // Calculate experience needed for next level (100 XP per level)
     const experienceNeeded = 100;
@@ -178,6 +178,21 @@ const Navbar: FC = () => {
   };
 
   const xpData = getExperienceProgress();
+  const displayLevel = currentUser?.level || 1;
+
+  // Debug logging in development
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development' && currentUser) {
+      console.log('🔍 Navbar User Data:', {
+        level: currentUser.level,
+        experience: (currentUser as any)?.experience,
+        experience_points: (currentUser as any)?.experience_points,
+        username: currentUser.username,
+        avatar: currentUser.avatar,
+        allFields: Object.keys(currentUser)
+      });
+    }
+  }, [currentUser]);
 
   // Dropdown component that renders using portal
   const DropdownMenu = () => {
@@ -279,6 +294,17 @@ const Navbar: FC = () => {
               </Link>
             </div>
 
+            {/* Account Actions */}
+            <div className="py-1">
+              <button
+                onClick={handleSetUsername}
+                className="w-full text-left px-4 py-2 text-sm hover:bg-gray-700 flex items-center transition-colors"
+              >
+                <Edit size={14} className="mr-2" />
+                Change Username
+              </button>
+            </div>
+
             {/* Logout */}
             <div className="border-t border-gray-700 py-1">
               <button
@@ -336,6 +362,7 @@ const Navbar: FC = () => {
               />
             </Link>
 
+            {/* Main Navigation - Dashboard and RUGGER Board only */}
             <nav className="hidden md:flex items-center">
               <Link href="/dashboard" className="px-3 py-1 hover:text-gray-300 text-sm transition-colors">
                 Dashboard
@@ -359,10 +386,10 @@ const Navbar: FC = () => {
                   </div>
 
                   {/* Level Display */}
-                  {userLevel && (
+                  {displayLevel && displayLevel > 1 && (
                     <div className="flex items-center bg-gray-800 rounded-full px-2 py-1">
                       <span className="text-xs text-gray-400 mr-1">Lv.</span>
-                      <span className="text-sm font-medium text-yellow-400">{userLevel}</span>
+                      <span className="text-sm font-medium text-yellow-400">{displayLevel}</span>
                     </div>
                   )}
 
@@ -380,23 +407,53 @@ const Navbar: FC = () => {
                   </div>
                 </div>
 
-                {/* User Menu Button */}
+                {/* User Menu Button - Enhanced for mobile */}
                 <button
                   ref={userButtonRef}
                   className="flex items-center bg-gray-800 hover:bg-gray-700 rounded-md px-2 py-1 transition-colors"
                   onClick={() => setShowUserMenu(!showUserMenu)}
                   aria-label="User menu"
                 >
-                  <User size={18} className="mr-1" />
-                  <div className="hidden md:block text-left mr-1">
-                    <div className="text-xs font-medium">{getUserDisplayName()}</div>
-                    {isWalletConnected && (
-                      <div className="text-xs text-gray-400">
-                        {isLoadingBalance ? 'Loading...' : `${walletBalance.toFixed(3)} SOL`}
+                  {/* Mobile: Show avatar, name, level, XP */}
+                  <div className="md:hidden flex items-center space-x-2">
+                    <span className="text-lg">{currentUser?.avatar || '👤'}</span>
+                    <div className="flex flex-col">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm font-medium">{getUserDisplayName()}</span>
+                        {displayLevel && displayLevel > 1 && (
+                          <span className="text-xs bg-gray-700 text-yellow-400 px-1.5 py-0.5 rounded-full">
+                            Lv.{displayLevel}
+                          </span>
+                        )}
                       </div>
-                    )}
+                      <div className="flex items-center space-x-2">
+                        <div className="h-1 w-16 bg-gray-700 rounded-full overflow-hidden">
+                          <div 
+                            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500" 
+                            style={{ width: `${xpData.progress}%` }}
+                          ></div>
+                        </div>
+                        <span className="text-xs text-gray-400">
+                          {xpData.current}/{xpData.needed}
+                        </span>
+                      </div>
+                    </div>
+                    <ChevronDown size={14} className={`transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
                   </div>
-                  <ChevronDown size={14} className={`transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
+
+                  {/* Desktop: Compact view */}
+                  <div className="hidden md:flex items-center">
+                    <User size={18} className="mr-1" />
+                    <div className="text-left mr-1">
+                      <div className="text-xs font-medium">{getUserDisplayName()}</div>
+                      {isWalletConnected && (
+                        <div className="text-xs text-gray-400">
+                          {isLoadingBalance ? 'Loading...' : `${walletBalance.toFixed(3)} SOL`}
+                        </div>
+                      )}
+                    </div>
+                    <ChevronDown size={14} className={`transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
+                  </div>
                 </button>
               </>
             ) : (
@@ -430,36 +487,7 @@ const Navbar: FC = () => {
         {showMobileMenu && (
           <div className="md:hidden bg-gray-800 mt-3 rounded-md p-2">
             <nav className="flex flex-col">
-              {/* Mobile User Stats */}
-              {authenticated && currentUser && (
-                <div className="px-4 py-2 border-b border-gray-700 mb-2">
-                  <div className="flex items-center space-x-3">
-                    <span className="text-lg">{currentUser.avatar || '👤'}</span>
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-2 mb-1">
-                        <span className="text-sm font-medium">{getUserDisplayName()}</span>
-                        {userLevel && (
-                          <span className="text-xs bg-gray-700 text-yellow-400 px-2 py-0.5 rounded-full">
-                            Lv.{userLevel}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="h-1.5 w-20 bg-gray-700 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500" 
-                            style={{ width: `${xpData.progress}%` }}
-                          ></div>
-                        </div>
-                        <span className="text-xs text-gray-400">
-                          {xpData.current}/{xpData.needed}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              
+              {/* Mobile Navigation Links */}
               <Link 
                 href="/dashboard" 
                 className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm transition-colors"
@@ -474,15 +502,6 @@ const Navbar: FC = () => {
               >
                 RUGGER Board
               </Link>
-              {authenticated && (
-                <Link 
-                  href="/settings" 
-                  className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm transition-colors"
-                  onClick={() => setShowMobileMenu(false)}
-                >
-                  Settings
-                </Link>
-              )}
             </nav>
           </div>
         )}

@@ -304,6 +304,16 @@ const Dashboard: FC = () => {
     profitLoss: 0
   });
 
+  // Add these with your other useState declarations:
+const [levelData, setLevelData] = useState({
+  level: 1,
+  experience: 0,
+  experiencePoints: 0,
+  experienceToNextLevel: 100,
+  progressPercentage: 0
+});
+const [isLoadingLevel, setIsLoadingLevel] = useState(false);
+
   const [enhancedUserStats, setEnhancedUserStats] = useState({
     winRate: 0,
     bestMultiplier: 0,
@@ -591,6 +601,67 @@ useEffect(() => {
 
   fetchUserStats();
 }, [userId, walletAddress]);
+const fetchLevelData = useCallback(async () => {
+  if (!userId) {
+    setLevelData({
+      level: 1,
+      experience: 0,
+      experiencePoints: 0,
+      experienceToNextLevel: 100,
+      progressPercentage: 0
+    });
+    return;
+  }
+
+  setIsLoadingLevel(true);
+  try {
+    console.log(`🎯 Dashboard: Fetching level data for user ${userId}`);
+    
+    const { data: user, error } = await supabase
+      .from('users_unified')
+      .select('level, experience, experience_points, badges_earned, achievements')
+      .eq('id', userId)
+      .single();
+
+    if (error || !user) {
+      console.error('❌ Failed to fetch level data:', error);
+      return;
+    }
+
+    const currentLevel = user.level || 1;
+    const currentXP = user.experience_points || 0;
+    
+    // Calculate XP needed for next level
+    const baseXP = 100;
+    const xpForNextLevel = baseXP * Math.pow(1.5, currentLevel - 1);
+    const xpForCurrentLevel = currentLevel > 1 ? baseXP * Math.pow(1.5, currentLevel - 2) : 0;
+    const xpNeededThisLevel = xpForNextLevel - xpForCurrentLevel;
+    const xpProgressThisLevel = currentXP - xpForCurrentLevel;
+    
+    const progressPercentage = Math.min(100, Math.max(0, (xpProgressThisLevel / xpNeededThisLevel) * 100));
+
+    setLevelData({
+      level: currentLevel,
+      experience: user.experience || 0,
+      experiencePoints: currentXP,
+      experienceToNextLevel: Math.ceil(xpForNextLevel - currentXP),
+      progressPercentage: progressPercentage
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching level data:', error);
+  } finally {
+    setIsLoadingLevel(false);
+  }
+}, [userId, supabase]);
+
+// ADD the useEffect RIGHT AFTER fetchLevelData:
+useEffect(() => {
+  if (userId) {
+    fetchLevelData();
+  }
+}, [userId, fetchLevelData]);
+
 
   // 🚀 OPTIMIZED: Refresh data function with separate manual loading state
   const refreshData = useCallback(async () => {
@@ -608,13 +679,20 @@ useEffect(() => {
     }, 10000);
     
     try {
-      // Show loading toast
       toast.loading('Refreshing dashboard data...', { id: 'dashboard-refresh' });
       
-      // Refresh custodial balance using the enhanced method
+      // Refresh custodial balance
       await refreshCustodialBalance();
       
-      // Refresh embedded wallet balance
+      // Refresh level data
+      try {
+        await fetchLevelData();
+        console.log('🎯 Dashboard: Level data refreshed');
+      } catch (error) {
+        console.error('❌ Dashboard: Failed to refresh level data:', error);
+      }
+      
+      // Refresh wallet balance
       try {
         const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
         const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
@@ -629,55 +707,47 @@ useEffect(() => {
           if (publicKey) {
             const lamports = await connection.getBalance(publicKey);
             setWalletBalance(lamports / LAMPORTS_PER_SOL);
-            console.log(`💼 Dashboard: Embedded wallet balance updated: ${(lamports / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
           }
         }
       } catch (error) {
         console.error('❌ Dashboard: Failed to refresh embedded wallet balance:', error);
       }
+
+          // Refresh user stats
+    try {
+      const userStats = await UserAPI.getUserStats(userId);
       
-      // 🚀 FIX: Refresh user stats using UserAPI instead of manual calculation
-      try {
-        console.log('📊 Dashboard: Refreshing stats from users_unified...');
-        const userStats = await UserAPI.getUserStats(userId);
+      if (userStats) {
+        setUserStats({
+          totalWagered: userStats.total_wagered,
+          totalPayouts: userStats.total_won,
+          gamesPlayed: userStats.games_played,
+          profitLoss: userStats.net_profit
+        });
         
-        if (userStats) {
-          setUserStats({
-            totalWagered: userStats.total_wagered,
-            totalPayouts: userStats.total_won,
-            gamesPlayed: userStats.games_played,
-            profitLoss: userStats.net_profit
-          });
-          
-          // 🚀 NEW: Also refresh enhanced stats
-          setEnhancedUserStats({
-            winRate: userStats.win_rate || 0,
-            bestMultiplier: userStats.best_multiplier || 0,
-            currentWinStreak: userStats.current_win_streak || 0,
-            bestWinStreak: userStats.best_win_streak || 0
-          });
-          
-          console.log(`📊 Dashboard: Stats refreshed from users_unified for ${userId}`);
-        } else {
-          console.log('⚠️ Dashboard: No stats found during refresh');
-        }
-      } catch (error) {
-        // 🚀 FIX: Properly handle unknown error type
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error('❌ Dashboard: Failed to refresh stats from users_unified:', errorMessage);
+        setEnhancedUserStats({
+          winRate: userStats.win_rate || 0,
+          bestMultiplier: userStats.best_multiplier || 0,
+          currentWinStreak: userStats.current_win_streak || 0,
+          bestWinStreak: userStats.best_win_streak || 0
+        });
       }
-      
-      // Success toast
-      toast.success('Dashboard data refreshed!', { id: 'dashboard-refresh' });
-      
     } catch (error) {
-      console.error('❌ Dashboard: Refresh failed:', error);
-      toast.error('Failed to refresh dashboard data', { id: 'dashboard-refresh' });
-    } finally {
-      clearTimeout(refreshTimeout);
-      setIsManualRefreshing(false);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('❌ Dashboard: Failed to refresh stats:', errorMessage);
     }
-  }, [isValidWallet, userId, walletAddress, refreshCustodialBalance]);
+    
+    toast.success('Dashboard data refreshed!', { id: 'dashboard-refresh' });
+    
+  } catch (error) {
+    console.error('❌ Dashboard: Refresh failed:', error);
+    toast.error('Failed to refresh dashboard data', { id: 'dashboard-refresh' });
+  } finally {
+    clearTimeout(refreshTimeout);
+    setIsManualRefreshing(false);
+  }
+}, [isValidWallet, userId, walletAddress, refreshCustodialBalance, fetchLevelData]);
+
 
   // 🚀 OPTIMIZED: Real-time socket listeners WITHOUT automatic stats refresh
   useEffect(() => {
@@ -798,38 +868,81 @@ useEffect(() => {
           )}
         </div>
 
-        {/* User Level and Experience */}
-        {isValidWallet && currentUser && (
-          <div className="bg-gray-900 rounded-lg p-6 mb-8">
-            <h2 className="text-xl font-bold text-white mb-4">Player Profile</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div>
-                <div className="text-gray-400 mb-1">Level</div>
-                <div className="text-2xl font-bold text-purple-400">
-                  {userLevel || 1}
-                </div>
+   {/* Enhanced Player Profile with Real Level System */}
+{isValidWallet && userId && (
+  <div className="bg-gray-900 rounded-lg p-6 mb-8">
+    <h2 className="text-xl font-bold text-white mb-4">Player Profile</h2>
+    
+    {isLoadingLevel ? (
+      <div className="animate-pulse space-y-4">
+        <div className="h-6 bg-gray-700 rounded w-32"></div>
+        <div className="h-4 bg-gray-700 rounded w-full"></div>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="h-16 bg-gray-700 rounded"></div>
+          <div className="h-16 bg-gray-700 rounded"></div>
+          <div className="h-16 bg-gray-700 rounded"></div>
+        </div>
+      </div>
+    ) : (
+      <div className="space-y-6">
+        {/* Level and XP Section */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center space-x-4">
+              <div className="bg-purple-600 rounded-full w-12 h-12 flex items-center justify-center">
+                <span className="text-white font-bold text-lg">{levelData.level}</span>
               </div>
               <div>
-                <div className="text-gray-400 mb-1">Experience</div>
-                <div className="flex items-center">
-                  <div className="w-32 h-3 bg-gray-800 rounded-full mr-3">
-                    <div 
-                      className="h-full bg-green-500 rounded-full transition-all duration-300" 
-                      style={{ width: `${Math.min(experience || 0, 100)}%` }}
-                    ></div>
-                  </div>
-                  <span className="text-sm text-white">{experience || 0}%</span>
-                </div>
-              </div>
-              <div>
-                <div className="text-gray-400 mb-1">Crates</div>
-                <div className="text-2xl font-bold text-yellow-400">
-                  {crates || 0} 🎁
-                </div>
+                <h3 className="text-white font-bold text-lg">Level {levelData.level}</h3>
+                <p className="text-gray-400 text-sm">{levelData.experiencePoints} Experience Points</p>
               </div>
             </div>
+            <div className="text-right">
+              <p className="text-purple-400 font-semibold">
+                {levelData.experienceToNextLevel > 0 
+                  ? `${levelData.experienceToNextLevel} XP to Level ${levelData.level + 1}`
+                  : "Max Level Reached!"
+                }
+              </p>
+            </div>
           </div>
-        )}
+          
+          {/* Enhanced Progress Bar */}
+          <div className="relative">
+            <div className="w-full bg-gray-700 rounded-full h-3">
+              <div 
+                className="bg-gradient-to-r from-purple-500 via-blue-500 to-purple-600 h-3 rounded-full transition-all duration-700 ease-out relative"
+                style={{ width: `${Math.max(5, levelData.progressPercentage)}%` }}
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-blue-400 rounded-full blur-sm opacity-60"></div>
+              </div>
+            </div>
+            <div className="flex justify-between mt-1 text-xs text-gray-400">
+              <span>{levelData.progressPercentage.toFixed(1)}% Complete</span>
+              <span>Level {levelData.level + 1}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-gray-800 rounded-lg p-4 text-center">
+            <div className="text-2xl font-bold text-purple-400">{levelData.level}</div>
+            <div className="text-gray-400 text-sm">Current Level</div>
+          </div>
+          <div className="bg-gray-800 rounded-lg p-4 text-center">
+            <div className="text-2xl font-bold text-blue-400">{levelData.experiencePoints}</div>
+            <div className="text-gray-400 text-sm">Total XP</div>
+          </div>
+          <div className="bg-gray-800 rounded-lg p-4 text-center">
+            <div className="text-2xl font-bold text-green-400">{levelData.experienceToNextLevel}</div>
+            <div className="text-gray-400 text-sm">XP to Next Level</div>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+)}
 
         {/* Wallet Status */}
         <div className="bg-gray-900 rounded-lg p-6 mb-8">

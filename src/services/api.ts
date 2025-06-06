@@ -672,23 +672,115 @@ export class UserAPI {
           games:game_id (
             game_number,
             crash_multiplier
+          ),
+          users_unified:user_id (
+            username,
+            avatar,
+            level,
+            badge
           )
         `)
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
         .limit(limit);
-
+  
       if (error) {
         logger.error('Error fetching user bet history:', error);
         return [];
       }
-
+  
       return data || [];
     } catch (error) {
       logger.error('Error fetching user bet history:', error);
       return [];
     }
   }
+
+  // If you need to get betting data for leaderboards/rankings
+static async getBetHistoryWithUsers(limit: number = 100): Promise<any[]> {
+  try {
+    const { data, error } = await supabase
+      .from('player_bets')
+      .select(`
+        *,
+        users_unified:user_id (
+          id,
+          username,
+          avatar,
+          level,
+          badge
+        ),
+        games:game_id (
+          game_number,
+          crash_multiplier,
+          created_at
+        )
+      `)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      logger.error('Error fetching bet history with users:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (error) {
+    logger.error('Error fetching bet history with users:', error);
+    return [];
+  }
+}
+
+// For leaderboard calculations
+static async getLeaderboardData(timeframe: 'daily' | 'weekly' | 'monthly' | 'all' = 'all'): Promise<any[]> {
+  try {
+    let dateFilter = '';
+    const now = new Date();
+    
+    switch (timeframe) {
+      case 'daily':
+        dateFilter = new Date(now.setHours(0, 0, 0, 0)).toISOString();
+        break;
+      case 'weekly':
+        const weekStart = new Date(now.setDate(now.getDate() - now.getDay()));
+        dateFilter = weekStart.toISOString();
+        break;
+      case 'monthly':
+        dateFilter = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+        break;
+    }
+
+    let query = supabase
+      .from('player_bets')
+      .select(`
+        user_id,
+        bet_amount,
+        profit_loss,
+        users_unified:user_id (
+          username,
+          avatar,
+          level,
+          badge
+        )
+      `);
+
+    if (dateFilter) {
+      query = query.gte('created_at', dateFilter);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      logger.error('Error fetching leaderboard data:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (error) {
+    logger.error('Error fetching leaderboard data:', error);
+    return [];
+  }
+}
 
   /**
    * Find user by any wallet address field

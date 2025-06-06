@@ -2,24 +2,12 @@
 'use client';
 
 import React, { createContext, useState, useEffect, ReactNode, useContext } from 'react';
-import { usePrivy } from '@privy-io/react-auth';
+import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
+import { UserAPI, UserData } from '../services/api';
 
-// Define User type directly here to avoid import conflicts
-interface User {
-  id: string;
-  username: string;
-  email: string;
-  avatar: string;
-  level: number;
-  experience: number;
-  balance: number;
-  tier: number;
-  joinedAt: string;
-  badge?: string; // Added optional badge property
-}
-
+// Use the UserData interface from your API that matches the database schema
 interface UserContextType {
-  currentUser: User | null;
+  currentUser: UserData | null;
   isAuthenticated: boolean;
   login: (username: string, password: string) => Promise<boolean>;
   logout: () => void;
@@ -30,6 +18,8 @@ interface UserContextType {
   isLoggedIn: boolean;
   setUsername: (username: string) => void;
   hasCustomUsername: boolean;
+  loading: boolean;
+  refreshUser: () => Promise<void>;
 }
 
 const defaultContext: UserContextType = {
@@ -38,12 +28,14 @@ const defaultContext: UserContextType = {
   login: async () => false,
   logout: () => {},
   register: async () => false,
-  userLevel: 2,
-  experience: 67,
-  crates: 4,
+  userLevel: 1,
+  experience: 0,
+  crates: 0,
   isLoggedIn: false,
   setUsername: () => {},
   hasCustomUsername: false,
+  loading: false,
+  refreshUser: async () => {},
 };
 
 // Create and export the context
@@ -59,121 +51,117 @@ export const useUser = () => {
 };
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<UserData | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasCustomUsername, setHasCustomUsername] = useState(false);
-  const userLevel = 2;
-  const experience = 67;
-  const crates = 4;
+  const [loading, setLoading] = useState(false);
   
   const { authenticated, user } = usePrivy();
+  const { wallets } = useSolanaWallets();
+  
+  // Get wallet address
+  const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
+  const walletAddress = embeddedWallet?.address || '';
   
   // Update isLoggedIn based on Privy authentication state
   const isLoggedIn = authenticated;
   
+  // Get real user level and experience from database
+  const userLevel = currentUser?.level || 1;
+  const experience = currentUser?.experience_points || 0;
+  const crates = 0; // Remove crates system or implement if needed
+  
+  // Function to fetch user data from database
+  const fetchUserData = async (walletAddr: string) => {
+    if (!walletAddr) return null;
+    
+    try {
+      setLoading(true);
+      console.log('🔄 Fetching user data from database for wallet:', walletAddr);
+      
+      // Use your UserAPI to get or create user
+      const userData = await UserAPI.getUserOrCreate(walletAddr);
+      
+      if (userData) {
+        console.log('✅ Fetched user data:', userData);
+        setCurrentUser(userData);
+        setHasCustomUsername(!!userData.username && userData.username !== `user_${userData.id.slice(-8)}`);
+        return userData;
+      }
+    } catch (error) {
+      console.error('❌ Error fetching user data:', error);
+    } finally {
+      setLoading(false);
+    }
+    
+    return null;
+  };
+  
+  // Function to refresh user data
+  const refreshUser = async () => {
+    if (walletAddress) {
+      await fetchUserData(walletAddress);
+    }
+  };
+  
   // Initialize user when Privy authentication changes
   useEffect(() => {
-    if (authenticated && user) {
-      // Try to get saved username
-      const savedUsername = localStorage.getItem(`username_${user.id}`);
-      
-      const defaultUsername = user.email?.address?.split('@')[0] || `user${Date.now().toString().slice(-4)}`;
-      
-      const demoUser: User = {
-        id: user.id || 'demo-user',
-        username: savedUsername || defaultUsername,
-        email: user.email?.address || 'demo@example.com',
-        avatar: '👑',
-        level: 2,
-        experience: 67,
-        balance: 0,
-        tier: 2,
-        joinedAt: new Date().toISOString(),
-        badge: 'verified', // Added badge property - you can set logic for different badge types
-      };
-      
-      setCurrentUser(demoUser);
+    if (authenticated && user && walletAddress) {
+      console.log('🔐 User authenticated, fetching data for wallet:', walletAddress);
+      fetchUserData(walletAddress);
       setIsAuthenticated(true);
-      setHasCustomUsername(!!savedUsername);
     } else {
       // Reset when logged out
+      console.log('🔓 User logged out, clearing data');
       setCurrentUser(null);
       setIsAuthenticated(false);
       setHasCustomUsername(false);
     }
-  }, [authenticated, user]);
+  }, [authenticated, user, walletAddress]);
   
   // Function to set username for users
-  const setUsername = (username: string) => {
-    if (!authenticated || !user) return;
+  const setUsername = async (username: string) => {
+    if (!authenticated || !currentUser) return;
     
-    // Save username to localStorage
-    localStorage.setItem(`username_${user.id}`, username);
-    
-    // Update current user with new username
-    if (currentUser) {
-      const updatedUser = {
-        ...currentUser,
-        username
-      };
-      setCurrentUser(updatedUser);
+    try {
+      console.log('📝 Updating username to:', username);
+      
+      // Update user in database
+      const success = await UserAPI.updateUser(currentUser.id, {
+        username,
+        updated_at: new Date().toISOString()
+      });
+      
+      if (success) {
+        // Update local state
+        const updatedUser = {
+          ...currentUser,
+          username
+        };
+        setCurrentUser(updatedUser);
+        setHasCustomUsername(true);
+        console.log('✅ Username updated successfully');
+      } else {
+        console.error('❌ Failed to update username in database');
+      }
+    } catch (error) {
+      console.error('❌ Error updating username:', error);
     }
-    
-    setHasCustomUsername(true);
   };
 
   const login = async (username: string, password: string): Promise<boolean> => {
-    // Mock login functionality - this is handled by Privy
-    if (username && password) {
-      const user: User = {
-        id: 'user-1',
-        username,
-        email: `${username}@example.com`,
-        avatar: '👑',
-        level: 2,
-        experience: 67,
-        balance: 0,
-        tier: 2,
-        joinedAt: new Date().toISOString(),
-        badge: 'verified', // Added badge property
-      };
-      
-      setCurrentUser(user);
-      setIsAuthenticated(true);
-      
-      return true;
-    }
-    
+    // This is handled by Privy, but keeping for interface compatibility
     return false;
   };
 
   const logout = () => {
     setCurrentUser(null);
     setIsAuthenticated(false);
+    setHasCustomUsername(false);
   };
 
   const register = async (username: string, email: string, password: string): Promise<boolean> => {
-    // Mock registration
-    if (username && email && password) {
-      const user: User = {
-        id: `user-${Date.now()}`,
-        username,
-        email,
-        avatar: '👤',
-        level: 1,
-        experience: 0,
-        balance: 0,
-        tier: 1,
-        joinedAt: new Date().toISOString(),
-        badge: 'new', // Added badge property - new users get 'new' badge
-      };
-      
-      setCurrentUser(user);
-      setIsAuthenticated(true);
-      
-      return true;
-    }
-    
+    // This is handled by Privy, but keeping for interface compatibility
     return false;
   };
 
@@ -190,6 +178,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       isLoggedIn,
       setUsername,
       hasCustomUsername,
+      loading,
+      refreshUser,
     }}>
       {children}
     </UserContext.Provider>

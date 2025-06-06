@@ -161,9 +161,9 @@ const Navbar: FC = () => {
 
   // Calculate experience progress for current level
   const getExperienceProgress = () => {
-    // Use real data from currentUser, checking available fields
+    // Use real data from currentUser (now comes from database)
     const currentLevel = currentUser?.level || 1;
-    const currentXP = (currentUser as any)?.experience_points || currentUser?.experience || 0;
+    const currentXP = currentUser?.experience_points || 0;
     
     // Calculate experience needed for next level (100 XP per level)
     const experienceNeeded = 100;
@@ -183,13 +183,12 @@ const Navbar: FC = () => {
   // Debug logging in development
   useEffect(() => {
     if (process.env.NODE_ENV === 'development' && currentUser) {
-      console.log('🔍 Navbar User Data:', {
+      console.log('🔍 Navbar User Data (Real from DB):', {
         level: currentUser.level,
-        experience: (currentUser as any)?.experience,
-        experience_points: (currentUser as any)?.experience_points,
+        experience_points: currentUser.experience_points,
         username: currentUser.username,
         avatar: currentUser.avatar,
-        allFields: Object.keys(currentUser)
+        id: currentUser.id
       });
     }
   }, [currentUser]);

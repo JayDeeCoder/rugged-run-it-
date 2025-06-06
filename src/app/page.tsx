@@ -1,4 +1,4 @@
-// src/app/page.tsx - Fixed version with leaderboard visibility issues resolved
+// src/app/page.tsx - Fixed version with LeaderboardContainer
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -11,7 +11,7 @@ import useWindowSize from '../hooks/useWindowSize';
 
 // Dynamically import components that might cause issues on SSR
 const ChartContainer = dynamic(() => import('../components/trading/ChartContainer'), { ssr: false });
-const Leaderboard = dynamic(() => import('../components/leaderboard/Leaderboard'), { ssr: false });
+const LeaderboardContainer = dynamic(() => import('../components/leaderboard/LeaderboardContainer'), { ssr: false });
 
 export default function Home() {
   const [isLeaderboardVisible, setIsLeaderboardVisible] = useState(false);
@@ -177,7 +177,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* FIXED: Leaderboard Section - Always show on mobile/tablet, conditional on desktop */}
+            {/* FIXED: Leaderboard Section using LeaderboardContainer */}
             <div className={`
               w-full
               ${isExtraSmall ? 'mt-2 mb-2 px-1' : 
@@ -191,13 +191,18 @@ export default function Home() {
               }
             `}>
               <div className="w-full">
-                <Leaderboard />
+                <LeaderboardContainer 
+                  period="daily"
+                  limit={10}
+                  showHeader={true}
+                  showRefresh={false}
+                />
               </div>
             </div>
             
             {/* Debug info - remove this in production */}
             {process.env.NODE_ENV === 'development' && (
-              <div className="fixed bottom-4 right-4 bg-black/80 text-white p-2 rounded text-xs">
+              <div className="fixed bottom-4 right-4 bg-black/80 text-white p-2 rounded text-xs z-50">
                 <div>Width: {width}px</div>
                 <div>Mounted: {isMounted ? 'Yes' : 'No'}</div>
                 <div>Mobile: {isMobile ? 'Yes' : 'No'}</div>

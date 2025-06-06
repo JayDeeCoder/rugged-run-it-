@@ -1,4 +1,4 @@
-// src/services/api.ts
+// src/services/api.ts - UPDATED FOR USERS_UNIFIED TABLE
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { io, Socket } from 'socket.io-client';
 import logger from '../utils/logger';
@@ -16,7 +16,67 @@ export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseKey);
 // Game server WebSocket connection
 const GAME_SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL || '';
 
-// Types
+// UPDATED TYPES FOR USERS_UNIFIED TABLE
+export interface UserData {
+  id: string;
+  username: string;
+  wallet_address: string;
+  external_wallet_address: string;
+  privy_wallet_address?: string;
+  custodial_balance: number;
+  privy_balance: number;
+  embedded_balance: number;
+  total_balance: number; // Generated column from database
+  total_deposited: number;
+  custodial_total_deposited: number;
+  avatar?: string;
+  level: number;
+  experience: number;
+  experience_points: number;
+  badge?: string;
+  badges_earned: string[];
+  achievements: string[];
+  total_games_played: number;
+  total_bets_placed: number;
+  games_won: number;
+  games_lost: number;
+  total_wagered: number;
+  total_won: number;
+  total_lost: number;
+  net_profit: number;
+  win_rate: number;
+  current_win_streak: number;
+  best_win_streak: number;
+  largest_win: number;
+  largest_loss: number;
+  best_multiplier: number;
+  daily_profit: number;
+  weekly_profit: number;
+  monthly_profit: number;
+  risk_score: number;
+  behavior_pattern: string;
+  preferred_bet_range: string;
+  is_connected: boolean;
+  created_at: string;
+  updated_at: string;
+  last_active?: string;
+}
+
+export interface CustodialBalanceData {
+  userId: string;
+  custodialBalance: number;
+  privyBalance: number;
+  embeddedBalance: number;
+  totalBalance: number; // From database calculation
+  totalDeposited: number;
+  canBet: boolean;
+  canWithdraw: boolean;
+  walletAddress: string;
+  lastUpdated: string;
+  source: string;
+}
+
+// Keep existing interfaces but update as needed
 export interface GameState {
   gameId: string;
   gameNumber: number;
@@ -41,78 +101,35 @@ export interface LeaderboardEntry {
   badge?: string;
 }
 
-export interface ChartData {
-  timestamp: string;
-  open_price: number;
-  high_price: number;
-  low_price: number;
-  close_price: number;
-  volume: number;
-}
-
 export interface UserStats {
   total_wagered: number;
   total_won: number;
+  total_lost: number;
+  net_profit: number;
   games_played: number;
-  best_multiplier: number;
+  games_won: number;
+  games_lost: number;
   win_rate: number;
-}
-
-export interface UserData {
-  id: string;
-  wallet_address: string;
-  username: string;
-  avatar?: string;
-  level?: number;
-  experience?: number;
-  badge?: string;
-  created_at: string;
-  updated_at: string;
+  best_multiplier: number;
+  largest_win: number;
+  largest_loss: number;
+  current_win_streak: number;
+  best_win_streak: number;
 }
 
 export interface BetEntry {
   id: string;
   game_id: string;
+  user_id: string;
   wallet_address: string;
   bet_amount: number;
   cashout_multiplier?: number;
   profit_loss?: number;
   created_at: string;
+  status: string;
 }
 
-// Type for partial bet data from Supabase queries
-export interface BetStatsData {
-  bet_amount: number;
-  profit_loss?: number;
-  cashout_multiplier?: number;
-}
-
-export interface ChatMessage {
-  id: string;
-  wallet_address: string;
-  username: string;
-  message: string;
-  message_type: 'user' | 'system' | 'announcement';
-  created_at: string;
-  avatar?: string;
-  level?: number;
-  badge?: string;
-}
-
-export interface SystemSetting {
-  key: string;
-  value: string;
-  description?: string;
-  updated_at: string;
-}
-
-// Type for partial system setting data from queries
-export interface SystemSettingData {
-  key: string;
-  value: string;
-}
-
-// Game API with WebSocket support
+// Keep existing GameAPI class unchanged
 export class GameAPI {
   private socket: Socket | null = null;
   private eventListeners: Map<string, Function[]> = new Map();
@@ -150,7 +167,6 @@ export class GameAPI {
         this.emit('connectionError', error);
       });
 
-      // Forward all game events to registered listeners
       this.socket.onAny((event, ...args) => {
         this.emit(event, ...args);
       });
@@ -184,6 +200,57 @@ export class GameAPI {
     if (index > -1) {
       listeners.splice(index, 1);
     }
+  }
+
+  // Enhanced custodial betting support
+  public placeCustodialBet(userId: string, betAmount: number): Promise<{
+    success: boolean;
+    reason?: string;
+    entryMultiplier?: number;
+    custodialBalance?: number;
+  }> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket?.connected) {
+        reject(new Error('Not connected to game server'));
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        reject(new Error('Custodial bet placement timeout'));
+      }, 15000);
+
+      this.socket.emit('custodialBet', { userId, betAmount });
+      
+      this.socket.once('custodialBetResult', (data) => {
+        clearTimeout(timeout);
+        resolve(data);
+      });
+    });
+  }
+
+  public cashOutCustodial(userId: string, walletAddress: string): Promise<{
+    success: boolean;
+    payout?: number;
+    custodialBalance?: number;
+    reason?: string;
+  }> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket?.connected) {
+        reject(new Error('Not connected to game server'));
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        reject(new Error('Custodial cashout timeout'));
+      }, 15000);
+
+      this.socket.emit('custodialCashOut', { userId, walletAddress });
+      
+      this.socket.once('custodialCashOutResult', (data) => {
+        clearTimeout(timeout);
+        resolve(data);
+      });
+    });
   }
 
   public placeBet(walletAddress: string, betAmount: number, userId?: string): Promise<boolean> {
@@ -243,7 +310,398 @@ export class GameAPI {
   }
 }
 
-// Leaderboard API
+// COMPLETELY UPDATED UserAPI FOR USERS_UNIFIED TABLE
+export class UserAPI {
+  /**
+   * Get or create user from users_unified table
+   */
+  static async getUserOrCreate(walletAddress: string): Promise<UserData | null> {
+    try {
+      console.log(`🔍 Getting user from users_unified for wallet: ${walletAddress}`);
+      
+      if (!walletAddress) {
+        throw new Error('Wallet address is required');
+      }
+      
+      // Search across all wallet fields in users_unified
+      let { data: user, error } = await supabase
+        .from('users_unified')
+        .select('*')
+        .or(`wallet_address.eq.${walletAddress},external_wallet_address.eq.${walletAddress},privy_wallet_address.eq.${walletAddress}`)
+        .single();
+
+      // If not found, try case-insensitive search
+      if (error && error.code === 'PGRST116') {
+        console.log(`📡 Trying case-insensitive search...`);
+        const { data: users, error: errorIlike } = await supabase
+          .from('users_unified')
+          .select('*')
+          .or(`wallet_address.ilike.${walletAddress},external_wallet_address.ilike.${walletAddress},privy_wallet_address.ilike.${walletAddress}`);
+        
+        if (users && users.length > 0 && !errorIlike) {
+          user = users[0];
+          error = null;
+          console.log(`✅ Found user with case-insensitive search: ${user.id}`);
+        }
+      }
+
+      if (error && error.code === 'PGRST116') {
+        // User doesn't exist, create new one
+        console.log(`👤 Creating new user in users_unified for wallet: ${walletAddress}`);
+        
+        const userId = crypto.randomUUID();
+        const username = `user_${userId.slice(-8)}`;
+        
+        const { data: newUser, error: createError } = await supabase
+          .from('users_unified')
+          .insert({
+            id: userId,
+            username,
+            wallet_address: walletAddress,
+            external_wallet_address: walletAddress,
+            privy_wallet_address: walletAddress,
+            custodial_balance: 0,
+            privy_balance: 0,
+            embedded_balance: 0,
+            total_deposited: 0,
+            custodial_total_deposited: 0,
+            level: 1,
+            experience: 0,
+            experience_points: 0,
+            experience_to_next_level: 100,
+            total_games_played: 0,
+            total_bets_placed: 0,
+            games_won: 0,
+            games_lost: 0,
+            total_wagered: 0,
+            total_won: 0,
+            total_lost: 0,
+            net_profit: 0,
+            win_rate: 0,
+            current_win_streak: 0,
+            best_win_streak: 0,
+            largest_win: 0,
+            largest_loss: 0,
+            best_multiplier: 0,
+            daily_profit: 0,
+            weekly_profit: 0,
+            monthly_profit: 0,
+            risk_score: 0,
+            behavior_pattern: 'casual',
+            preferred_bet_range: 'small',
+            badge: 'newcomer',
+            badges_earned: [],
+            achievements: [],
+            chat_level: 0,
+            is_chat_moderator: false,
+            is_connected: true,
+            avatar: '👤',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .select()
+          .single();
+
+        if (createError) {
+          console.error('❌ Error creating user in users_unified:', createError);
+          throw createError;
+        }
+        
+        user = newUser;
+        console.log(`✅ Created new user: ${user.id} for wallet: ${walletAddress}`);
+      } else if (error) {
+        console.error('❌ Error fetching user from users_unified:', error);
+        throw error;
+      } else {
+        console.log(`✅ Found existing user: ${user.id} for wallet: ${walletAddress}`);
+      }
+
+      return this.transformUserData(user);
+      
+    } catch (error) {
+      console.error('❌ UserAPI.getUserOrCreate error:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get custodial balance for a user
+   */
+  static async getCustodialBalance(userId: string): Promise<CustodialBalanceData | null> {
+    try {
+      console.log(`💰 Getting custodial balance for user: ${userId}`);
+      
+      const { data: user, error } = await supabase
+        .from('users_unified')
+        .select(`
+          id,
+          username,
+          custodial_balance,
+          privy_balance,
+          embedded_balance,
+          total_balance,
+          total_deposited,
+          custodial_total_deposited,
+          external_wallet_address,
+          wallet_address,
+          updated_at
+        `)
+        .eq('id', userId)
+        .single();
+
+      if (error || !user) {
+        console.error(`❌ User ${userId} not found in users_unified:`, error?.message);
+        return null;
+      }
+
+      const custodialBalance = parseFloat(user.custodial_balance) || 0;
+      const privyBalance = parseFloat(user.privy_balance) || 0;
+      const embeddedBalance = parseFloat(user.embedded_balance) || 0;
+      const totalBalance = parseFloat(user.total_balance) || 0; // From database calculation
+      const totalDeposited = parseFloat(user.total_deposited) || 0;
+
+      return {
+        userId: user.id,
+        custodialBalance,
+        privyBalance,
+        embeddedBalance,
+        totalBalance, // Use database-calculated value
+        totalDeposited,
+        canBet: custodialBalance >= 0.001,
+        canWithdraw: custodialBalance > 0,
+        walletAddress: user.external_wallet_address || user.wallet_address,
+        lastUpdated: user.updated_at,
+        source: 'users_unified'
+      };
+      
+    } catch (error) {
+      console.error('❌ Error getting custodial balance:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Transform raw database user data to UserData interface
+   */
+  private static transformUserData(rawUser: any): UserData {
+    return {
+      id: rawUser.id,
+      username: rawUser.username,
+      wallet_address: rawUser.wallet_address,
+      external_wallet_address: rawUser.external_wallet_address,
+      privy_wallet_address: rawUser.privy_wallet_address,
+      custodial_balance: parseFloat(rawUser.custodial_balance) || 0,
+      privy_balance: parseFloat(rawUser.privy_balance) || 0,
+      embedded_balance: parseFloat(rawUser.embedded_balance) || 0,
+      total_balance: parseFloat(rawUser.total_balance) || 0, // Database calculated
+      total_deposited: parseFloat(rawUser.total_deposited) || 0,
+      custodial_total_deposited: parseFloat(rawUser.custodial_total_deposited) || 0,
+      avatar: rawUser.avatar,
+      level: rawUser.level || 1,
+      experience: rawUser.experience || 0,
+      experience_points: rawUser.experience_points || 0,
+      badge: rawUser.badge,
+      badges_earned: rawUser.badges_earned || [],
+      achievements: rawUser.achievements || [],
+      total_games_played: rawUser.total_games_played || 0,
+      total_bets_placed: rawUser.total_bets_placed || 0,
+      games_won: rawUser.games_won || 0,
+      games_lost: rawUser.games_lost || 0,
+      total_wagered: parseFloat(rawUser.total_wagered) || 0,
+      total_won: parseFloat(rawUser.total_won) || 0,
+      total_lost: parseFloat(rawUser.total_lost) || 0,
+      net_profit: parseFloat(rawUser.net_profit) || 0,
+      win_rate: parseFloat(rawUser.win_rate) || 0,
+      current_win_streak: rawUser.current_win_streak || 0,
+      best_win_streak: rawUser.best_win_streak || 0,
+      largest_win: parseFloat(rawUser.largest_win) || 0,
+      largest_loss: parseFloat(rawUser.largest_loss) || 0,
+      best_multiplier: parseFloat(rawUser.best_multiplier) || 0,
+      daily_profit: parseFloat(rawUser.daily_profit) || 0,
+      weekly_profit: parseFloat(rawUser.weekly_profit) || 0,
+      monthly_profit: parseFloat(rawUser.monthly_profit) || 0,
+      risk_score: parseFloat(rawUser.risk_score) || 0,
+      behavior_pattern: rawUser.behavior_pattern || 'casual',
+      preferred_bet_range: rawUser.preferred_bet_range || 'small',
+      is_connected: rawUser.is_connected || false,
+      created_at: rawUser.created_at,
+      updated_at: rawUser.updated_at,
+      last_active: rawUser.last_active
+    };
+  }
+
+  /**
+   * Update user in users_unified table
+   */
+  static async updateUser(userId: string, updates: Partial<UserData>): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('users_unified')
+        .update({ 
+          ...updates, 
+          updated_at: new Date().toISOString() 
+        })
+        .eq('id', userId);
+
+      if (error) {
+        logger.error('Error updating user in users_unified:', error);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Error updating user:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get user stats from users_unified (no need to calculate, already stored)
+   */
+  static async getUserStats(userId: string): Promise<UserStats | null> {
+    try {
+      const { data: user, error } = await supabase
+        .from('users_unified')
+        .select(`
+          total_wagered,
+          total_won,
+          total_lost,
+          net_profit,
+          total_games_played,
+          games_won,
+          games_lost,
+          win_rate,
+          best_multiplier,
+          largest_win,
+          largest_loss,
+          current_win_streak,
+          best_win_streak
+        `)
+        .eq('id', userId)
+        .single();
+
+      if (error || !user) {
+        logger.error('Error fetching user stats from users_unified:', error);
+        return null;
+      }
+
+      return {
+        total_wagered: parseFloat(user.total_wagered) || 0,
+        total_won: parseFloat(user.total_won) || 0,
+        total_lost: parseFloat(user.total_lost) || 0,
+        net_profit: parseFloat(user.net_profit) || 0,
+        games_played: user.total_games_played || 0,
+        games_won: user.games_won || 0,
+        games_lost: user.games_lost || 0,
+        win_rate: parseFloat(user.win_rate) || 0,
+        best_multiplier: parseFloat(user.best_multiplier) || 0,
+        largest_win: parseFloat(user.largest_win) || 0,
+        largest_loss: parseFloat(user.largest_loss) || 0,
+        current_win_streak: user.current_win_streak || 0,
+        best_win_streak: user.best_win_streak || 0
+      };
+    } catch (error) {
+      logger.error('Error fetching user stats:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get user bet history
+   */
+  static async getUserBetHistory(userId: string, limit: number = 50): Promise<BetEntry[]> {
+    try {
+      const { data, error } = await supabase
+        .from('player_bets')
+        .select(`
+          *,
+          games:game_id (
+            game_number,
+            crash_multiplier
+          )
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (error) {
+        logger.error('Error fetching user bet history:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
+      logger.error('Error fetching user bet history:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Find user by any wallet address field
+   */
+  static async findUserByWalletAddress(walletAddress: string): Promise<UserData | null> {
+    try {
+      const { data: user, error } = await supabase
+        .from('users_unified')
+        .select('*')
+        .or(`wallet_address.ilike.${walletAddress},external_wallet_address.ilike.${walletAddress},privy_wallet_address.ilike.${walletAddress}`)
+        .single();
+
+      if (error || !user) {
+        return null;
+      }
+
+      return this.transformUserData(user);
+    } catch (error) {
+      logger.error('Error finding user by wallet address:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Authenticate user and register if needed
+   */
+  static async authenticateUser(walletAddress: string, privyUserId?: string, privyWalletAddress?: string): Promise<{
+    success: boolean;
+    user?: UserData;
+    isNewUser?: boolean;
+    error?: string;
+  }> {
+    try {
+      console.log(`🔐 Authenticating user for wallet: ${walletAddress}`);
+      
+      // Get or create user
+      const user = await this.getUserOrCreate(walletAddress);
+      
+      if (!user) {
+        return {
+          success: false,
+          error: 'Failed to get or create user'
+        };
+      }
+
+      // Check if this is a new user (created within last 10 seconds)
+      const isNewUser = new Date(user.created_at).getTime() > Date.now() - 10000;
+
+      console.log(`✅ User authenticated: ${user.id} (${isNewUser ? 'NEW' : 'EXISTING'})`);
+
+      return {
+        success: true,
+        user,
+        isNewUser
+      };
+      
+    } catch (error) {
+      console.error('❌ User authentication error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Authentication failed'
+      };
+    }
+  }
+}
+
+// Keep existing APIs unchanged (LeaderboardAPI, ChartAPI, ChatAPI, SystemAPI)
 export class LeaderboardAPI {
   static async getLeaderboard(period: 'daily' | 'weekly' | 'monthly' | 'all_time' = 'daily'): Promise<LeaderboardEntry[]> {
     try {
@@ -306,32 +764,10 @@ export class LeaderboardAPI {
       return null;
     }
   }
-
-  static async updateLeaderboard(walletAddress: string, profit: number, multiplier: number): Promise<boolean> {
-    try {
-      const { error } = await supabase
-        .rpc('update_leaderboard_entry', {
-          wallet_addr: walletAddress,
-          profit_amount: profit,
-          multiplier_value: multiplier
-        });
-
-      if (error) {
-        logger.error('Error updating leaderboard:', error);
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      logger.error('Error updating leaderboard:', error);
-      return false;
-    }
-  }
 }
 
-// Chart API
 export class ChartAPI {
-  static async getChartData(gameId: string): Promise<ChartData[]> {
+  static async getChartData(gameId: string): Promise<any[]> {
     try {
       const { data, error } = await supabase
         .from('chart_data')
@@ -378,394 +814,10 @@ export class ChartAPI {
       return [];
     }
   }
-
-  static async insertChartData(gameId: string, chartData: ChartData[]): Promise<boolean> {
-    try {
-      const { error } = await supabase
-        .from('chart_data')
-        .insert(chartData.map(data => ({ ...data, game_id: gameId })));
-
-      if (error) {
-        logger.error('Error inserting chart data:', error);
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      logger.error('Error inserting chart data:', error);
-      return false;
-    }
-  }
 }
 
-// User API
-// src/services/api.ts - Enhanced UserAPI with validation
-// Replace your existing UserAPI class with this enhanced version
-
-export class UserAPI {
-  /**
-   * Enhanced getUserOrCreate with validation to prevent mapping issues
-   */
-  static async getUserOrCreate(walletAddress: string): Promise<UserData | null> {
-    try {
-      console.log(`🔍 Getting user for wallet: ${walletAddress}`);
-      
-      if (!walletAddress) {
-        throw new Error('Wallet address is required');
-      }
-      
-      // First, try to find user with EXACT case match
-      console.log(`📡 Trying exact case match: ${walletAddress}`);
-      let { data: user, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('wallet_address', walletAddress) // Exact case first!
-        .single();
-  
-      // If not found, try lowercase
-      if (error && error.code === 'PGRST116') {
-        console.log(`📡 Trying lowercase: ${walletAddress.toLowerCase()}`);
-        const { data: userLower, error: errorLower } = await supabase
-          .from('users')
-          .select('*')
-          .eq('wallet_address', walletAddress.toLowerCase())
-          .single();
-        
-        if (userLower && !errorLower) {
-          user = userLower;
-          error = null;
-          console.log(`✅ Found user with lowercase search: ${user.id}`);
-        }
-      }
-  
-      // If not found, try case-insensitive search
-      if (error && error.code === 'PGRST116') {
-        console.log(`📡 Trying case-insensitive search with ilike...`);
-        const { data: users, error: errorIlike } = await supabase
-          .from('users')
-          .select('*')
-          .ilike('wallet_address', walletAddress); // Case-insensitive search
-        
-        if (users && users.length > 0 && !errorIlike) {
-          user = users[0]; // Take the first match
-          error = null;
-          console.log(`✅ Found user with case-insensitive search: ${user.id}`);
-        }
-      }
-  
-      if (error && error.code === 'PGRST116') {
-        // User truly doesn't exist, create new one
-        console.log(`👤 Creating new user for wallet: ${walletAddress}`);
-        
-        const { data: newUser, error: createError } = await supabase
-          .from('users')
-          .insert({
-            wallet_address: walletAddress, // Keep original case!
-            username: `user${walletAddress.slice(-4)}`,
-            avatar: '👤',
-            level: 1,
-            experience: 0
-          })
-          .select()
-          .single();
-  
-        if (createError) {
-          console.error('❌ Error creating user:', createError);
-          throw createError;
-        }
-        
-        user = newUser;
-        console.log(`✅ Created new user: ${user.id} for wallet: ${walletAddress}`);
-      } else if (error) {
-        console.error('❌ Error fetching user:', error);
-        throw error;
-      } else {
-        console.log(`✅ Found existing user: ${user.id} for wallet: ${walletAddress}`);
-      }
-  
-      return user;
-      
-    } catch (error) {
-      console.error('❌ UserAPI.getUserOrCreate error:', error);
-      return null;
-    }
-  }
-
-  /**
-   * NEW: Force refresh user data (for when mappings might be stale)
-   */
-  static async refreshUserData(walletAddress: string): Promise<UserData | null> {
-    try {
-      console.log(`🔄 Force refreshing user data for wallet: ${walletAddress}`);
-      
-      const normalizedWallet = walletAddress.toLowerCase();
-      
-      // Force a fresh query by using a timestamp
-      const { data: user, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('wallet_address', normalizedWallet)
-        .single();
-
-      if (error) {
-        console.error(`❌ Failed to refresh user data: ${error.message}`);
-        return null;
-      }
-
-      console.log(`✅ Refreshed user data: ${user.id} for wallet: ${walletAddress}`);
-      return user;
-    } catch (error) {
-      console.error('❌ Error refreshing user data:', error);
-      return null;
-    }
-  }
-
-  /**
-   * NEW: Validate that a user-wallet mapping is correct
-   */
-  static async validateUserWalletMapping(userId: string, walletAddress: string): Promise<boolean> {
-    try {
-      console.log(`🔍 Validating mapping: ${userId} <-> ${walletAddress}`);
-      
-      const { data: user, error } = await supabase
-        .from('users')
-        .select('id, wallet_address')
-        .eq('id', userId)
-        .single();
-
-      if (error) {
-        console.warn(`⚠️ Validation failed - user not found: ${error.message}`);
-        return false;
-      }
-
-      const isValid = user.wallet_address?.toLowerCase() === walletAddress.toLowerCase();
-      
-      if (!isValid) {
-        console.warn(`⚠️ VALIDATION FAILED:`);
-        console.warn(`   User ID: ${userId}`);
-        console.warn(`   Expected wallet: ${walletAddress}`);
-        console.warn(`   Database wallet: ${user.wallet_address}`);
-      } else {
-        console.log(`✅ Validation passed: ${userId} <-> ${walletAddress}`);
-      }
-
-      return isValid;
-    } catch (error) {
-      console.error('❌ Failed to validate user-wallet mapping:', error);
-      return false;
-    }
-  }
-
-  /**
-   * NEW: Check for duplicate wallet addresses (admin/debug function)
-   */
-  static async checkForDuplicateWallets(): Promise<any[]> {
-    try {
-      console.log(`🔍 Checking for duplicate wallet addresses...`);
-      
-      // This query finds all wallet addresses that appear more than once
-      const { data, error } = await supabase
-        .rpc('find_duplicate_wallets'); // You'll need to create this function in Supabase
-      
-      if (error) {
-        console.error('❌ Failed to check for duplicates:', error);
-        return [];
-      }
-      
-      if (data && data.length > 0) {
-        console.warn(`⚠️ Found ${data.length} duplicate wallet addresses:`, data);
-      } else {
-        console.log(`✅ No duplicate wallet addresses found`);
-      }
-      
-      return data || [];
-    } catch (error) {
-      console.error('❌ Error checking for duplicate wallets:', error);
-      return [];
-    }
-  }
-
-  /**
-   * NEW: Emergency user lookup with comprehensive validation
-   */
-  static async emergencyUserLookup(walletAddress: string): Promise<any> {
-    try {
-      console.log(`🚨 Emergency user lookup for wallet: ${walletAddress}`);
-      
-      const normalizedWallet = walletAddress.toLowerCase();
-      
-      // Get all users with this wallet address (should only be one)
-      const { data: users, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('wallet_address', normalizedWallet);
-
-      const result = {
-        walletAddress: walletAddress,
-        normalizedWallet: normalizedWallet,
-        usersFound: users?.length || 0,
-        users: users || [],
-        error: error?.message,
-        timestamp: new Date().toISOString()
-      };
-
-      console.log(`🚨 Emergency lookup result:`, result);
-      
-      if (users && users.length > 1) {
-        console.error(`❌ CRITICAL: Found ${users.length} users with wallet ${walletAddress}!`);
-        
-        // Log this critical issue
-        try {
-          await supabase
-            .from('audit_log')
-            .insert({
-              action: 'DUPLICATE_WALLET_DETECTED',
-              details: result
-            });
-        } catch (auditError) {
-          console.warn('⚠️ Failed to log duplicate wallet to audit trail:', auditError);
-        }
-      }
-      
-      return result;
-    } catch (error) {
-      console.error('❌ Emergency lookup error:', error);
-      return {
-        walletAddress,
-        error: error instanceof Error ? error.message : 'Unknown error',
-        timestamp: new Date().toISOString()
-      };
-    }
-  }
-
-  // Keep all your existing methods below unchanged...
-  static async updateUser(walletAddress: string, updates: Partial<UserData>): Promise<boolean> {
-    try {
-      const { error } = await supabase
-        .from('users')
-        .update({ ...updates, updated_at: new Date().toISOString() })
-        .eq('wallet_address', walletAddress.toLowerCase()); // Normalize here too
-
-      if (error) {
-        logger.error('Error updating user:', error);
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      logger.error('Error updating user:', error);
-      return false;
-    }
-  }
-
-  // ... rest of your existing methods stay the same
-  static async getUserStats(walletAddress: string): Promise<UserStats | null> {
-    try {
-      const { data, error } = await supabase
-        .from('player_bets')
-        .select('bet_amount, profit_loss, cashout_multiplier')
-        .eq('wallet_address', walletAddress.toLowerCase()); // Normalize here too
-
-      if (error) {
-        logger.error('Error fetching user stats:', error);
-        return null;
-      }
-
-      if (!data || data.length === 0) {
-        return {
-          total_wagered: 0,
-          total_won: 0,
-          games_played: 0,
-          best_multiplier: 0,
-          win_rate: 0
-        };
-      }
-
-      const betData: BetStatsData[] = data;
-
-      const totalWagered = betData.reduce((sum: number, bet: BetStatsData) => sum + bet.bet_amount, 0);
-      const totalWon = betData.reduce((sum: number, bet: BetStatsData) => sum + Math.max(0, bet.profit_loss || 0), 0);
-      const gamesPlayed = betData.length;
-      const bestMultiplier = Math.max(...betData.map((bet: BetStatsData) => bet.cashout_multiplier || 0));
-      const wins = betData.filter((bet: BetStatsData) => (bet.profit_loss || 0) > 0).length;
-      const winRate = gamesPlayed > 0 ? wins / gamesPlayed : 0;
-
-      return {
-        total_wagered: totalWagered,
-        total_won: totalWon,
-        games_played: gamesPlayed,
-        best_multiplier: bestMultiplier,
-        win_rate: winRate
-      };
-    } catch (error) {
-      logger.error('Error fetching user stats:', error);
-      return null;
-    }
-  }
-
-  static async getUserBetHistory(walletAddress: string, limit: number = 50): Promise<BetEntry[]> {
-    try {
-      const { data, error } = await supabase
-        .from('player_bets')
-        .select(`
-          *,
-          games:game_id (
-            game_number,
-            crash_multiplier
-          )
-        `)
-        .eq('wallet_address', walletAddress.toLowerCase()) // Normalize here too
-        .order('created_at', { ascending: false })
-        .limit(limit);
-
-      if (error) {
-        logger.error('Error fetching user bet history:', error);
-        return [];
-      }
-
-      return data || [];
-    } catch (error) {
-      logger.error('Error fetching user bet history:', error);
-      return [];
-    }
-  }
-
-  static async recordBet(
-    gameId: string,
-    walletAddress: string,
-    betAmount: number,
-    cashoutMultiplier?: number,
-    profitLoss?: number
-  ): Promise<boolean> {
-    try {
-      const { error } = await supabase
-        .from('player_bets')
-        .insert({
-          game_id: gameId,
-          wallet_address: walletAddress.toLowerCase(), // Normalize here too
-          bet_amount: betAmount,
-          cashout_multiplier: cashoutMultiplier,
-          profit_loss: profitLoss
-        });
-
-      if (error) {
-        logger.error('Error recording bet:', error);
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      logger.error('Error recording bet:', error);
-      return false;
-    }
-  }
-}
-
-// Chat API with real-time subscriptions
 export class ChatAPI {
-  private subscription: any = null;
-
-  static async getChatHistory(limit: number = 50): Promise<ChatMessage[]> {
+  static async getChatHistory(limit: number = 50): Promise<any[]> {
     try {
       const { data, error } = await supabase
         .from('chat_messages')
@@ -808,13 +860,13 @@ export class ChatAPI {
     }
   }
 
-  static subscribeToMessages(callback: (message: ChatMessage) => void): () => void {
+  static subscribeToMessages(callback: (message: any) => void): () => void {
     const subscription = supabase
       .channel('chat_messages')
       .on('postgres_changes', 
         { event: 'INSERT', schema: 'public', table: 'chat_messages' },
         (payload) => {
-          callback(payload.new as ChatMessage);
+          callback(payload.new);
         }
       )
       .subscribe();
@@ -825,7 +877,6 @@ export class ChatAPI {
   }
 }
 
-// System API
 export class SystemAPI {
   static async getSettings(): Promise<Record<string, string>> {
     try {
@@ -839,8 +890,7 @@ export class SystemAPI {
       }
 
       const settings: Record<string, string> = {};
-      // Use proper typing for the partial system setting data
-      data?.forEach((setting: SystemSettingData) => {
+      data?.forEach((setting: any) => {
         settings[setting.key] = setting.value;
       });
 
@@ -848,24 +898,6 @@ export class SystemAPI {
     } catch (error) {
       logger.error('Error fetching system settings:', error);
       return {};
-    }
-  }
-
-  static async updateSetting(key: string, value: string): Promise<boolean> {
-    try {
-      const { error } = await supabase
-        .from('system_settings')
-        .upsert({ key, value, updated_at: new Date().toISOString() });
-
-      if (error) {
-        logger.error('Error updating setting:', error);
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      logger.error('Error updating setting:', error);
-      return false;
     }
   }
 }

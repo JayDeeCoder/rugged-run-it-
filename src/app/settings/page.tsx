@@ -79,8 +79,19 @@ const SettingsPage: FC = () => {
       <div className="max-w-6xl mx-auto p-4">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Settings & Trading Guide</h1>
-          <p className="text-gray-400">Learn to trade, manage your account, and customize your experience</p>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-3xl font-bold mb-2">Settings & Trading Guide</h1>
+              <p className="text-gray-400">Learn to trade, manage your account, and customize your experience</p>
+            </div>
+            <a 
+              href="/"
+              className="flex items-center px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 rounded-lg font-medium transition-all duration-200 shadow-lg hover:shadow-xl"
+            >
+              <span className="mr-2">🎮</span>
+              Back to Game
+            </a>
+          </div>
         </div>
 
         {/* Tab Navigation */}
@@ -162,6 +173,28 @@ const SettingsPage: FC = () => {
                       Example: Trade 0.1 SOL, exit at 2.00x = 0.1 × 2.00 × 0.95 = 0.19 SOL profit!
                     </p>
                   </div>
+                </div>
+              </div>
+
+              <div className="bg-gradient-to-r from-red-900/30 to-orange-900/30 rounded-lg p-6 border border-red-500/20 mb-6">
+                <h3 className="text-xl font-bold mb-4 flex items-center text-red-400">
+                  🎯 The Art of the RUG - It's You vs. Everyone!
+                </h3>
+                <p className="text-lg text-gray-300 leading-relaxed mb-4">
+                  Here's the secret: <strong>YOU'RE</strong> the one pulling the rug! Every time you hit that "RUG" button, you're creating sell pressure that can trigger market crashes for other players. The key to winning? <span className="text-yellow-400 font-bold">Pull the rug before you GET rugged!</span> 🏃‍♂️💨
+                </p>
+                
+                <div className="bg-gray-800/50 rounded p-4 border-l-4 border-red-500">
+                  <h4 className="font-bold text-red-400 mb-2">🕯️ Watch for the Dark Red Candles!</h4>
+                  <p className="text-gray-300 text-sm">
+                    When multiple players exit at the same time, you'll see darker red candles appear on the chart - that's the visual sign of a coordinated rug pull in action! The more players that exit together, the darker and more dramatic the sell-off becomes. Don't get caught holding the bag! 📉
+                  </p>
+                </div>
+                
+                <div className="mt-4 p-3 bg-yellow-900/20 rounded border border-yellow-500/30">
+                  <p className="text-yellow-300 text-sm font-medium">
+                    💡 <strong>Pro Tip:</strong> The best ruggers know when to follow the crowd out the door, and when to be the first one running for the exit. Sometimes being early is better than being right!
+                  </p>
                 </div>
               </div>
 

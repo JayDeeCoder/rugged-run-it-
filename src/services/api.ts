@@ -194,7 +194,7 @@ export interface BetEntry {
   status: string;
 }
 
-// Keep existing GameAPI class unchanged
+// GameAPI class
 export class GameAPI {
   private socket: Socket | null = null;
   private eventListeners: Map<string, Function[]> = new Map();
@@ -589,6 +589,272 @@ export class UserAPI {
     }
   }
 
+  static async updateUserStatsAfterBet(
+    userId: string, 
+    betAmount: number, 
+    profitLoss: number, 
+    multiplier?: number,
+    isWin: boolean = false
+  ): Promise<boolean> {
+    try {
+      console.log(`📊 Updating user stats for bet: userId=${userId}, amount=${betAmount}, profit=${profitLoss}`);
+
+      // Get current user stats
+      const { data: currentUser, error: fetchError } = await supabase
+        .from('users_unified')
+        .select(`
+          total_games_played,
+          total_bets_placed,
+          games_won,
+          games_lost,
+          total_wagered,
+          total_won,
+          total_lost,
+          net_profit,
+          largest_win,
+          largest_loss,
+          best_multiplier,
+          current_win_streak,
+          best_win_streak,
+          win_rate
+        `)
+        .eq('id', userId)
+        .single();
+
+      if (fetchError || !currentUser) {
+        console.error('❌ Error fetching user stats:', fetchError);
+        return false;
+      }
+
+      // Calculate new stats
+      const newStats = {
+        total_games_played: (currentUser.total_games_played || 0) + 1,
+        total_bets_placed: (currentUser.total_bets_placed || 0) + 1,
+        games_won: (currentUser.games_won || 0) + (isWin ? 1 : 0),
+        games_lost: (currentUser.games_lost || 0) + (isWin ? 0 : 1),
+        total_wagered: (parseFloat(currentUser.total_wagered) || 0) + betAmount,
+        total_won: (parseFloat(currentUser.total_won) || 0) + (profitLoss > 0 ? profitLoss + betAmount : 0),
+        total_lost: (parseFloat(currentUser.total_lost) || 0) + (profitLoss < 0 ? Math.abs(profitLoss) : 0),
+        net_profit: (parseFloat(currentUser.net_profit) || 0) + profitLoss,
+        largest_win: Math.max(parseFloat(currentUser.largest_win) || 0, profitLoss > 0 ? profitLoss : 0),
+        largest_loss: Math.max(parseFloat(currentUser.largest_loss) || 0, profitLoss < 0 ? Math.abs(profitLoss) : 0),
+        best_multiplier: Math.max(parseFloat(currentUser.best_multiplier) || 0, multiplier || 0),
+        current_win_streak: isWin ? (currentUser.current_win_streak || 0) + 1 : 0,
+        best_win_streak: Math.max(currentUser.best_win_streak || 0, isWin ? (currentUser.current_win_streak || 0) + 1 : currentUser.current_win_streak || 0),
+        updated_at: new Date().toISOString()
+      };
+
+      // Calculate win rate
+      const totalGames = newStats.total_games_played;
+      newStats.win_rate = totalGames > 0 ? (newStats.games_won / totalGames) * 100 : 0;
+
+      // Update user stats
+      const { error: updateError } = await supabase
+        .from('users_unified')
+        .update(newStats)
+        .eq('id', userId);
+
+      if (updateError) {
+        console.error('❌ Error updating user stats:', updateError);
+        return false;
+      }
+
+      console.log(`✅ Successfully updated user stats: games=${newStats.total_games_played}, profit=${newStats.net_profit}`);
+      return true;
+
+    } catch (error) {
+      console.error('❌ Error in updateUserStatsAfterBet:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Sync individual user stats from player_bets table
+   */
+  static async syncUserStatsFromBets(userId: string): Promise<boolean> {
+    try {
+      console.log(`📊 Syncing stats for user: ${userId}`);
+
+      // Get all bets for this user
+      const { data: bets, error: betsError } = await supabase
+        .from('player_bets')
+        .select('bet_amount, profit_loss, cashout_multiplier, status, created_at')
+        .eq('user_id', userId);
+
+      if (betsError) {
+        console.error('❌ Error fetching user bets:', betsError);
+        return false;
+      }
+
+      if (!bets || bets.length === 0) {
+        console.log(`ℹ️ No bets found for user ${userId}`);
+        return true;
+      }
+
+      // Calculate stats from bets
+      let totalWagered = 0;
+      let totalWon = 0;
+      let totalLost = 0;
+      let netProfit = 0;
+      let gamesWon = 0;
+      let gamesLost = 0;
+      let largestWin = 0;
+      let largestLoss = 0;
+      let bestMultiplier = 0;
+      let currentWinStreak = 0;
+      let bestWinStreak = 0;
+      let tempWinStreak = 0;
+
+      // Sort bets by date to calculate win streaks
+      const sortedBets = bets.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+      for (const bet of sortedBets) {
+        const betAmount = parseFloat(bet.bet_amount) || 0;
+        const profitLoss = parseFloat(bet.profit_loss) || 0;
+        const multiplier = parseFloat(bet.cashout_multiplier) || 0;
+        
+        totalWagered += betAmount;
+        netProfit += profitLoss;
+
+        if (profitLoss > 0) {
+          // Win
+          gamesWon++;
+          totalWon += profitLoss + betAmount;
+          largestWin = Math.max(largestWin, profitLoss);
+          tempWinStreak++;
+          bestWinStreak = Math.max(bestWinStreak, tempWinStreak);
+        } else {
+          // Loss
+          gamesLost++;
+          totalLost += Math.abs(profitLoss);
+          largestLoss = Math.max(largestLoss, Math.abs(profitLoss));
+          tempWinStreak = 0;
+        }
+
+        bestMultiplier = Math.max(bestMultiplier, multiplier);
+      }
+
+      // Current win streak is the streak at the end
+      currentWinStreak = tempWinStreak;
+
+      const totalGames = gamesWon + gamesLost;
+      const winRate = totalGames > 0 ? (gamesWon / totalGames) * 100 : 0;
+
+      // Update user stats
+      const updatedStats = {
+        total_games_played: totalGames,
+        total_bets_placed: bets.length,
+        games_won: gamesWon,
+        games_lost: gamesLost,
+        total_wagered: totalWagered,
+        total_won: totalWon,
+        total_lost: totalLost,
+        net_profit: netProfit,
+        win_rate: winRate,
+        largest_win: largestWin,
+        largest_loss: largestLoss,
+        best_multiplier: bestMultiplier,
+        current_win_streak: currentWinStreak,
+        best_win_streak: bestWinStreak,
+        updated_at: new Date().toISOString()
+      };
+
+      const { error: updateError } = await supabase
+        .from('users_unified')
+        .update(updatedStats)
+        .eq('id', userId);
+
+      if (updateError) {
+        console.error('❌ Error updating user stats:', updateError);
+        return false;
+      }
+
+      console.log(`✅ Synced stats for user ${userId}: ${totalGames} games, $${netProfit.toFixed(2)} profit`);
+      return true;
+
+    } catch (error) {
+      console.error('❌ Error in syncUserStatsFromBets:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Sync all user stats from player_bets table (one-time fix)
+   */
+  static async syncAllUserStats(): Promise<boolean> {
+    try {
+      console.log('🔄 Starting user stats sync from player_bets...');
+
+      // Get all users
+      const { data: users, error: usersError } = await supabase
+        .from('users_unified')
+        .select('id, username');
+
+      if (usersError) {
+        console.error('❌ Error fetching users:', usersError);
+        return false;
+      }
+
+      console.log(`📊 Syncing stats for ${users?.length || 0} users...`);
+
+      // Process each user
+      for (const user of users || []) {
+        await this.syncUserStatsFromBets(user.id);
+        // Small delay to avoid overwhelming the database
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      console.log('✅ User stats sync completed');
+      return true;
+
+    } catch (error) {
+      console.error('❌ Error in syncAllUserStats:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Enhanced recordBet function that also updates user stats
+   */
+  static async recordBetWithStatsUpdate(
+    gameId: string,
+    walletAddress: string,
+    betAmount: number,
+    userId?: string,
+    cashoutMultiplier?: number,
+    profitLoss?: number
+  ): Promise<boolean> {
+    try {
+      // Record the bet in player_bets table
+      const { error: betError } = await supabase
+        .from('player_bets')
+        .insert({
+          game_id: gameId,
+          user_id: userId,
+          wallet_address: walletAddress,
+          bet_amount: betAmount,
+          cashout_multiplier: cashoutMultiplier,
+          profit_loss: profitLoss
+        });
+
+      if (betError) {
+        console.error('❌ Error recording bet:', betError);
+        return false;
+      }
+
+      // Update user stats if we have userId and profitLoss
+      if (userId && profitLoss !== undefined) {
+        const isWin = profitLoss > 0;
+        await this.updateUserStatsAfterBet(userId, betAmount, profitLoss, cashoutMultiplier, isWin);
+      }
+
+      return true;
+    } catch (error) {
+      console.error('❌ Error recording bet with stats update:', error);
+      return false;
+    }
+  }
+
   /**
    * Get user stats from users_unified (no need to calculate, already stored)
    */
@@ -677,90 +943,90 @@ export class UserAPI {
   }
 
   // If you need to get betting data for leaderboards/rankings
-static async getBetHistoryWithUsers(limit: number = 100): Promise<any[]> {
-  try {
-    const { data, error } = await supabase
-      .from('player_bets')
-      .select(`
-        *,
-        users_unified:user_id (
-          id,
-          username,
-          avatar,
-          level,
-          badge
-        ),
-        games:game_id (
-          game_number,
-          crash_multiplier,
-          created_at
-        )
-      `)
-      .order('created_at', { ascending: false })
-      .limit(limit);
+  static async getBetHistoryWithUsers(limit: number = 100): Promise<any[]> {
+    try {
+      const { data, error } = await supabase
+        .from('player_bets')
+        .select(`
+          *,
+          users_unified:user_id (
+            id,
+            username,
+            avatar,
+            level,
+            badge
+          ),
+          games:game_id (
+            game_number,
+            crash_multiplier,
+            created_at
+          )
+        `)
+        .order('created_at', { ascending: false })
+        .limit(limit);
 
-    if (error) {
+      if (error) {
+        logger.error('Error fetching bet history with users:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
       logger.error('Error fetching bet history with users:', error);
       return [];
     }
-
-    return data || [];
-  } catch (error) {
-    logger.error('Error fetching bet history with users:', error);
-    return [];
   }
-}
 
-// For leaderboard calculations
-static async getLeaderboardData(timeframe: 'daily' | 'weekly' | 'monthly' | 'all' = 'all'): Promise<any[]> {
-  try {
-    let dateFilter = '';
-    const now = new Date();
-    
-    switch (timeframe) {
-      case 'daily':
-        dateFilter = new Date(now.setHours(0, 0, 0, 0)).toISOString();
-        break;
-      case 'weekly':
-        const weekStart = new Date(now.setDate(now.getDate() - now.getDay()));
-        dateFilter = weekStart.toISOString();
-        break;
-      case 'monthly':
-        dateFilter = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-        break;
-    }
+  // For leaderboard calculations
+  static async getLeaderboardData(timeframe: 'daily' | 'weekly' | 'monthly' | 'all' = 'all'): Promise<any[]> {
+    try {
+      let dateFilter = '';
+      const now = new Date();
+      
+      switch (timeframe) {
+        case 'daily':
+          dateFilter = new Date(now.setHours(0, 0, 0, 0)).toISOString();
+          break;
+        case 'weekly':
+          const weekStart = new Date(now.setDate(now.getDate() - now.getDay()));
+          dateFilter = weekStart.toISOString();
+          break;
+        case 'monthly':
+          dateFilter = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+          break;
+      }
 
-    let query = supabase
-      .from('player_bets')
-      .select(`
-        user_id,
-        bet_amount,
-        profit_loss,
-        users_unified:user_id (
-          username,
-          avatar,
-          level,
-          badge
-        )
-      `);
+      let query = supabase
+        .from('player_bets')
+        .select(`
+          user_id,
+          bet_amount,
+          profit_loss,
+          users_unified:user_id (
+            username,
+            avatar,
+            level,
+            badge
+          )
+        `);
 
-    if (dateFilter) {
-      query = query.gte('created_at', dateFilter);
-    }
+      if (dateFilter) {
+        query = query.gte('created_at', dateFilter);
+      }
 
-    const { data, error } = await query;
+      const { data, error } = await query;
 
-    if (error) {
+      if (error) {
+        logger.error('Error fetching leaderboard data:', error);
+        return [];
+      }
+
+      return data || [];
+    } catch (error) {
       logger.error('Error fetching leaderboard data:', error);
       return [];
     }
-
-    return data || [];
-  } catch (error) {
-    logger.error('Error fetching leaderboard data:', error);
-    return [];
   }
-}
 
   /**
    * Find user by any wallet address field
@@ -916,11 +1182,11 @@ export class LeaderboardAPI {
           risk_score,
           behavior_pattern
         `)
-        .gt(profitColumn, 0) // Only show users with positive profit
-        .gt('total_games_played', 0) // Only show users who have played games
-        .order(profitColumn, { ascending: false })
+        //.gt(profitColumn, 0) // Only show users with positive profit
+        //.gt('total_games_played', 0) // Only show users who have played games
+        .order('created_at', { ascending: false }) // Show newest users first
         .limit(100);
-
+        
       if (error) {
         console.error('❌ Error fetching leaderboard from users_unified:', error);
         throw error;
@@ -1090,6 +1356,7 @@ export class LeaderboardAPI {
     }
   }
 }
+
 export class ChartAPI {
   static async getChartData(gameId: string): Promise<ChartData[]> {
     try {

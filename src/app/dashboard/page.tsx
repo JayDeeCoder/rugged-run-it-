@@ -1274,7 +1274,7 @@ const Dashboard: FC = () => {
                     <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-30' : ''}`}>
                       <div className="text-gray-400 mb-1">Win Rate</div>
                       <div className="text-lg font-bold text-blue-400">
-                        {(enhancedUserStats.winRate * 100).toFixed(1)}%
+                      {enhancedUserStats.winRate.toFixed(1)}%
                       </div>
                       <div className="text-xs text-gray-500 mt-1">
                         Success percentage
@@ -1282,7 +1282,7 @@ const Dashboard: FC = () => {
                     </div>
                     
                     <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-purple-400 ring-opacity-30' : ''}`}>
-                      <div className="text-gray-400 mb-1">Best Multiplier</div>
+                    <div className="text-gray-400 mb-1">Best Multiplier</div>
                       <div className="text-lg font-bold text-purple-400">
                         {enhancedUserStats.bestMultiplier.toFixed(2)}x
                       </div>

@@ -402,7 +402,7 @@ export class UserAPI {
           .from('users_unified')
           .select('*')
           .or(`wallet_address.ilike.${walletAddress},external_wallet_address.ilike.${walletAddress},privy_wallet_address.ilike.${walletAddress}`);
-        
+          
         if (users && users.length > 0 && !errorIlike) {
           user = users[0];
           error = null;
@@ -417,6 +417,7 @@ export class UserAPI {
         const userId = generateUUID();
         const username = `user_${userId.slice(-8)}`;
         
+        // ✅ MINIMAL INSERT - only essential fields to avoid generated column errors
         const { data: newUser, error: createError } = await supabase
           .from('users_unified')
           .insert({
@@ -426,43 +427,11 @@ export class UserAPI {
             external_wallet_address: walletAddress,
             privy_wallet_address: walletAddress,
             custodial_balance: 0,
-            privy_balance: 0,
-            embedded_balance: 0,
-            total_deposited: 0,
-            custodial_total_deposited: 0,
             level: 1,
-            experience: 0,
-            experience_points: 0,
-            experience_to_next_level: 100,
-            total_games_played: 0,
-            total_bets_placed: 0,
-            games_won: 0,
-            games_lost: 0,
-            total_wagered: 0,
-            total_won: 0,
-            total_lost: 0,
-            net_profit: 0,
-            win_rate: 0,
-            current_win_streak: 0,
-            best_win_streak: 0,
-            largest_win: 0,
-            largest_loss: 0,
-            best_multiplier: 0,
-            daily_profit: 0,
-            weekly_profit: 0,
-            monthly_profit: 0,
-            risk_score: 0,
-            behavior_pattern: 'casual',
-            preferred_bet_range: 'small',
-            badge: 'newcomer',
-            badges_earned: [],
-            achievements: [],
-            chat_level: 0,
-            is_chat_moderator: false,
-            is_connected: true,
             avatar: '👤',
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString()
+            // Let database set defaults for everything else
           })
           .select()
           .single();
@@ -481,7 +450,7 @@ export class UserAPI {
         console.log(`✅ Found existing user: ${user.id} for wallet: ${walletAddress}`);
       }
 
-      return this.transformUserData(user);
+      return UserAPI.transformUserData(user);
       
     } catch (error) {
       console.error('❌ UserAPI.getUserOrCreate error:', error);
@@ -808,7 +777,7 @@ static async getLeaderboardData(timeframe: 'daily' | 'weekly' | 'monthly' | 'all
         return null;
       }
 
-      return this.transformUserData(user);
+      return UserAPI.transformUserData(user);
     } catch (error) {
       logger.error('Error finding user by wallet address:', error);
       return null;
@@ -863,7 +832,7 @@ static async getLeaderboardData(timeframe: 'daily' | 'weekly' | 'monthly' | 'all
       console.log(`🔐 Authenticating user for wallet: ${walletAddress}`);
       
       // Get or create user
-      const user = await this.getUserOrCreate(walletAddress);
+      const user = await UserAPI.getUserOrCreate(walletAddress);
       
       if (!user) {
         return {

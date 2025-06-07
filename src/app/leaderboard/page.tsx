@@ -327,9 +327,9 @@ const LeaderboardPage: FC = () => {
                       {/* Quick Stats */}
                       <div className="grid grid-cols-3 gap-3 mt-4">
                         <div className="text-center">
-                          <div className="text-lg font-bold text-green-400">
-                            {(currentUserData.win_rate * 100).toFixed(1)}%
-                          </div>
+                        <div className="text-lg font-bold text-green-400">
+  {currentUserData.win_rate.toFixed(1)}%
+</div>
                           <div className="text-xs text-gray-400">Win Rate</div>
                         </div>
                         <div className="text-center">

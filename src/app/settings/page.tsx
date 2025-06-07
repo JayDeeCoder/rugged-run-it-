@@ -1,7 +1,7 @@
 // src/app/settings/page.tsx
 'use client';
 
-import { FC, useState, useContext, useEffect } from 'react';
+import { FC, useState, useContext } from 'react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';
 import { 
@@ -19,7 +19,6 @@ import {
   Clock,
   Zap,
   Eye,
-  EyeOff,
   Edit3,
   Save,
   RefreshCw
@@ -32,9 +31,11 @@ const SettingsPage: FC = () => {
   const userContext = useContext(UserContext);
   
   // Type guard to ensure userContext is not null
-  const { currentUser, setUsername, loading } = userContext || { currentUser: null, setUsername: () => {}, loading: false };
-  
-  // currentUser now comes directly from users_unified table with correct schema
+  const { currentUser, setUsername, loading } = userContext || { 
+    currentUser: null, 
+    setUsername: () => {}, 
+    loading: false 
+  };
   
   const [activeTab, setActiveTab] = useState('game-guide');
   const [showUsernameModal, setShowUsernameModal] = useState(false);
@@ -205,11 +206,11 @@ const SettingsPage: FC = () => {
                   {
                     step: 1,
                     title: "Fund Your Trading Account",
-                    description: "Deposit SOL to your custodial balance or connect your external wallet",
+                    description: "Deposit SOL from your free In Game wallet",
                     details: [
                       "Your trading balance is shown in the trading panel",
                       "Deposits are instant and secure",
-                      "Minimum trade size is 0.001 SOL"
+                      "Minimum trade size is 0.005 SOL"
                     ],
                     color: "blue"
                   },
@@ -540,7 +541,7 @@ const SettingsPage: FC = () => {
                   </div>
                   <div className="text-center">
                     <div className="text-2xl font-bold text-yellow-400">
-                      {((currentUser?.win_rate || 0) * 100).toFixed(1)}%
+                      {(currentUser?.win_rate || 0).toFixed(1)}%
                     </div>
                     <div className="text-sm text-gray-400">Success Rate</div>
                   </div>
@@ -738,12 +739,14 @@ const SettingsPage: FC = () => {
       </div>
 
       {/* Username Modal */}
-      <UsernameModal 
-        isOpen={showUsernameModal}
-        onClose={() => setShowUsernameModal(false)}
-        onSubmit={handleUsernameSubmit}
-        currentUsername={currentUser?.username || ''}
-      />
+      {showUsernameModal && (
+        <UsernameModal 
+          isOpen={showUsernameModal}
+          onClose={() => setShowUsernameModal(false)}
+          onSubmit={handleUsernameSubmit}
+          currentUsername={currentUser?.username || ''}
+        />
+      )}
     </div>
   );
 };

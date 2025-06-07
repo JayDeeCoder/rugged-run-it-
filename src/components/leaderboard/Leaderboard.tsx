@@ -187,7 +187,7 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
                     <span>•</span>
                     <span>{entry.games_played} games</span>
                     <span>•</span>
-                    <span className="text-green-400">{(entry.win_rate * 100).toFixed(1)}% win</span>
+                    <span className="text-green-400">{entry.win_rate.toFixed(1)}% win</span>
                   </div>
 
                   {/* Level progress bar (compact) */}
@@ -265,7 +265,7 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
                   </div>
                   <div>
                     <div className="text-gray-400 text-xs">Win Rate</div>
-                    <div className="text-green-400 font-semibold">{(entry.win_rate * 100).toFixed(1)}%</div>
+                    <div className="text-green-400 font-semibold">{entry.win_rate.toFixed(1)}%</div>
                   </div>
                   <div>
                     <div className="text-gray-400 text-xs">Best Multiplier</div>

@@ -86,7 +86,7 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
                 TOP RUGGERS - {getPeriodDisplayName(period)}
               </h2>
               <p className="text-xs text-gray-400">
-                Profit leaders from users_unified table
+              Ranked by win rate • 
               </p>
             </div>
           </div>

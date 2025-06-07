@@ -1209,7 +1209,10 @@ export class LeaderboardAPI {
         `)
         //.gt(profitColumn, 0) // Only show users with positive profit
         //.gt('total_games_played', 0) // Only show users who have played games
-        .order('created_at', { ascending: false }) // Show newest users first
+        .order('win_rate', { ascending: false }) // 🎯 Primary: Best win rate first
+  .order('net_profit', { ascending: false }) // 🥈 Secondary: Highest profit
+  .order('total_games_played', { ascending: false }) // 🥉 Tertiary: Most active
+ 
         .limit(100);
         
       if (error) {

@@ -1309,12 +1309,14 @@ const updateRecentTransfers = () => {};
     try {
       toast.loading('Refreshing...', { id: 'refresh' });
       
-      // Simple parallel refresh - no timeouts or complex logic
-      await Promise.all([
-        refreshEmbeddedBalance(),
-        refreshCustodialBalance(),
-        refreshRuggedBalance()
-      ]);
+      // ✅ FIXED: Sequential refresh to prevent race conditions
+      await refreshEmbeddedBalance();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      await refreshCustodialBalance();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      await refreshRuggedBalance();
       
       toast.success('Balances updated!', { id: 'refresh' });
       
@@ -1331,45 +1333,46 @@ const updateRecentTransfers = () => {};
       toast.error('Wallet not ready for transfer');
       return false;
     }
-
+  
     if (amount <= 0 || amount > embeddedWalletBalance) {
       toast.error(`Invalid amount. Available: ${embeddedWalletBalance.toFixed(3)} SOL`);
       return false;
     }
-
-    console.log('🚀 Starting transfer using updated API:', { amount, userId });
+  
+    console.log('🚀 Starting transfer with FIXED API:', { amount, userId });
     
     try {
-      // 🔥 Use the updated hook that calls our fixed API endpoint
+      // ✅ FIXED: Wait for user initialization before transfer
+      let retryCount = 0;
+      while (!userId && retryCount < 3) {
+        console.log('⏳ Waiting for user initialization...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        retryCount++;
+      }
+      
+      if (!userId) {
+        throw new Error('User not initialized after 3 seconds');
+      }
+      
       const result = await executeAutoTransfer(
         userId, 
         amount,
-        // This callback will refresh the custodial balance immediately
+        // ✅ FIXED: Simplified callback - single refresh with delay
         async () => {
-          console.log('🔄 Transfer completed, refreshing custodial balance...');
-          await refreshCustodialBalance();
-          
-          // Also trigger a delayed refresh for safety
+          console.log('🔄 Transfer completed, refreshing balance in 2s...');
           setTimeout(() => {
             refreshCustodialBalance();
-          }, 1500);
+          }, 2000);
         }
       );
-
+  
       if (result.success) {
         console.log('✅ Transfer completed successfully:', result);
         
-        // Update transfer tracking
-        transferAttempts.current.push({
-          timestamp: Date.now(),
-          amount: amount,
-          signature: result.transactionId
-        });
-        
-        transferAttempts.current = transferAttempts.current.slice(-10);
-        
-        // Reset any balance issue flags
-        setBalanceIssueDetected(false);
+        // ✅ FIXED: Single balance refresh, no multiple updates
+        setTimeout(() => {
+          refreshCustodialBalance();
+        }, 3000);
         
         return true;
       } else {
@@ -1383,7 +1386,8 @@ const updateRecentTransfers = () => {};
       toast.error(error instanceof Error ? error.message : 'Transfer failed');
       return false;
     }
-  }, [embeddedWallet, walletAddress, userId, embeddedWalletBalance, executeAutoTransfer, refreshCustodialBalance, setBalanceIssueDetected]);
+  }, [embeddedWallet, walletAddress, userId, embeddedWalletBalance, executeAutoTransfer, refreshCustodialBalance]);
+  
 
   // 🚀 UPDATED: Enhanced bet placement with shared state
   const handleBuy = useCallback(async () => {
@@ -1894,62 +1898,31 @@ setTimeout(() => {
       return;
     }
     
-    if (initializationRef.current.attempted && 
-        initializationRef.current.lastWallet === walletAddress) {
-      console.log('🔍 USER INIT: Already attempted');
-      return;
-    }
-    
-    console.log(`🔗 TRACKED: Starting user initialization for wallet: ${walletAddress}`);
+    console.log(`🔗 Starting user initialization for wallet: ${walletAddress}`);
     initializationRef.current.attempted = true;
     initializationRef.current.lastWallet = walletAddress;
-    
-    let initTimeout: NodeJS.Timeout | null = null;
-    
-    console.log(`🔍 USER INIT DEBUG:`, {
-      walletAddress,
-      currentUserId: userId,
-      authenticated,
-      privyUserId: user?.id // Add this to see Privy ID
-    });
     
     const initUser = async () => {
       try {
         if (userId && initializationRef.current.lastUserId === userId) {
-          console.log(`✅ TRACKED: User ${userId} already initialized for this wallet`);
+          console.log(`✅ User ${userId} already initialized for this wallet`);
           initializationRef.current.completed = true;
           return;
         }
         
-        console.log(`📡 TRACKED: Getting user data for wallet: ${walletAddress}`);
+        console.log(`📡 Getting user data for wallet: ${walletAddress}`);
         const userData = await UserAPI.getUserOrCreate(walletAddress);
         
-        console.log(`📡 TRACKED: getUserOrCreate returned:`, userData);
+        console.log(`📡 getUserOrCreate returned:`, userData);
         
-        if (userData) {
-          console.log(`👤 TRACKED: About to set userId to: ${userData.id}`);
-          console.log(`👤 TRACKED: userData.id analysis:`, {
-            id: userData.id,
-            type: typeof userData.id,
-            length: userData.id?.length,
-            isUUID: userData.id?.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
-            isPrivyID: userData.id?.startsWith('did:privy:')
-          });
-          
-          trackedSetUserId(userData.id); // Use tracked version
+        if (userData && userData.id) {
+          console.log(`👤 Setting userId to: ${userData.id}`);
+          trackedSetUserId(userData.id);
           initializationRef.current.lastUserId = userData.id;
           
-          // Verify it was set correctly
+          // ✅ FIXED: Wait for socket initialization before triggering balance
           setTimeout(() => {
-            console.log(`👤 TRACKED: Verification after setUserId:`, {
-              expectedId: userData.id,
-              actualUserId: userId,
-              match: userId === userData.id
-            });
-          }, 100);
-          
-          initTimeout = setTimeout(() => {
-            console.log(`📡 TRACKED: Initializing user via socket with ID: ${userData.id}`);
+            console.log(`📡 Initializing user via socket with ID: ${userData.id}`);
             
             const socket = (window as any).gameSocket;
             if (socket) {
@@ -1959,48 +1932,33 @@ setTimeout(() => {
               });
               
               socket.once('userInitializeResult', (result: any) => {
-                console.log('📡 TRACKED: User initialization result:', result);
+                console.log('📡 User initialization result:', result);
                 
                 if (result.success) {
-                  console.log(`✅ TRACKED: User ${result.userId} initialized successfully`);
-                  
+                  console.log(`✅ User ${result.userId} initialized successfully`);
                   initializationRef.current.completed = true;
-                  initializationRef.current.lastUserId = result.userId;
                   
-                  // 🔍 Check if socket result has different ID
-                  if (result.userId !== userData.id) {
-                    console.warn(`⚠️ TRACKED: Socket returned different userId!`, {
-                      originalId: userData.id,
-                      socketId: result.userId,
-                      shouldUpdate: false // We shouldn't update to socket ID
-                    });
-                  }
-                  
+                  // ✅ FIXED: Single balance update after socket confirmation
                   setTimeout(() => {
-                    console.log(`🔄 TRACKED: Triggering balance update with userId: ${userId}`);
-                    try {
-                      updateCustodialBalance();
-                      updateRuggedBalance();
-                    } catch (error) {
-                      console.warn('⚠️ TRACKED: Balance update failed during initialization:', error);
-                    }
-                  }, 500);
+                    console.log(`🔄 Triggering initial balance update`);
+                    updateCustodialBalance(true); // Force initial update
+                  }, 1000);
                 } else {
-                  console.error('❌ TRACKED: User initialization failed:', result.error);
+                  console.error('❌ User initialization failed:', result.error);
                   toast.error('Failed to initialize wallet');
                   initializationRef.current.attempted = false;
                   initializationRef.current.completed = false;
                 }
               });
             } else {
-              console.error('❌ TRACKED: Socket not available for user initialization');
+              console.error('❌ Socket not available for user initialization');
               initializationRef.current.attempted = false;
               initializationRef.current.completed = false;
             }
-          }, 1000);
+          }, 1500); // Give more time for socket connection
         }
       } catch (error) {
-        console.error('❌ TRACKED: Could not initialize user:', error);
+        console.error('❌ Could not initialize user:', error);
         toast.error('Failed to initialize wallet');
         initializationRef.current.attempted = false;
         initializationRef.current.completed = false;
@@ -2008,11 +1966,7 @@ setTimeout(() => {
     };
     
     initUser();
-    
-    return () => {
-      if (initTimeout) clearTimeout(initTimeout);
-    };
-  }, [authenticated, walletAddress, userId, user?.id, trackedSetUserId, updateCustodialBalance, updateRuggedBalance]);
+  }, [authenticated, walletAddress, userId, user?.id, trackedSetUserId, updateCustodialBalance]);
 
   useEffect(() => {
     if (userId) {
@@ -2143,19 +2097,24 @@ useEffect(() => {
   const socket = (window as any).gameSocket;
   if (!socket) return;
   
-  const handleCustodialBalanceUpdate = (data: any) => {
+  // ✅ FIXED: Only listen to essential events, no balance conflicts
+  const handleCustodialTransferComplete = (data: any) => {
     if (data.userId === userId) {
-      console.log(`💰 Balance update for ${userId}:`, data.balance);
-      // Let the shared hook handle it automatically - no interference
+      console.log(`💳 Transfer completed for ${userId}, refreshing in 2s...`);
+      setTimeout(() => {
+        refreshCustodialBalance();
+      }, 2000);
     }
   };
   
-  socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+  // ✅ FIXED: Remove custodialBalanceUpdate listener to prevent conflicts
+  // The shared hook handles this now
+  socket.on('custodialTransferComplete', handleCustodialTransferComplete);
   
   return () => {
-    socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+    socket.off('custodialTransferComplete', handleCustodialTransferComplete);
   };
-}, [userId, walletAddress]);
+}, [userId, walletAddress, refreshCustodialBalance]);
   // Auto cashout effect
   useEffect(() => {
     if (

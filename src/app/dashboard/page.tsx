@@ -1,5 +1,3 @@
-// Replace the top section of your Dashboard component with this:
-
 'use client';
 
 import { FC, useState, useEffect, useContext, useCallback, useRef } from 'react';
@@ -50,9 +48,6 @@ const getSupabaseClient = () => {
   }
   return supabaseClient;
 };
-
-// Rest of your component code stays the same...
-// Just make sure you're using getSupabaseClient() instead of createClient directly
 
 // 🚀 FIX: TypeScript interface for bet data from Supabase
 interface PlayerBet {
@@ -305,14 +300,14 @@ const Dashboard: FC = () => {
   });
 
   // Add these with your other useState declarations:
-const [levelData, setLevelData] = useState({
-  level: 1,
-  experience: 0,
-  experiencePoints: 0,
-  experienceToNextLevel: 100,
-  progressPercentage: 0
-});
-const [isLoadingLevel, setIsLoadingLevel] = useState(false);
+  const [levelData, setLevelData] = useState({
+    level: 1,
+    experience: 0,
+    experiencePoints: 0,
+    experienceToNextLevel: 100,
+    progressPercentage: 0
+  });
+  const [isLoadingLevel, setIsLoadingLevel] = useState(false);
 
   const [enhancedUserStats, setEnhancedUserStats] = useState({
     winRate: 0,
@@ -322,6 +317,10 @@ const [isLoadingLevel, setIsLoadingLevel] = useState(false);
   });
   const [isLoadingStats, setIsLoadingStats] = useState<boolean>(false);
   const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false); // 🚀 FIX: Separate manual refresh state
+  
+  // 🚀 ENHANCED: Add these state variables for live updates
+  const [statsLastUpdated, setStatsLastUpdated] = useState<number>(0);
+  const [isStatsUpdating, setIsStatsUpdating] = useState<boolean>(false);
   
   // Initialization ref for user setup
   const initializationRef = useRef<{ 
@@ -519,151 +518,316 @@ const [isLoadingLevel, setIsLoadingLevel] = useState(false);
     };
   }, [isValidWallet, walletAddress]);
 
-  // 🚀 FIXED: Updated Dashboard to use users_unified table for stats
-// Replace the fetchUserStats useEffect in your Dashboard component with this:
-
-useEffect(() => {
-  const fetchUserStats = async () => {
+  const fetchLevelData = useCallback(async () => {
     if (!userId) {
-      console.log('🔍 Dashboard: No userId available for stats fetch');
-      setUserStats({
-        totalWagered: 0,
-        totalPayouts: 0,
-        gamesPlayed: 0,
-        profitLoss: 0
+      setLevelData({
+        level: 1,
+        experience: 0,
+        experiencePoints: 0,
+        experienceToNextLevel: 100,
+        progressPercentage: 0
       });
       return;
     }
 
-    setIsLoadingStats(true);
-    
-    const statsTimeout = setTimeout(() => {
-      console.log('⏰ Dashboard: Stats loading timeout - forcing completion');
-      setIsLoadingStats(false);
-    }, 10000);
-    
+    setIsLoadingLevel(true);
     try {
-      console.log(`📊 Dashboard: Fetching user stats from users_unified for userId: ${userId}`);
+      console.log(`🎯 Dashboard: Fetching level data for user ${userId}`);
       
-      // 🚀 FIX: Use UserAPI.getUserStats() which reads from users_unified table
-      const userStats = await UserAPI.getUserStats(userId);
+      const { data: user, error } = await supabase
+        .from('users_unified')
+        .select('level, experience, experience_points, badges_earned, achievements')
+        .eq('id', userId)
+        .single();
+
+      if (error || !user) {
+        console.error('❌ Failed to fetch level data:', error);
+        return;
+      }
+
+      const currentLevel = user.level || 1;
+      const currentXP = user.experience_points || 0;
       
-      if (userStats) {
-        console.log('✅ Dashboard: Got unified stats:', userStats);
+      // Calculate XP needed for next level
+      const baseXP = 100;
+      const xpForNextLevel = baseXP * Math.pow(1.5, currentLevel - 1);
+      const xpForCurrentLevel = currentLevel > 1 ? baseXP * Math.pow(1.5, currentLevel - 2) : 0;
+      const xpNeededThisLevel = xpForNextLevel - xpForCurrentLevel;
+      const xpProgressThisLevel = currentXP - xpForCurrentLevel;
+      
+      const progressPercentage = Math.min(100, Math.max(0, (xpProgressThisLevel / xpNeededThisLevel) * 100));
+
+      setLevelData({
+        level: currentLevel,
+        experience: user.experience || 0,
+        experiencePoints: currentXP,
+        experienceToNextLevel: Math.ceil(xpForNextLevel - currentXP),
+        progressPercentage: progressPercentage
+      });
+
+    } catch (error) {
+      console.error('❌ Error fetching level data:', error);
+    } finally {
+      setIsLoadingLevel(false);
+    }
+  }, [userId, supabase]);
+
+  // ADD the useEffect RIGHT AFTER fetchLevelData:
+  useEffect(() => {
+    if (userId) {
+      fetchLevelData();
+    }
+  }, [userId, fetchLevelData]);
+
+  // 🚀 ENHANCED: Live dashboard stats - Replace your existing fetchUserStats useEffect with this:
+  useEffect(() => {
+    const fetchUserStats = async () => {
+      if (!userId) {
+        console.log('🔍 Dashboard: No userId available for stats fetch');
+        setUserStats({
+          totalWagered: 0,
+          totalPayouts: 0,
+          gamesPlayed: 0,
+          profitLoss: 0
+        });
+        setEnhancedUserStats({
+          winRate: 0,
+          bestMultiplier: 0,
+          currentWinStreak: 0,
+          bestWinStreak: 0
+        });
+        return;
+      }
+
+      setIsLoadingStats(true);
+      
+      const statsTimeout = setTimeout(() => {
+        console.log('⏰ Dashboard: Stats loading timeout - forcing completion');
+        setIsLoadingStats(false);
+      }, 10000);
+      
+      try {
+        console.log(`📊 Dashboard: Fetching user stats from users_unified for userId: ${userId}`);
+        
+        const userStats = await UserAPI.getUserStats(userId);
+        
+        if (userStats) {
+          console.log('✅ Dashboard: Got unified stats:', userStats);
+          
+          setUserStats({
+            totalWagered: userStats.total_wagered,
+            totalPayouts: userStats.total_won,
+            gamesPlayed: userStats.games_played,
+            profitLoss: userStats.net_profit
+          });
+
+          setEnhancedUserStats({
+            winRate: userStats.win_rate || 0,
+            bestMultiplier: userStats.best_multiplier || 0,
+            currentWinStreak: userStats.current_win_streak || 0,
+            bestWinStreak: userStats.best_win_streak || 0
+          });
+          
+          console.log(`📊 Dashboard: Stats updated from users_unified for ${userId}`);
+        }
+        
+      } catch (error) {
+        console.error('❌ Dashboard: Failed to fetch user stats from users_unified:', error);
+        
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const errorDetails = error instanceof Error && 'details' in error ? (error as any).details : 'No details';
+        
+        console.log('🔍 Debug info:', {
+          userId,
+          walletAddress,
+          errorMessage,
+          errorDetails
+        });
         
         setUserStats({
-          totalWagered: userStats.total_wagered,
-          totalPayouts: userStats.total_won,
-          gamesPlayed: userStats.games_played,
-          profitLoss: userStats.net_profit
-        });
-
-        setEnhancedUserStats({
-          winRate: userStats.win_rate || 0,
-          bestMultiplier: userStats.best_multiplier || 0,
-          currentWinStreak: userStats.current_win_streak || 0,
-          bestWinStreak: userStats.best_win_streak || 0
+          totalWagered: 0,
+          totalPayouts: 0,
+          gamesPlayed: 0,
+          profitLoss: 0
         });
         
-        console.log(`📊 Dashboard: Stats updated from users_unified for ${userId}`);
+        setEnhancedUserStats({
+          winRate: 0,
+          bestMultiplier: 0,
+          currentWinStreak: 0,
+          bestWinStreak: 0
+        });
+        
+        toast.error(`Stats loading failed: ${errorMessage}`);
+      } finally {
+        clearTimeout(statsTimeout);
+        setTimeout(() => setIsLoadingStats(false), 100);
+      }
+    };
+
+    fetchUserStats();
+  }, [userId, walletAddress]);
+
+  // 🚀 NEW: Add this separate effect for LIVE stats updates via socket events
+  useEffect(() => {
+    if (!userId) return;
+    
+    const socket = (window as any).gameSocket;
+    if (!socket) return;
+    
+    console.log(`📊 Dashboard: Setting up LIVE stats listeners for user: ${userId}`);
+    
+    let statsRefreshTimeout: NodeJS.Timeout | null = null;
+    
+    // 🚀 LIVE: Debounced stats refresh function
+    const refreshStatsDebounced = () => {
+      if (statsRefreshTimeout) {
+        clearTimeout(statsRefreshTimeout);
       }
       
-    } catch (error) {
-      console.error('❌ Dashboard: Failed to fetch user stats from users_unified:', error);
+      // Show updating indicator
+      setIsStatsUpdating(true);
       
-      // 🚀 FIX: Properly handle unknown error type
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const errorDetails = error instanceof Error && 'details' in error ? (error as any).details : 'No details';
-      
-      // Show detailed error information
-      console.log('🔍 Debug info:', {
-        userId,
-        walletAddress,
-        errorMessage,
-        errorDetails
-      });
-      
-      // Set zeros on error
-      setUserStats({
-        totalWagered: 0,
-        totalPayouts: 0,
-        gamesPlayed: 0,
-        profitLoss: 0
-      });
-      
-      // Show helpful error message
-      toast.error(`Stats loading failed: ${errorMessage}`);
-    } finally {
-      clearTimeout(statsTimeout);
-      setTimeout(() => setIsLoadingStats(false), 100);
-    }
-  };
+      statsRefreshTimeout = setTimeout(async () => {
+        console.log(`📊 Dashboard LIVE: Refreshing stats for ${userId} after game event...`);
+        
+        try {
+          const userStats = await UserAPI.getUserStats(userId);
+          
+          if (userStats) {
+            console.log('📊 Dashboard LIVE: Stats updated:', userStats);
+            
+            setUserStats(prevStats => {
+              const newStats = {
+                totalWagered: userStats.total_wagered,
+                totalPayouts: userStats.total_won,
+                gamesPlayed: userStats.games_played,
+                profitLoss: userStats.net_profit
+              };
+              
+              // Only update if there's a meaningful change
+              if (JSON.stringify(prevStats) !== JSON.stringify(newStats)) {
+                console.log(`📊 Dashboard LIVE: Stats changed - updating display`);
+                setStatsLastUpdated(Date.now()); // 🚀 NEW: Track update time
+                return newStats;
+              }
+              return prevStats;
+            });
 
-  fetchUserStats();
-}, [userId, walletAddress]);
-const fetchLevelData = useCallback(async () => {
-  if (!userId) {
-    setLevelData({
-      level: 1,
-      experience: 0,
-      experiencePoints: 0,
-      experienceToNextLevel: 100,
-      progressPercentage: 0
-    });
-    return;
-  }
-
-  setIsLoadingLevel(true);
-  try {
-    console.log(`🎯 Dashboard: Fetching level data for user ${userId}`);
+            setEnhancedUserStats(prevEnhanced => {
+              const newEnhanced = {
+                winRate: userStats.win_rate || 0,
+                bestMultiplier: userStats.best_multiplier || 0,
+                currentWinStreak: userStats.current_win_streak || 0,
+                bestWinStreak: userStats.best_win_streak || 0
+              };
+              
+              if (JSON.stringify(prevEnhanced) !== JSON.stringify(newEnhanced)) {
+                console.log(`📊 Dashboard LIVE: Enhanced stats changed - updating display`);
+                return newEnhanced;
+              }
+              return prevEnhanced;
+            });
+          }
+        } catch (error) {
+          console.error('❌ Dashboard LIVE: Failed to refresh stats:', error);
+        } finally {
+          // Hide updating indicator
+          setTimeout(() => setIsStatsUpdating(false), 500);
+        }
+      }, 2000); // 2 second debounce to avoid rapid updates
+    };
     
-    const { data: user, error } = await supabase
-      .from('users_unified')
-      .select('level, experience, experience_points, badges_earned, achievements')
-      .eq('id', userId)
-      .single();
+    // 🚀 LIVE: Socket event handlers for real-time stats updates
+    const handleCustodialBetPlaced = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`🎯 Dashboard LIVE: Bet placed for ${userId} - refreshing stats...`);
+        refreshStatsDebounced();
+        
+        // Show immediate feedback
+        toast.success(`Bet placed: ${data.betAmount} SOL`, { 
+          duration: 2000,
+          id: 'bet-placed' 
+        });
+      }
+    };
 
-    if (error || !user) {
-      console.error('❌ Failed to fetch level data:', error);
-      return;
-    }
+    const handleCustodialCashout = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`💸 Dashboard LIVE: Cashout processed for ${userId} - refreshing stats...`);
+        refreshStatsDebounced();
+        
+        // Show immediate feedback with payout info
+        if (data.payout && data.multiplier) {
+          toast.success(`Cashed out at ${data.multiplier.toFixed(2)}x: +${data.payout.toFixed(3)} SOL!`, { 
+            duration: 3000,
+            id: 'cashout-success' 
+          });
+        }
+      }
+    };
 
-    const currentLevel = user.level || 1;
-    const currentXP = user.experience_points || 0;
+    const handleGameEnd = (data: any) => {
+      // Refresh stats when any game ends (in case user was playing)
+      console.log(`🎮 Dashboard LIVE: Game ended - refreshing stats for active players...`);
+      refreshStatsDebounced();
+    };
+
+    const handleUserStatsUpdate = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`📊 Dashboard LIVE: Direct stats update received for ${userId}`);
+        
+        // Immediate update from socket data if available
+        if (data.stats) {
+          setUserStats({
+            totalWagered: data.stats.total_wagered || 0,
+            totalPayouts: data.stats.total_won || 0,
+            gamesPlayed: data.stats.games_played || 0,
+            profitLoss: data.stats.net_profit || 0
+          });
+
+          setEnhancedUserStats({
+            winRate: data.stats.win_rate || 0,
+            bestMultiplier: data.stats.best_multiplier || 0,
+            currentWinStreak: data.stats.current_win_streak || 0,
+            bestWinStreak: data.stats.best_win_streak || 0
+          });
+        } else {
+          // Fallback to API fetch
+          refreshStatsDebounced();
+        }
+      }
+    };
+
+    const handleBetResult = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`🎲 Dashboard LIVE: Bet result received for ${userId}:`, data);
+        refreshStatsDebounced();
+      }
+    };
+
+    // Register all live stats event listeners
+    socket.on('custodialBetPlaced', handleCustodialBetPlaced);
+    socket.on('custodialCashout', handleCustodialCashout);
+    socket.on('gameEnd', handleGameEnd);
+    socket.on('userStatsUpdate', handleUserStatsUpdate);
+    socket.on('betResult', handleBetResult);
     
-    // Calculate XP needed for next level
-    const baseXP = 100;
-    const xpForNextLevel = baseXP * Math.pow(1.5, currentLevel - 1);
-    const xpForCurrentLevel = currentLevel > 1 ? baseXP * Math.pow(1.5, currentLevel - 2) : 0;
-    const xpNeededThisLevel = xpForNextLevel - xpForCurrentLevel;
-    const xpProgressThisLevel = currentXP - xpForCurrentLevel;
-    
-    const progressPercentage = Math.min(100, Math.max(0, (xpProgressThisLevel / xpNeededThisLevel) * 100));
+    return () => {
+      console.log(`📊 Dashboard: Cleaning up LIVE stats listeners for user: ${userId}`);
+      socket.off('custodialBetPlaced', handleCustodialBetPlaced);
+      socket.off('custodialCashout', handleCustodialCashout);
+      socket.off('gameEnd', handleGameEnd);
+      socket.off('userStatsUpdate', handleUserStatsUpdate);
+      socket.off('betResult', handleBetResult);
+      
+      if (statsRefreshTimeout) {
+        clearTimeout(statsRefreshTimeout);
+      }
+    };
+  }, [userId]);
 
-    setLevelData({
-      level: currentLevel,
-      experience: user.experience || 0,
-      experiencePoints: currentXP,
-      experienceToNextLevel: Math.ceil(xpForNextLevel - currentXP),
-      progressPercentage: progressPercentage
-    });
-
-  } catch (error) {
-    console.error('❌ Error fetching level data:', error);
-  } finally {
-    setIsLoadingLevel(false);
-  }
-}, [userId, supabase]);
-
-// ADD the useEffect RIGHT AFTER fetchLevelData:
-useEffect(() => {
-  if (userId) {
-    fetchLevelData();
-  }
-}, [userId, fetchLevelData]);
-
-
-  // 🚀 OPTIMIZED: Refresh data function with separate manual loading state
+  // 🚀 ENHANCED: Updated refreshData function with better feedback
   const refreshData = useCallback(async () => {
     if (!isValidWallet || !userId) {
       console.log('🔄 Dashboard: Cannot refresh - wallet or user not ready');
@@ -676,7 +840,7 @@ useEffect(() => {
     const refreshTimeout = setTimeout(() => {
       console.log('⏰ Dashboard: Manual refresh timeout - forcing completion');
       setIsManualRefreshing(false);
-    }, 10000);
+    }, 15000); // Increased timeout for manual refresh
     
     try {
       toast.loading('Refreshing dashboard data...', { id: 'dashboard-refresh' });
@@ -713,41 +877,44 @@ useEffect(() => {
         console.error('❌ Dashboard: Failed to refresh embedded wallet balance:', error);
       }
 
-          // Refresh user stats
-    try {
-      const userStats = await UserAPI.getUserStats(userId);
-      
-      if (userStats) {
-        setUserStats({
-          totalWagered: userStats.total_wagered,
-          totalPayouts: userStats.total_won,
-          gamesPlayed: userStats.games_played,
-          profitLoss: userStats.net_profit
-        });
+      // 🚀 ENHANCED: Refresh user stats with better error handling
+      try {
+        console.log('📊 Dashboard: Manual stats refresh...');
+        const userStats = await UserAPI.getUserStats(userId);
         
-        setEnhancedUserStats({
-          winRate: userStats.win_rate || 0,
-          bestMultiplier: userStats.best_multiplier || 0,
-          currentWinStreak: userStats.current_win_streak || 0,
-          bestWinStreak: userStats.best_win_streak || 0
-        });
+        if (userStats) {
+          setUserStats({
+            totalWagered: userStats.total_wagered,
+            totalPayouts: userStats.total_won,
+            gamesPlayed: userStats.games_played,
+            profitLoss: userStats.net_profit
+          });
+          
+          setEnhancedUserStats({
+            winRate: userStats.win_rate || 0,
+            bestMultiplier: userStats.best_multiplier || 0,
+            currentWinStreak: userStats.current_win_streak || 0,
+            bestWinStreak: userStats.best_win_streak || 0
+          });
+          
+          console.log('📊 Dashboard: Manual stats refresh completed');
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error('❌ Dashboard: Failed to refresh stats:', errorMessage);
+        toast.error('Failed to refresh stats');
       }
+      
+      toast.success('Dashboard data refreshed!', { id: 'dashboard-refresh' });
+      
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      console.error('❌ Dashboard: Failed to refresh stats:', errorMessage);
+      console.error('❌ Dashboard: Refresh failed:', error);
+      toast.error('Failed to refresh dashboard data', { id: 'dashboard-refresh' });
+    } finally {
+      clearTimeout(refreshTimeout);
+      setIsManualRefreshing(false);
     }
-    
-    toast.success('Dashboard data refreshed!', { id: 'dashboard-refresh' });
-    
-  } catch (error) {
-    console.error('❌ Dashboard: Refresh failed:', error);
-    toast.error('Failed to refresh dashboard data', { id: 'dashboard-refresh' });
-  } finally {
-    clearTimeout(refreshTimeout);
-    setIsManualRefreshing(false);
-  }
-}, [isValidWallet, userId, walletAddress, refreshCustodialBalance, fetchLevelData]);
-
+  }, [isValidWallet, userId, walletAddress, refreshCustodialBalance, fetchLevelData]);
 
   // 🚀 OPTIMIZED: Real-time socket listeners WITHOUT automatic stats refresh
   useEffect(() => {
@@ -798,21 +965,6 @@ useEffect(() => {
         }, 3000); // 3 second debounce for wallet
       };
 
-      // 🚀 FIX: Remove automatic stats refresh - just log the events
-      const handleCustodialBetPlaced = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`🎯 Dashboard REAL-TIME: Bet placed for ${userId} - stats will update on next manual refresh`);
-          // Don't automatically refresh stats - user can manually refresh if needed
-        }
-      };
-
-      const handleCustodialCashout = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`💸 Dashboard REAL-TIME: Cashout processed for ${userId} - stats will update on next manual refresh`);
-          // Don't automatically refresh stats - user can manually refresh if needed
-        }
-      };
-
       const handleTransactionConfirmed = (data: any) => {
         if (data.userId === userId || data.walletAddress === walletAddress) {
           console.log(`🔗 Dashboard REAL-TIME: Transaction confirmed - scheduling wallet refresh`);
@@ -821,21 +973,17 @@ useEffect(() => {
       };
 
       // Register socket event listeners
-      socket.on('custodialBetPlaced', handleCustodialBetPlaced);
-      socket.on('custodialCashout', handleCustodialCashout);
       socket.on('transactionConfirmed', handleTransactionConfirmed);
       
       return () => {
         console.log(`🔌 Dashboard: Cleaning up optimized real-time listeners for user: ${userId}`);
-        socket.off('custodialBetPlaced', handleCustodialBetPlaced);
-        socket.off('custodialCashout', handleCustodialCashout);
         socket.off('transactionConfirmed', handleTransactionConfirmed);
         
         // Clear any pending timeouts
         if (walletRefreshTimeout) clearTimeout(walletRefreshTimeout);
       };
     }
-  }, [userId, walletAddress]); // 🚀 FIX: Remove supabase from dependencies since we don't use automatic stats refresh
+  }, [userId, walletAddress]);
 
   // Loading state while Privy initializes
   if (!ready) {
@@ -868,81 +1016,81 @@ useEffect(() => {
           )}
         </div>
 
-   {/* Enhanced Player Profile with Real Level System */}
-{isValidWallet && userId && (
-  <div className="bg-gray-900 rounded-lg p-6 mb-8">
-    <h2 className="text-xl font-bold text-white mb-4">Player Profile</h2>
-    
-    {isLoadingLevel ? (
-      <div className="animate-pulse space-y-4">
-        <div className="h-6 bg-gray-700 rounded w-32"></div>
-        <div className="h-4 bg-gray-700 rounded w-full"></div>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="h-16 bg-gray-700 rounded"></div>
-          <div className="h-16 bg-gray-700 rounded"></div>
-          <div className="h-16 bg-gray-700 rounded"></div>
-        </div>
-      </div>
-    ) : (
-      <div className="space-y-6">
-        {/* Level and XP Section */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center space-x-4">
-              <div className="bg-purple-600 rounded-full w-12 h-12 flex items-center justify-center">
-                <span className="text-white font-bold text-lg">{levelData.level}</span>
+        {/* Enhanced Player Profile with Real Level System */}
+        {isValidWallet && userId && (
+          <div className="bg-gray-900 rounded-lg p-6 mb-8">
+            <h2 className="text-xl font-bold text-white mb-4">Player Profile</h2>
+            
+            {isLoadingLevel ? (
+              <div className="animate-pulse space-y-4">
+                <div className="h-6 bg-gray-700 rounded w-32"></div>
+                <div className="h-4 bg-gray-700 rounded w-full"></div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="h-16 bg-gray-700 rounded"></div>
+                  <div className="h-16 bg-gray-700 rounded"></div>
+                  <div className="h-16 bg-gray-700 rounded"></div>
+                </div>
               </div>
-              <div>
-                <h3 className="text-white font-bold text-lg">Level {levelData.level}</h3>
-                <p className="text-gray-400 text-sm">{levelData.experiencePoints} Experience Points</p>
-              </div>
-            </div>
-            <div className="text-right">
-              <p className="text-purple-400 font-semibold">
-                {levelData.experienceToNextLevel > 0 
-                  ? `${levelData.experienceToNextLevel} XP to Level ${levelData.level + 1}`
-                  : "Max Level Reached!"
-                }
-              </p>
-            </div>
-          </div>
-          
-          {/* Enhanced Progress Bar */}
-          <div className="relative">
-            <div className="w-full bg-gray-700 rounded-full h-3">
-              <div 
-                className="bg-gradient-to-r from-purple-500 via-blue-500 to-purple-600 h-3 rounded-full transition-all duration-700 ease-out relative"
-                style={{ width: `${Math.max(5, levelData.progressPercentage)}%` }}
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-blue-400 rounded-full blur-sm opacity-60"></div>
-              </div>
-            </div>
-            <div className="flex justify-between mt-1 text-xs text-gray-400">
-              <span>{levelData.progressPercentage.toFixed(1)}% Complete</span>
-              <span>Level {levelData.level + 1}</span>
-            </div>
-          </div>
-        </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Level and XP Section */}
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center space-x-4">
+                      <div className="bg-purple-600 rounded-full w-12 h-12 flex items-center justify-center">
+                        <span className="text-white font-bold text-lg">{levelData.level}</span>
+                      </div>
+                      <div>
+                        <h3 className="text-white font-bold text-lg">Level {levelData.level}</h3>
+                        <p className="text-gray-400 text-sm">{levelData.experiencePoints} Experience Points</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-purple-400 font-semibold">
+                        {levelData.experienceToNextLevel > 0 
+                          ? `${levelData.experienceToNextLevel} XP to Level ${levelData.level + 1}`
+                          : "Max Level Reached!"
+                        }
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {/* Enhanced Progress Bar */}
+                  <div className="relative">
+                    <div className="w-full bg-gray-700 rounded-full h-3">
+                      <div 
+                        className="bg-gradient-to-r from-purple-500 via-blue-500 to-purple-600 h-3 rounded-full transition-all duration-700 ease-out relative"
+                        style={{ width: `${Math.max(5, levelData.progressPercentage)}%` }}
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-blue-400 rounded-full blur-sm opacity-60"></div>
+                      </div>
+                    </div>
+                    <div className="flex justify-between mt-1 text-xs text-gray-400">
+                      <span>{levelData.progressPercentage.toFixed(1)}% Complete</span>
+                      <span>Level {levelData.level + 1}</span>
+                    </div>
+                  </div>
+                </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-gray-800 rounded-lg p-4 text-center">
-            <div className="text-2xl font-bold text-purple-400">{levelData.level}</div>
-            <div className="text-gray-400 text-sm">Current Level</div>
+                {/* Stats Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-gray-800 rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-purple-400">{levelData.level}</div>
+                    <div className="text-gray-400 text-sm">Current Level</div>
+                  </div>
+                  <div className="bg-gray-800 rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-blue-400">{levelData.experiencePoints}</div>
+                    <div className="text-gray-400 text-sm">Total XP</div>
+                  </div>
+                  <div className="bg-gray-800 rounded-lg p-4 text-center">
+                    <div className="text-2xl font-bold text-green-400">{levelData.experienceToNextLevel}</div>
+                    <div className="text-gray-400 text-sm">XP to Next Level</div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-          <div className="bg-gray-800 rounded-lg p-4 text-center">
-            <div className="text-2xl font-bold text-blue-400">{levelData.experiencePoints}</div>
-            <div className="text-gray-400 text-sm">Total XP</div>
-          </div>
-          <div className="bg-gray-800 rounded-lg p-4 text-center">
-            <div className="text-2xl font-bold text-green-400">{levelData.experienceToNextLevel}</div>
-            <div className="text-gray-400 text-sm">XP to Next Level</div>
-          </div>
-        </div>
-      </div>
-    )}
-  </div>
-)}
+        )}
 
         {/* Wallet Status */}
         <div className="bg-gray-900 rounded-lg p-6 mb-8">
@@ -1042,86 +1190,140 @@ useEffect(() => {
           />
         )}
 
-        {/* Enhanced Game Stats with more data from users_unified */}
-{isValidWallet && (
-  <div className="bg-gray-900 rounded-lg p-6 mb-8">
-    <h2 className="text-xl font-bold text-white mb-4 flex items-center">
-      <TrendingUp size={20} className="mr-2" />
-      Game Statistics
-    </h2>
-    
-    {isLoadingStats ? (
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="animate-pulse">
-            <div className="h-4 bg-gray-700 rounded w-24 mb-2"></div>
-            <div className="h-8 bg-gray-700 rounded w-20"></div>
-          </div>
-        ))}
-      </div>
-    ) : (
-      <>
-        {/* Primary Stats Row */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-          <div>
-            <div className="text-gray-400 mb-1">Total Wagered</div>
-            <div className="text-2xl font-bold text-white">
-              {userStats.totalWagered.toFixed(3)} SOL
+        {/* 🚀 ENHANCED: Game Statistics section with live updates */}
+        {isValidWallet && (
+          <div className="bg-gray-900 rounded-lg p-6 mb-8">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-white flex items-center">
+                <TrendingUp size={20} className="mr-2" />
+                Game Statistics
+                {/* 🚀 LIVE: Live update indicator */}
+                {isStatsUpdating && (
+                  <div className="ml-3 flex items-center text-green-400 text-sm">
+                    <div className="animate-pulse w-2 h-2 bg-green-400 rounded-full mr-2"></div>
+                    Updating...
+                  </div>
+                )}
+              </h2>
+              
+              {/* 🚀 LIVE: Last updated timestamp */}
+              <div className="text-xs text-gray-500">
+                {statsLastUpdated > 0 && (
+                  <span>Last updated: {new Date(statsLastUpdated).toLocaleTimeString()}</span>
+                )}
+              </div>
             </div>
-          </div>
-          <div>
-            <div className="text-gray-400 mb-1">Total Won</div>
-            <div className="text-2xl font-bold text-green-400">
-              {userStats.totalPayouts.toFixed(3)} SOL
-            </div>
-          </div>
-          <div>
-            <div className="text-gray-400 mb-1">Games Played</div>
-            <div className="text-2xl font-bold text-white">
-              {userStats.gamesPlayed}
-            </div>
-          </div>
-          <div>
-            <div className="text-gray-400 mb-1">Net Profit/Loss</div>
-            <div className={`text-2xl font-bold ${userStats.profitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {userStats.profitLoss >= 0 ? '+' : ''}{userStats.profitLoss.toFixed(3)} SOL
-            </div>
-          </div>
-        </div>
+            
+            {isLoadingStats ? (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="animate-pulse">
+                    <div className="h-4 bg-gray-700 rounded w-24 mb-2"></div>
+                    <div className="h-8 bg-gray-700 rounded w-20"></div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                {/* Primary Stats Row with live update animations */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                  <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-50' : ''}`}>
+                    <div className="text-gray-400 mb-1">Total Wagered</div>
+                    <div className="text-2xl font-bold text-white">
+                      {userStats.totalWagered.toFixed(3)} SOL
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      All time betting volume
+                    </div>
+                  </div>
+                  
+                  <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-green-400 ring-opacity-50' : ''}`}>
+                    <div className="text-gray-400 mb-1">Total Won</div>
+                    <div className="text-2xl font-bold text-green-400">
+                      {userStats.totalPayouts.toFixed(3)} SOL
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Successful cashouts
+                    </div>
+                  </div>
+                  
+                  <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-purple-400 ring-opacity-50' : ''}`}>
+                    <div className="text-gray-400 mb-1">Games Played</div>
+                    <div className="text-2xl font-bold text-white">
+                      {userStats.gamesPlayed}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Rounds participated
+                    </div>
+                  </div>
+                  
+                  <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-yellow-400 ring-opacity-50' : ''}`}>
+                    <div className="text-gray-400 mb-1">Net Profit/Loss</div>
+                    <div className={`text-2xl font-bold ${userStats.profitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {userStats.profitLoss >= 0 ? '+' : ''}{userStats.profitLoss.toFixed(3)} SOL
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {userStats.profitLoss >= 0 ? 'Total profit' : 'Total loss'}
+                    </div>
+                  </div>
+                </div>
 
-        {/* 🚀 FIXED: Additional Stats using enhancedUserStats instead of currentUser */}
-        {enhancedUserStats.winRate > 0 || enhancedUserStats.bestMultiplier > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 border-t border-gray-700">
-            <div>
-              <div className="text-gray-400 mb-1">Win Rate</div>
-              <div className="text-lg font-bold text-blue-400">
-                {(enhancedUserStats.winRate * 100).toFixed(1)}%
-              </div>
-            </div>
-            <div>
-              <div className="text-gray-400 mb-1">Best Multiplier</div>
-              <div className="text-lg font-bold text-purple-400">
-                {enhancedUserStats.bestMultiplier.toFixed(2)}x
-              </div>
-            </div>
-            <div>
-              <div className="text-gray-400 mb-1">Current Streak</div>
-              <div className="text-lg font-bold text-yellow-400">
-                {enhancedUserStats.currentWinStreak} wins
-              </div>
-            </div>
-            <div>
-              <div className="text-gray-400 mb-1">Best Streak</div>
-              <div className="text-lg font-bold text-orange-400">
-                {enhancedUserStats.bestWinStreak} wins
-              </div>
-            </div>
+                {/* Enhanced Additional Stats */}
+                {(enhancedUserStats.winRate > 0 || enhancedUserStats.bestMultiplier > 0 || userStats.gamesPlayed > 0) && (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 border-t border-gray-700">
+                    <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-30' : ''}`}>
+                      <div className="text-gray-400 mb-1">Win Rate</div>
+                      <div className="text-lg font-bold text-blue-400">
+                        {(enhancedUserStats.winRate * 100).toFixed(1)}%
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Success percentage
+                      </div>
+                    </div>
+                    
+                    <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-purple-400 ring-opacity-30' : ''}`}>
+                      <div className="text-gray-400 mb-1">Best Multiplier</div>
+                      <div className="text-lg font-bold text-purple-400">
+                        {enhancedUserStats.bestMultiplier.toFixed(2)}x
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Highest cashout
+                      </div>
+                    </div>
+                    
+                    <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-yellow-400 ring-opacity-30' : ''}`}>
+                      <div className="text-gray-400 mb-1">Current Streak</div>
+                      <div className="text-lg font-bold text-yellow-400">
+                        {enhancedUserStats.currentWinStreak} wins
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Active win streak
+                      </div>
+                    </div>
+                    
+                    <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-orange-400 ring-opacity-30' : ''}`}>
+                      <div className="text-gray-400 mb-1">Best Streak</div>
+                      <div className="text-lg font-bold text-orange-400">
+                        {enhancedUserStats.bestWinStreak} wins
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Personal record
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 🚀 NEW: Live stats help text */}
+                <div className="mt-4 pt-4 border-t border-gray-700">
+                  <div className="flex items-center text-xs text-gray-500">
+                    <div className="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div>
+                    <span>Stats update automatically when you play • Last sync: {statsLastUpdated > 0 ? new Date(statsLastUpdated).toLocaleTimeString() : 'Not yet synced'}</span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
-        ) : null}
-      </>
-    )}
-  </div>
-)}
+        )}
 
         {/* Quick Actions */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">

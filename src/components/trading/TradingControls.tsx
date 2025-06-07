@@ -1123,7 +1123,6 @@ const TradingControls: FC<TradingControlsProps> = ({
     setUserId(newUserId);
   }, []);
   
-  console.log(`💰 TRACKED: useSharedCustodialBalance called with userId: ${userId}`);
 
   const { 
     custodialBalance, 

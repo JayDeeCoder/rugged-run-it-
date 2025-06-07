@@ -1,4 +1,6 @@
-// src/app/pages/settings.tsx
+// src/app/settings/page.tsx
+'use client';
+
 import { FC, useState, useContext, useEffect } from 'react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import { UserContext } from '../../context/UserContext';

@@ -166,15 +166,16 @@ export interface LeaderboardEntry {
   badges_earned: string[];
 }
 
+// User stats interface - includes both stored and calculated fields
 export interface UserStats {
   total_wagered: number;
   total_won: number;
   total_lost: number;
-  net_profit: number;
+  net_profit: number;        // Calculated by database: (total_won - total_lost)
   games_played: number;
   games_won: number;
   games_lost: number;
-  win_rate: number;
+  win_rate: number;          // Calculated by database: (games_won / games_played) * 100
   best_multiplier: number;
   largest_win: number;
   largest_loss: number;
@@ -599,7 +600,7 @@ export class UserAPI {
     try {
       console.log(`📊 Updating user stats for bet: userId=${userId}, amount=${betAmount}, profit=${profitLoss}`);
 
-      // Get current user stats
+      // Get current user stats (excluding generated columns)
       const { data: currentUser, error: fetchError } = await supabase
         .from('users_unified')
         .select(`
@@ -610,13 +611,11 @@ export class UserAPI {
           total_wagered,
           total_won,
           total_lost,
-          net_profit,
           largest_win,
           largest_loss,
           best_multiplier,
           current_win_streak,
-          best_win_streak,
-          win_rate
+          best_win_streak
         `)
         .eq('id', userId)
         .single();
@@ -635,20 +634,18 @@ export class UserAPI {
         total_wagered: (parseFloat(currentUser.total_wagered) || 0) + betAmount,
         total_won: (parseFloat(currentUser.total_won) || 0) + (profitLoss > 0 ? profitLoss + betAmount : 0),
         total_lost: (parseFloat(currentUser.total_lost) || 0) + (profitLoss < 0 ? Math.abs(profitLoss) : 0),
-        net_profit: (parseFloat(currentUser.net_profit) || 0) + profitLoss,
         largest_win: Math.max(parseFloat(currentUser.largest_win) || 0, profitLoss > 0 ? profitLoss : 0),
         largest_loss: Math.max(parseFloat(currentUser.largest_loss) || 0, profitLoss < 0 ? Math.abs(profitLoss) : 0),
         best_multiplier: Math.max(parseFloat(currentUser.best_multiplier) || 0, multiplier || 0),
         current_win_streak: isWin ? (currentUser.current_win_streak || 0) + 1 : 0,
         best_win_streak: Math.max(currentUser.best_win_streak || 0, isWin ? (currentUser.current_win_streak || 0) + 1 : currentUser.current_win_streak || 0),
         updated_at: new Date().toISOString()
+        // EXCLUDED (auto-calculated by database):
+        // win_rate: calculated as (games_won / total_games_played) * 100
+        // net_profit: calculated as (total_won - total_lost)
       };
 
-      // Calculate win rate
-      const totalGames = newStats.total_games_played;
-      newStats.win_rate = totalGames > 0 ? (newStats.games_won / totalGames) * 100 : 0;
-
-      // Update user stats
+      // Update user stats (database will calculate win_rate and net_profit automatically)
       const { error: updateError } = await supabase
         .from('users_unified')
         .update(newStats)
@@ -659,7 +656,13 @@ export class UserAPI {
         return false;
       }
 
-      console.log(`✅ Successfully updated user stats: games=${newStats.total_games_played}, profit=${newStats.net_profit}`);
+      console.log(`✅ Successfully updated user stats: games=${newStats.total_games_played}`);
+      
+      // If you need these values for logging/debugging (not stored in DB):
+      const calculatedWinRate = newStats.total_games_played > 0 ? (newStats.games_won / newStats.total_games_played) * 100 : 0;
+      const calculatedNetProfit = newStats.total_won - newStats.total_lost;
+      console.log(`📈 Calculated stats: win_rate=${calculatedWinRate.toFixed(1)}%, net_profit=${calculatedNetProfit.toFixed(2)}`);
+      
       return true;
 
     } catch (error) {
@@ -669,7 +672,7 @@ export class UserAPI {
   }
 
   /**
-   * Sync individual user stats from player_bets table
+   * Sync individual user stats from player_bets table (SAFE VERSION)
    */
   static async syncUserStatsFromBets(userId: string): Promise<boolean> {
     try {
@@ -695,7 +698,6 @@ export class UserAPI {
       let totalWagered = 0;
       let totalWon = 0;
       let totalLost = 0;
-      let netProfit = 0;
       let gamesWon = 0;
       let gamesLost = 0;
       let largestWin = 0;
@@ -714,7 +716,6 @@ export class UserAPI {
         const multiplier = parseFloat(bet.cashout_multiplier) || 0;
         
         totalWagered += betAmount;
-        netProfit += profitLoss;
 
         if (profitLoss > 0) {
           // Win
@@ -736,11 +737,9 @@ export class UserAPI {
 
       // Current win streak is the streak at the end
       currentWinStreak = tempWinStreak;
-
       const totalGames = gamesWon + gamesLost;
-      const winRate = totalGames > 0 ? (gamesWon / totalGames) * 100 : 0;
 
-      // Update user stats
+      // Update user stats (SAFE - no generated columns)
       const updatedStats = {
         total_games_played: totalGames,
         total_bets_placed: bets.length,
@@ -749,14 +748,15 @@ export class UserAPI {
         total_wagered: totalWagered,
         total_won: totalWon,
         total_lost: totalLost,
-        net_profit: netProfit,
-        win_rate: winRate,
         largest_win: largestWin,
         largest_loss: largestLoss,
         best_multiplier: bestMultiplier,
         current_win_streak: currentWinStreak,
         best_win_streak: bestWinStreak,
         updated_at: new Date().toISOString()
+        // EXCLUDED (auto-calculated by database):
+        // win_rate: (games_won / total_games_played) * 100
+        // net_profit: (total_won - total_lost)
       };
 
       const { error: updateError } = await supabase
@@ -769,7 +769,7 @@ export class UserAPI {
         return false;
       }
 
-      console.log(`✅ Synced stats for user ${userId}: ${totalGames} games, $${netProfit.toFixed(2)} profit`);
+      console.log(`✅ Synced stats for user ${userId}: ${totalGames} games`);
       return true;
 
     } catch (error) {
@@ -779,7 +779,7 @@ export class UserAPI {
   }
 
   /**
-   * Sync all user stats from player_bets table (one-time fix)
+   * Sync all user stats from player_bets table (SAFE VERSION)
    */
   static async syncAllUserStats(): Promise<boolean> {
     try {
@@ -798,13 +798,21 @@ export class UserAPI {
       console.log(`📊 Syncing stats for ${users?.length || 0} users...`);
 
       // Process each user
+      let processedCount = 0;
       for (const user of users || []) {
         await this.syncUserStatsFromBets(user.id);
+        processedCount++;
+        
+        // Log progress every 25 users
+        if (processedCount % 25 === 0) {
+          console.log(`📊 Progress: ${processedCount}/${users?.length} users processed`);
+        }
+        
         // Small delay to avoid overwhelming the database
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
 
-      console.log('✅ User stats sync completed');
+      console.log('✅ User stats sync completed successfully!');
       return true;
 
     } catch (error) {
@@ -814,7 +822,7 @@ export class UserAPI {
   }
 
   /**
-   * Enhanced recordBet function that also updates user stats
+   * Enhanced recordBet function that also updates user stats (SAFE VERSION)
    */
   static async recordBetWithStatsUpdate(
     gameId: string,
@@ -853,6 +861,23 @@ export class UserAPI {
       console.error('❌ Error recording bet with stats update:', error);
       return false;
     }
+  }
+
+  /**
+   * Get calculated stats (win_rate, net_profit) without storing them
+   */
+  static calculateDerivedStats(statsData: {
+    total_games_played: number;
+    games_won: number;
+    total_won: number;
+    total_lost: number;
+  }): { win_rate: number; net_profit: number } {
+    const win_rate = statsData.total_games_played > 0 
+      ? (statsData.games_won / statsData.total_games_played) * 100 
+      : 0;
+    const net_profit = statsData.total_won - statsData.total_lost;
+    
+    return { win_rate, net_profit };
   }
 
   /**

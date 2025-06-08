@@ -728,7 +728,7 @@ const SettingsPage: FC = () => {
                     </p>
                     <div className="text-sm">
                       <div>📧 Email: IRUGGEDSUPPORT@IRUGGED.COM</div>
-                      <div>💬 Discord: <a href="https://discord.gg/trrn7EZH" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300">Join our community</a></div>
+                      <div>💬 Discord: <a href="https://discord.gg/ZhhGJXB4yD" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300">Join our community</a></div>
                       <div>🐦 Twitter: @ruggeddotfun</div>
                     </div>
                   </div>
@@ -739,7 +739,7 @@ const SettingsPage: FC = () => {
                     </p>
                     <div className="flex space-x-2">
                       <a 
-                        href="https://discord.gg/trrn7EZH" 
+                        href="https://discord.gg/ZhhGJXB4yD" 
                         target="_blank" 
                         rel="noopener noreferrer"
                         className="px-3 py-1 bg-purple-600/20 hover:bg-purple-600/30 rounded text-sm transition-colors"

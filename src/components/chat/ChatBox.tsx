@@ -98,7 +98,7 @@ const ChatBox: FC = () => {
           </div>
         </h2>
         <div className="flex space-x-3">
-          <a href="https://discord.gg/trrn7EZH" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300">
+          <a href="https://discord.gg/ZhhGJXB4yD" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300">
             <Image
               src="/images/icons8-discord.svg"
               width={20}

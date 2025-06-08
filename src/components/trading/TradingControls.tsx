@@ -115,7 +115,7 @@ const useWalletBalance = (walletAddress: string) => {
         if (!loading) {
           updateBalance();
         }
-      }, 30000); // 30 seconds
+      }, 15000); // 15 seconds
       
       return () => {
         if (updateIntervalRef.current) {
@@ -150,7 +150,7 @@ const useWalletBalance = (walletAddress: string) => {
           console.log(`🔗 REAL-TIME: Transaction confirmed for ${walletAddress}, refreshing balance...`);
           
           // Force refresh after confirmation with delay for blockchain settlement
-          setTimeout(forceRefresh, 3000);
+          setTimeout(forceRefresh, 2000);
         }
       };
 
@@ -160,7 +160,7 @@ const useWalletBalance = (walletAddress: string) => {
           console.log(`🎯 REAL-TIME: Bet placed from ${walletAddress}, refreshing balance...`);
           
           // Refresh balance after bet placement
-          setTimeout(forceRefresh, 2000);
+          setTimeout(forceRefresh, 1500);
         }
       };
 
@@ -170,7 +170,7 @@ const useWalletBalance = (walletAddress: string) => {
           console.log(`💸 REAL-TIME: Payout to ${walletAddress}, refreshing balance...`);
           
           // Refresh balance after payout
-          setTimeout(forceRefresh, 2000);
+          setTimeout(forceRefresh, 1000);
           
           if (data.amount) {
             toast.success(`Payout received: +${data.amount?.toFixed(3)} SOL`);
@@ -685,7 +685,7 @@ const BettingSection: FC<{
   onQuickTransfer
 }) => {
   // Quick transfer amounts
-  const quickTransferAmounts = [0.01, 0.05, 0.1, 0.5];
+  const quickTransferAmounts = [0.05, 0.1, 0.5, 1.0];
   const [isTransferMode, setIsTransferMode] = useState(false);
   
   // 🚀 ADD THIS MISSING VARIABLE:
@@ -1249,7 +1249,7 @@ const updateRecentTransfers = () => {};
 
   const betValidationError = useMemo(() => {
     const amountNum = parseFloat(amount);
-    const minBetAmount = currentToken === TokenType.SOL ? 0.002 : 1;
+    const minBetAmount = currentToken === TokenType.SOL ? 0.005 : 1;
     const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
     
     if (isNaN(amountNum) || amountNum <= 0) return 'Enter valid amount';
@@ -1269,7 +1269,7 @@ const updateRecentTransfers = () => {};
 
   const quickAmounts = useMemo(() => {
     return currentToken === TokenType.SOL 
-      ? [0.01, 0.05, 0.1, 0.5] 
+      ? [0.05, 0.1, 0.25, 0.5] 
       : [10, 50, 100, 500];
   }, [currentToken]);
 
@@ -1310,10 +1310,10 @@ const updateRecentTransfers = () => {};
       
       // ✅ FIXED: Sequential refresh to prevent race conditions
       await refreshEmbeddedBalance();
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 250));
       
       await refreshCustodialBalance();
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 250));
       
       await refreshRuggedBalance();
       
@@ -1406,7 +1406,7 @@ const updateRecentTransfers = () => {};
       return;
     }
     
-    const minBetAmount = currentToken === TokenType.SOL ? 0.001 : 1;
+    const minBetAmount = currentToken === TokenType.SOL ? 0.005 : 1;
     const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
     
     if (amountNum < minBetAmount) {
@@ -2160,7 +2160,7 @@ useEffect(() => {
   }, [isConnected, isCashingOut, setIsCashingOut]);
 
   // Quick transfer amounts
-  const quickTransferAmounts = [0.001, 0.01, 0.05, 0.1];
+  const quickTransferAmounts = [0.05, 0.1, 0.5, 1.0];
 
   // Handle auto cashout value change
   const handleAutoCashoutValueChange = useCallback((value: string) => {

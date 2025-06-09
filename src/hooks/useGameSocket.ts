@@ -133,7 +133,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
   // Enhanced connection with automatic reconnection
   useEffect(() => {
-    const serverUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'wss://1741-3-16-49-236.ngrok-free.app';
+    const serverUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'wss://irugged-run.ngrok.app';
     
     console.log('🔍 Environment check:');
     console.log('  - NODE_ENV:', process.env.NODE_ENV);

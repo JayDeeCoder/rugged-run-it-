@@ -1,5 +1,5 @@
-// Enhanced useGameSocket hook with REAL-TIME liquidity updates
-// + Missing artificialBoostUpdate handler + proper liquidity field updates
+// Enhanced useGameSocket hook with FIXED CONNECTION LOGIC + REAL-TIME liquidity updates
+// 🚀 FIXED: Incorporates the connection improvements from dashboard/leaderboard
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
@@ -63,6 +63,113 @@ interface UserInitResult {
   embeddedBalance?: number;
 }
 
+// 🚀 FIXED: Enhanced socket initialization with better connection handling
+const initializeGameSocket = async (): Promise<Socket | null> => {
+  return new Promise((resolve) => {
+    try {
+      // Check if socket already exists on window
+      let gameSocket = (window as any).gameSocket;
+      
+      if (gameSocket && gameSocket.connected) {
+        console.log('✅ Game Socket: Using existing connected socket');
+        resolve(gameSocket);
+        return;
+      }
+      
+      if (gameSocket && !gameSocket.connected) {
+        console.log('🔌 Game Socket: Existing socket found but disconnected, reconnecting...');
+        gameSocket.connect();
+        
+        gameSocket.once('connect', () => {
+          console.log('✅ Game Socket: Reconnected successfully');
+          resolve(gameSocket);
+        });
+        
+        setTimeout(() => {
+          console.warn('⚠️ Game Socket: Reconnect timeout, creating new socket');
+          gameSocket = null;
+          initializeNewSocket();
+        }, 5000);
+        
+        return;
+      }
+      
+      // No existing socket, create new one
+      initializeNewSocket();
+      
+      function initializeNewSocket() {
+        // Check if socket.io is available
+        const io = (window as any).io;
+        if (!io) {
+          console.warn('⚠️ Game Socket: Socket.io not found, loading from CDN...');
+          
+          // Load socket.io if not present
+          if (typeof window !== 'undefined' && !document.querySelector('script[src*="socket.io"]')) {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js';
+            script.onload = () => {
+              console.log('✅ Game Socket: Socket.io loaded from CDN');
+              // Retry after loading
+              setTimeout(() => initializeNewSocket(), 1000);
+            };
+            script.onerror = () => {
+              console.error('❌ Game Socket: Failed to load socket.io from CDN');
+              resolve(null);
+            };
+            document.head.appendChild(script);
+          }
+          return;
+        }
+        
+        // Create new socket connection
+        const serverUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'wss://irugged-run.ngrok.app';
+        
+        console.log('🔌 Game Socket: Creating new connection to:', serverUrl);
+        
+        gameSocket = io(serverUrl, {
+          transports: ['websocket', 'polling'],
+          timeout: 20000,
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 5000,
+          forceNew: true,
+          upgrade: true,
+          rememberUpgrade: false,
+        });
+
+        // Store socket globally for other components
+        (window as any).gameSocket = gameSocket;
+        (window as any).socket = gameSocket;
+
+        // Connection handlers
+        gameSocket.on('connect', () => {
+          console.log('✅ Game Socket: Connected successfully');
+          console.log('  - Transport:', gameSocket.io.engine.transport.name);
+          console.log('  - Socket ID:', gameSocket.id);
+          resolve(gameSocket);
+        });
+
+        gameSocket.on('connect_error', (error: any) => {
+          console.error('❌ Game Socket: Connection error:', error);
+          resolve(null);
+        });
+
+        // Timeout fallback
+        setTimeout(() => {
+          if (!gameSocket.connected) {
+            console.error('❌ Game Socket: Connection timeout');
+            resolve(null);
+          }
+        }, 10000);
+      }
+    } catch (error) {
+      console.error('❌ Game Socket: Initialization error:', error);
+      resolve(null);
+    }
+  });
+};
+
 export function useGameSocket(walletAddress: string, userId?: string) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -83,6 +190,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
   const gameStateRef = useRef<GameState | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<number>(0);
+  const socketInitRef = useRef(false);
 
   // Calculate server time offset for synchronization
   const syncServerTime = useCallback((serverTime: number) => {
@@ -131,498 +239,471 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     return updatedGame;
   }, []);
 
-  // Enhanced connection with automatic reconnection
+  // 🚀 FIXED: Enhanced connection with improved initialization
   useEffect(() => {
-    const serverUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'wss://irugged-run.ngrok.app';
+    if (socketInitRef.current) return;
     
-    console.log('🔍 Environment check:');
+    console.log('🔍 Game Socket: Environment check:');
     console.log('  - NODE_ENV:', process.env.NODE_ENV);
     console.log('  - NEXT_PUBLIC_GAME_SERVER_URL:', process.env.NEXT_PUBLIC_GAME_SERVER_URL);
-    console.log('  - Final server URL:', serverUrl);
     console.log('  - Wallet Address:', walletAddress);
     
+    socketInitRef.current = true;
     setConnectionAttempts(prev => prev + 1);
     setConnectionError(null);
     
-    const newSocket = io(serverUrl, {
-      transports: ['websocket', 'polling'],
-      timeout: 20000,
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      forceNew: true,
-      upgrade: true,
-      rememberUpgrade: false,
-    });
-
-    // Store socket globally for other components
-    (window as any).gameSocket = newSocket;
-    (window as any).socket = newSocket;
-
-    // Enhanced connection handler
-    newSocket.on('connect', () => {
-      console.log('✅ Connected to enhanced game server');
-      console.log('  - Transport:', newSocket.io.engine.transport.name);
-      console.log('  - Socket ID:', newSocket.id);
-      setIsConnected(true);
-      setConnectionError(null);
-      setConnectionAttempts(0);
-      newSocket.emit('requestGameSync');
-    });
-
-    // Enhanced error handling
-    newSocket.on('connect_error', (error) => {
-      console.error('❌ Connection error:', error);
-      setIsConnected(false);
-      setCanBet(false);
-      setConnectionError(`Connection failed: ${error.message}`);
-      
-      if (connectionAttempts >= 2) {
-        console.log('🔄 Switching to polling transport only...');
-        newSocket.io.opts.transports = ['polling'];
-      }
-    });
-
-    // Better disconnect handling
-    newSocket.on('disconnect', (reason, details) => {
-      console.log('🔌 Disconnected from game server');
-      console.log('  - Reason:', reason);
-      console.log('  - Details:', details);
-      setIsConnected(false);
-      setCanBet(false);
-      
-      if (reason === 'io server disconnect') {
-        setConnectionError('Server disconnected - manual reconnection required');
-      } else {
-        setConnectionError(`Disconnected: ${reason}`);
-      }
-    });
-
-    // Add transport change detection
-    newSocket.on('upgrade', () => {
-      console.log('📶 Upgraded to websocket transport');
-    });
-
-    newSocket.on('upgradeError', (error) => {
-      console.warn('⚠️ Websocket upgrade failed, using polling:', error);
-    });
-
-    // 🚀 ENHANCED: Game state handler with full liquidity support
-    newSocket.on('gameState', (gameState: any) => {
-      console.log('📊 Received enhanced game state with liquidity:', gameState);
-      
-      if (gameState.serverTime) {
-        syncServerTime(gameState.serverTime);
-      }
-      
-      const newGameState: GameState = {
-        id: gameState.gameId || gameState.id || '',
-        gameNumber: gameState.gameNumber || 0,
-        multiplier: gameState.multiplier || 1.0,
-        status: gameState.status || 'waiting',
-        totalBets: gameState.totalBets || 0,
-        totalPlayers: gameState.totalPlayers || 0,
-        boostedPlayerCount: gameState.boostedPlayerCount || gameState.totalPlayers || 0,
-        boostedTotalBets: gameState.boostedTotalBets || gameState.totalBets || 0,
-        startTime: gameState.startTime || Date.now(),
-        maxMultiplier: gameState.maxMultiplier,
-        serverTime: gameState.serverTime,
-        countdown: gameState.countdown,
-        canBet: gameState.canBet,
-        preGameBets: gameState.preGameBets,
-        preGamePlayers: gameState.preGamePlayers,
-        // 🚀 NEW: Include liquidity breakdown
-        liquidityBreakdown: gameState.liquidityBreakdown,
-        artificialPlayerCount: gameState.artificialPlayerCount
-      };
-      
-      if (gameState.countdown !== undefined) {
-        updateCountdownState(gameState.countdown, gameState.status);
-      }
-      
-      setCurrentGame(newGameState);
-      gameStateRef.current = newGameState;
-    });
-
-    // 🚀 NEW: Dedicated artificial boost/liquidity update handler
-    newSocket.on('artificialBoostUpdate', (data: any) => {
-      
-      if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
-        const updatedGame = updateGameWithLiquidityData(
-          gameStateRef.current, 
-          {
-            boostedPlayerCount: data.boostedPlayerCount,
-            boostedTotalBets: data.boostedTotalBets,
-            liquidityBreakdown: data.liquidityProfile,
-            artificialPlayerCount: data.artificialPlayerCount,
-            multiplier: data.currentMultiplier,
-            serverTime: data.timestamp
-          },
-          'artificialBoostUpdate'
-        );
+    const initConnection = async () => {
+      try {
+        const gameSocket = await initializeGameSocket();
         
-        setCurrentGame(updatedGame);
-        gameStateRef.current = updatedGame;
-      } else {
-        console.warn('⚠️ Received artificial boost update for different/no game');
-      }
-    });
+        if (!gameSocket) {
+          setConnectionError('Failed to initialize socket connection');
+          setIsConnected(false);
+          socketInitRef.current = false;
+          return;
+        }
 
-    // Handle waiting period start
-    newSocket.on('gameWaiting', (data: any) => {
-      
-      
-      if (data.serverTime) {
-        syncServerTime(data.serverTime);
-      }
-      
-      updateCountdownState(data.countdown || 10000, 'waiting');
-      
-      if (gameStateRef.current) {
-        const waitingGame = updateGameWithLiquidityData(
-          gameStateRef.current,
-          {
-            id: data.gameId,
-            gameNumber: data.gameNumber,
-            status: 'waiting',
+        setSocket(gameSocket);
+        setIsConnected(gameSocket.connected);
+        setConnectionError(null);
+        setConnectionAttempts(0);
+
+        // Enhanced connection handlers
+        gameSocket.on('connect', () => {
+          console.log('✅ Game Socket: Connected to enhanced game server');
+          console.log('  - Transport:', gameSocket.io.engine.transport.name);
+          console.log('  - Socket ID:', gameSocket.id);
+          setIsConnected(true);
+          setConnectionError(null);
+          setConnectionAttempts(0);
+          gameSocket.emit('requestGameSync');
+          
+          // 🚀 NEW: Auto-initialize user if available
+          if (userId && walletAddress) {
+            console.log('🔧 Game Socket: Auto-initializing user on connect...');
+            gameSocket.emit('initializeUser', { 
+              userId, 
+              walletAddress,
+              autoInit: true,
+              timestamp: Date.now()
+            });
+          }
+        });
+
+        // Enhanced error handling
+        gameSocket.on('connect_error', (error: any) => {
+          console.error('❌ Game Socket: Connection error:', error);
+          setIsConnected(false);
+          setCanBet(false);
+          setConnectionError(`Connection failed: ${error.message}`);
+          
+          setConnectionAttempts(prev => {
+            const newAttempts = prev + 1;
+            if (newAttempts >= 2) {
+              console.log('🔄 Game Socket: Switching to polling transport only...');
+              gameSocket.io.opts.transports = ['polling'];
+            }
+            return newAttempts;
+          });
+        });
+
+        // Better disconnect handling
+        gameSocket.on('disconnect', (reason: string, details?: any) => {
+          console.log('🔌 Game Socket: Disconnected from game server');
+          console.log('  - Reason:', reason);
+          console.log('  - Details:', details);
+          setIsConnected(false);
+          setCanBet(false);
+          
+          if (reason === 'io server disconnect') {
+            setConnectionError('Server disconnected - manual reconnection required');
+          } else {
+            setConnectionError(`Disconnected: ${reason}`);
+          }
+        });
+
+        // Add transport change detection
+        gameSocket.on('upgrade', () => {
+          console.log('📶 Game Socket: Upgraded to websocket transport');
+        });
+
+        gameSocket.on('upgradeError', (error: any) => {
+          console.warn('⚠️ Game Socket: Websocket upgrade failed, using polling:', error);
+        });
+
+        // 🚀 ENHANCED: Game state handler with full liquidity support
+        gameSocket.on('gameState', (gameState: any) => {
+          console.log('📊 Game Socket: Received enhanced game state with liquidity:', gameState);
+          
+          if (gameState.serverTime) {
+            syncServerTime(gameState.serverTime);
+          }
+          
+          const newGameState: GameState = {
+            id: gameState.gameId || gameState.id || '',
+            gameNumber: gameState.gameNumber || 0,
+            multiplier: gameState.multiplier || 1.0,
+            status: gameState.status || 'waiting',
+            totalBets: gameState.totalBets || 0,
+            totalPlayers: gameState.totalPlayers || 0,
+            boostedPlayerCount: gameState.boostedPlayerCount || gameState.totalPlayers || 0,
+            boostedTotalBets: gameState.boostedTotalBets || gameState.totalBets || 0,
+            startTime: gameState.startTime || Date.now(),
+            maxMultiplier: gameState.maxMultiplier,
+            serverTime: gameState.serverTime,
+            countdown: gameState.countdown,
+            canBet: gameState.canBet,
+            preGameBets: gameState.preGameBets,
+            preGamePlayers: gameState.preGamePlayers,
+            // 🚀 NEW: Include liquidity breakdown
+            liquidityBreakdown: gameState.liquidityBreakdown,
+            artificialPlayerCount: gameState.artificialPlayerCount
+          };
+          
+          if (gameState.countdown !== undefined) {
+            updateCountdownState(gameState.countdown, gameState.status);
+          }
+          
+          setCurrentGame(newGameState);
+          gameStateRef.current = newGameState;
+        });
+
+        // 🚀 NEW: Dedicated artificial boost/liquidity update handler
+        gameSocket.on('artificialBoostUpdate', (data: any) => {
+          if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
+            const updatedGame = updateGameWithLiquidityData(
+              gameStateRef.current, 
+              {
+                boostedPlayerCount: data.boostedPlayerCount,
+                boostedTotalBets: data.boostedTotalBets,
+                liquidityBreakdown: data.liquidityProfile,
+                artificialPlayerCount: data.artificialPlayerCount,
+                multiplier: data.currentMultiplier,
+                serverTime: data.timestamp
+              },
+              'artificialBoostUpdate'
+            );
+            
+            setCurrentGame(updatedGame);
+            gameStateRef.current = updatedGame;
+          } else {
+            console.warn('⚠️ Game Socket: Received artificial boost update for different/no game');
+          }
+        });
+
+        // Handle waiting period start
+        gameSocket.on('gameWaiting', (data: any) => {
+          if (data.serverTime) {
+            syncServerTime(data.serverTime);
+          }
+          
+          updateCountdownState(data.countdown || 10000, 'waiting');
+          
+          if (gameStateRef.current) {
+            const waitingGame = updateGameWithLiquidityData(
+              gameStateRef.current,
+              {
+                id: data.gameId,
+                gameNumber: data.gameNumber,
+                status: 'waiting',
+                multiplier: 1.0,
+                countdown: data.countdown,
+                canBet: data.canBet,
+                serverTime: data.serverTime,
+                // 🚀 NEW: Reset liquidity for waiting period
+                boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
+                boostedTotalBets: data.boostedTotalBets || 0
+              },
+              'gameWaiting'
+            );
+            
+            setCurrentGame(waitingGame);
+            gameStateRef.current = waitingGame;
+          }
+        });
+
+        // 🚀 ENHANCED: Countdown handler with liquidity preservation
+        gameSocket.on('countdown', (data: any) => {
+          if (data.serverTime) {
+            syncServerTime(data.serverTime);
+          }
+          
+          const countdownMs = data.countdownMs || (data.timeRemaining * 1000);
+          updateCountdownState(countdownMs, 'waiting');
+          
+          if (gameStateRef.current && gameStateRef.current.status === 'waiting') {
+            const updatedGame = updateGameWithLiquidityData(
+              gameStateRef.current,
+              {
+                countdown: countdownMs,
+                canBet: data.timeRemaining > 2,
+                serverTime: data.serverTime,
+                boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
+                boostedTotalBets: data.boostedTotalBets || gameStateRef.current.boostedTotalBets
+              },
+              'countdown'
+            );
+            
+            setCurrentGame(updatedGame);
+            gameStateRef.current = updatedGame;
+          }
+        });
+
+        // 🚀 ENHANCED: Server sync with liquidity data
+        gameSocket.on('serverSync', (data: any) => {
+          if (data.serverTime) {
+            syncServerTime(data.serverTime);
+          }
+          
+          if (data.countdown && data.countdown > 0) {
+            setCountdown(data.countdown);
+            setIsWaitingPeriod(true);
+            setCanBet(data.canBet !== false);
+          } else if (data.status === 'waiting') {
+            setIsWaitingPeriod(true);
+          } else {
+            setIsWaitingPeriod(false);
+            setCountdown(0);
+          }
+          
+          if (gameStateRef.current) {
+            const syncedGame = updateGameWithLiquidityData(
+              gameStateRef.current,
+              {
+                ...data,
+                countdown: data.countdown || 0,
+                boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
+                boostedTotalBets: data.boostedTotalBets || gameStateRef.current.boostedTotalBets
+              },
+              'serverSync'
+            );
+            
+            setCurrentGame(syncedGame);
+            gameStateRef.current = syncedGame;
+          }
+        });
+
+        // 🚀 ENHANCED: Multiplier updates with liquidity tracking
+        gameSocket.on('multiplierUpdate', (data: any) => {
+          if (gameStateRef.current && gameStateRef.current.gameNumber === data.gameNumber) {
+            if (data.serverTime) {
+              syncServerTime(data.serverTime);
+            }
+            
+            const updatedGame = updateGameWithLiquidityData(
+              gameStateRef.current,
+              {
+                multiplier: data.multiplier,
+                serverTime: data.serverTime,
+                // 🚀 NEW: Include liquidity updates from multiplier events
+                boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
+                boostedTotalBets: data.boostedTotalBets || gameStateRef.current.boostedTotalBets,
+                liquidityBreakdown: data.liquidityGrowth !== undefined ? {
+                  ...gameStateRef.current.liquidityBreakdown,
+                  liquidityGrowth: parseFloat(data.liquidityGrowth)
+                } : gameStateRef.current.liquidityBreakdown
+              },
+              'multiplierUpdate'
+            );
+            
+            setCurrentGame(updatedGame);
+            gameStateRef.current = updatedGame;
+          } else {
+            console.warn('⚠️ Game Socket: Received multiplier update for different game, requesting sync...');
+            gameSocket.emit('requestGameSync');
+          }
+        });
+
+        // 🚀 ENHANCED: Game started with full liquidity initialization
+        gameSocket.on('gameStarted', (data: any) => {
+          if (data.serverTime) {
+            syncServerTime(data.serverTime);
+          }
+          
+          setCountdown(0);
+          setIsWaitingPeriod(false);
+          setCanBet(true);
+          
+          const newGameState: GameState = {
+            id: data.gameId || '',
+            gameNumber: data.gameNumber || 0,
             multiplier: 1.0,
-            countdown: data.countdown,
-            canBet: data.canBet,
+            status: 'active',
+            totalBets: data.totalBets || data.preGameBets || 0,
+            totalPlayers: data.totalPlayers || data.preGamePlayers || 0,
+            boostedPlayerCount: data.boostedPlayerCount || data.totalPlayers || 0,
+            boostedTotalBets: data.boostedTotalBets || data.totalBets || 0,
+            startTime: data.startTime || Date.now(),
+            maxMultiplier: data.maxMultiplier,
             serverTime: data.serverTime,
-            // 🚀 NEW: Reset liquidity for waiting period
-            boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
-            boostedTotalBets: data.boostedTotalBets || 0
-          },
-          'gameWaiting'
-        );
-        
-        setCurrentGame(waitingGame);
-        gameStateRef.current = waitingGame;
-      }
-    });
+            preGameBets: data.preGameBets,
+            preGamePlayers: data.preGamePlayers,
+            canBet: true,
+            // 🚀 NEW: Initialize liquidity breakdown
+            liquidityBreakdown: data.liquidityBreakdown,
+            artificialPlayerCount: data.artificialPlayerCount
+          };
+          
+          setCurrentGame(newGameState);
+          gameStateRef.current = newGameState;
+        });
 
-    // 🚀 ENHANCED: Countdown handler with liquidity preservation
-    newSocket.on('countdown', (data: any) => {
-      
-      
-      if (data.serverTime) {
-        syncServerTime(data.serverTime);
-      }
-      
-      const countdownMs = data.countdownMs || (data.timeRemaining * 1000);
-      updateCountdownState(countdownMs, 'waiting');
-      
-      if (gameStateRef.current && gameStateRef.current.status === 'waiting') {
-        const updatedGame = updateGameWithLiquidityData(
-          gameStateRef.current,
-          {
-            countdown: countdownMs,
-            canBet: data.timeRemaining > 2,
-            serverTime: data.serverTime,
-            boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
-            boostedTotalBets: data.boostedTotalBets || gameStateRef.current.boostedTotalBets
-          },
-          'countdown'
-        );
-        
-        setCurrentGame(updatedGame);
-        gameStateRef.current = updatedGame;
-      }
-    });
+        // 🚀 ENHANCED: Game crashed with liquidity cleanup
+        gameSocket.on('gameCrashed', (data: any) => {
+          setCountdown(0);
+          setIsWaitingPeriod(false);
+          setCanBet(false);
+          
+          if (gameStateRef.current && gameStateRef.current.gameNumber === data.gameNumber) {
+            const crashedGame: GameState = {
+              ...gameStateRef.current,
+              status: 'crashed',
+              multiplier: data.crashMultiplier || data.finalMultiplier || gameStateRef.current.multiplier,
+              boostedPlayerCount: gameStateRef.current.boostedPlayerCount,
+              boostedTotalBets: gameStateRef.current.boostedTotalBets,
+              canBet: false,
+              // 🚀 NEW: Preserve final liquidity state for history
+              liquidityBreakdown: gameStateRef.current.liquidityBreakdown
+            };
+            
+            setCurrentGame(crashedGame);
+            gameStateRef.current = null; // Clear current game
+            
+            setGameHistory(prev => [...prev.slice(-49), crashedGame]);
+          }
+        });
 
-    // 🔥 ENHANCED: Better user initialization with timeout handling
-newSocket.on('connect', () => {
-  console.log('✅ Connected to enhanced game server');
-  setIsConnected(true);
-  setConnectionError(null);
-  setConnectionAttempts(0);
-  
-  // 🔥 NEW: Enhanced game sync with user check
-  newSocket.emit('requestGameSync');
-  
-  // If we have user info, try to initialize immediately
-  if (userId && walletAddress) {
-    console.log('🔧 Auto-initializing user on connect...');
-    newSocket.emit('initializeUser', { 
-      userId, 
-      walletAddress,
-      autoInit: true,
-      timestamp: Date.now()
-    });
-    
-    // Set timeout for initialization
-    const initTimeout = setTimeout(() => {
-      console.warn('⚠️ User initialization timeout - trying emergency init');
-      newSocket.emit('emergencyUserInit', { 
-        userId, 
-        walletAddress,
-        force: true
-      });
-    }, 10000);
-    
-    // Clear timeout if we get response
-    newSocket.once('userInitializeResult', () => {
-      clearTimeout(initTimeout);
-    });
-  }
-});
-    // 🚀 ENHANCED: Server sync with liquidity data
-    newSocket.on('serverSync', (data: any) => {
-      
-      if (data.serverTime) {
-        syncServerTime(data.serverTime);
-      }
-      
-      if (data.countdown && data.countdown > 0) {
-        setCountdown(data.countdown);
-        setIsWaitingPeriod(true);
-        setCanBet(data.canBet !== false);
-      } else if (data.status === 'waiting') {
-        setIsWaitingPeriod(true);
-      } else {
-        setIsWaitingPeriod(false);
-        setCountdown(0);
-      }
-      
-      if (gameStateRef.current) {
-        const syncedGame = updateGameWithLiquidityData(
-          gameStateRef.current,
-          {
-            ...data,
-            countdown: data.countdown || 0,
-            boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
-            boostedTotalBets: data.boostedTotalBets || gameStateRef.current.boostedTotalBets
-          },
-          'serverSync'
-        );
-        
-        setCurrentGame(syncedGame);
-        gameStateRef.current = syncedGame;
-      }
-    });
+        // Handle game sync responses
+        gameSocket.on('gameSync', (data: any) => {
+          if (data.serverTime) {
+            syncServerTime(data.serverTime);
+          }
+          
+          if (data.status) {
+            const syncedGame: GameState = {
+              id: data.gameId || '',
+              gameNumber: data.gameNumber || 0,
+              multiplier: data.multiplier || 1.0,
+              status: data.status,
+              totalBets: data.totalBets || 0,
+              totalPlayers: data.totalPlayers || 0,
+              boostedPlayerCount: data.boostedPlayerCount || data.totalPlayers || 0,
+              boostedTotalBets: data.boostedTotalBets || data.totalBets || 0,
+              startTime: data.startTime || 0,
+              serverTime: data.serverTime,
+              countdown: data.countdown,
+              canBet: data.canBet,
+              liquidityBreakdown: data.liquidityBreakdown,
+              artificialPlayerCount: data.artificialPlayerCount
+            };
+            
+            if (data.status === 'waiting' && data.countdown !== undefined) {
+              updateCountdownState(data.countdown, 'waiting');
+            }
+            
+            setCurrentGame(syncedGame);
+            gameStateRef.current = syncedGame;
+          }
+        });
 
-    // 🚀 ENHANCED: Multiplier updates with liquidity tracking
-    newSocket.on('multiplierUpdate', (data: any) => {
-      if (gameStateRef.current && gameStateRef.current.gameNumber === data.gameNumber) {
-        if (data.serverTime) {
-          syncServerTime(data.serverTime);
-        }
-        
-        const updatedGame = updateGameWithLiquidityData(
-          gameStateRef.current,
-          {
-            multiplier: data.multiplier,
-            serverTime: data.serverTime,
-            // 🚀 NEW: Include liquidity updates from multiplier events
-            boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
-            boostedTotalBets: data.boostedTotalBets || gameStateRef.current.boostedTotalBets,
-            liquidityBreakdown: data.liquidityGrowth !== undefined ? {
-              ...gameStateRef.current.liquidityBreakdown,
-              liquidityGrowth: parseFloat(data.liquidityGrowth)
-            } : gameStateRef.current.liquidityBreakdown
-          },
-          'multiplierUpdate'
-        );
-        
-        setCurrentGame(updatedGame);
-        gameStateRef.current = updatedGame;
-      } else {
-        console.warn('⚠️ Received multiplier update for different game, requesting sync...');
-        newSocket.emit('requestGameSync');
-      }
-    });
+        // 🚀 ENHANCED: Game history with liquidity data
+        gameSocket.on('gameHistory', (history: any[]) => {
+          const mappedHistory: GameState[] = history.map(game => ({
+            id: game.id || '',
+            gameNumber: game.gameNumber || 0,
+            multiplier: game.currentMultiplier || game.multiplier || 1.0,
+            status: game.status || 'crashed',
+            totalBets: game.totalBets || 0,
+            totalPlayers: game.totalPlayers || 0,
+            boostedPlayerCount: game.boostedPlayerCount || game.totalPlayers || 0,
+            boostedTotalBets: game.boostedTotalBets || game.totalBets || 0,
+            startTime: game.startTime || 0,
+            maxMultiplier: game.maxMultiplier,
+            serverTime: game.serverTime,
+            liquidityBreakdown: game.liquidityBreakdown,
+            artificialPlayerCount: game.artificialPlayerCount
+          }));
+          setGameHistory(mappedHistory);
+        });
 
-    // 🚀 ENHANCED: Game started with full liquidity initialization
-    newSocket.on('gameStarted', (data: any) => {
-     
-      
-      if (data.serverTime) {
-        syncServerTime(data.serverTime);
-      }
-      
-      setCountdown(0);
-      setIsWaitingPeriod(false);
-      setCanBet(true);
-      
-      const newGameState: GameState = {
-        id: data.gameId || '',
-        gameNumber: data.gameNumber || 0,
-        multiplier: 1.0,
-        status: 'active',
-        totalBets: data.totalBets || data.preGameBets || 0,
-        totalPlayers: data.totalPlayers || data.preGamePlayers || 0,
-        boostedPlayerCount: data.boostedPlayerCount || data.totalPlayers || 0,
-        boostedTotalBets: data.boostedTotalBets || data.totalBets || 0,
-        startTime: data.startTime || Date.now(),
-        maxMultiplier: data.maxMultiplier,
-        serverTime: data.serverTime,
-        preGameBets: data.preGameBets,
-        preGamePlayers: data.preGamePlayers,
-        canBet: true,
-        // 🚀 NEW: Initialize liquidity breakdown
-        liquidityBreakdown: data.liquidityBreakdown,
-        artificialPlayerCount: data.artificialPlayerCount
-      };
-      
-      setCurrentGame(newGameState);
-      gameStateRef.current = newGameState;
-    });
+        // 🚀 ENHANCED: Bet placed with instant liquidity updates
+        gameSocket.on('betPlaced', (data: any) => {
+          if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
+            const updatedGame = updateGameWithLiquidityData(
+              gameStateRef.current,
+              {
+                totalBets: data.totalBets,
+                totalPlayers: data.totalPlayers,
+                boostedPlayerCount: data.boostedPlayerCount,
+                boostedTotalBets: data.boostedTotalBets,
+                countdown: data.countdown
+              },
+              'betPlaced'
+            );
+            
+            setCurrentGame(updatedGame);
+            gameStateRef.current = updatedGame;
+          }
+        });
 
-    // 🚀 ENHANCED: Game crashed with liquidity cleanup
-    newSocket.on('gameCrashed', (data: any) => {
-      
-      
-      setCountdown(0);
-      setIsWaitingPeriod(false);
-      setCanBet(false);
-      
-      if (gameStateRef.current && gameStateRef.current.gameNumber === data.gameNumber) {
-        const crashedGame: GameState = {
-          ...gameStateRef.current,
-          status: 'crashed',
-          multiplier: data.crashMultiplier || data.finalMultiplier || gameStateRef.current.multiplier,
-          boostedPlayerCount: gameStateRef.current.boostedPlayerCount,
-          boostedTotalBets: gameStateRef.current.boostedTotalBets,
-          canBet: false,
-          // 🚀 NEW: Preserve final liquidity state for history
-          liquidityBreakdown: gameStateRef.current.liquidityBreakdown
+        // 🚀 NEW: Handle custodial bet placed with liquidity updates
+        gameSocket.on('custodialBetPlaced', (data: any) => {
+          if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
+            const updatedGame = updateGameWithLiquidityData(
+              gameStateRef.current,
+              {
+                totalBets: data.totalBets,
+                totalPlayers: data.totalPlayers,
+                boostedPlayerCount: data.boostedPlayerCount,
+                boostedTotalBets: data.boostedTotalBets
+              },
+              'custodialBetPlaced'
+            );
+            
+            setCurrentGame(updatedGame);
+            gameStateRef.current = updatedGame;
+          }
+        });
+
+        // 🚀 NEW: Handle liquidity updates on player cashouts
+        gameSocket.on('playerCashedOut', (data: any) => {
+          if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
+            // Liquidity should decrease when players cash out (server handles this)
+            // Just trigger a refresh to get latest boosted values
+            if (gameSocket.connected) {
+              gameSocket.emit('requestGameSync');
+            }
+          }
+        });
+
+        // 🚀 ENHANCED: More frequent sync for liquidity updates
+        const syncInterval = setInterval(() => {
+          if (gameSocket.connected && gameStateRef.current) {
+            gameSocket.emit('requestGameSync');
+          } else if (!gameSocket.connected) {
+            console.warn('⚠️ Game Socket: Socket disconnected during sync check');
+          }
+        }, 15000); // Reduced from 30s to 15s for more frequent liquidity updates
+
+        // Cleanup function
+        return () => {
+          clearInterval(syncInterval);
+          if (syncTimeoutRef.current) {
+            clearTimeout(syncTimeoutRef.current);
+          }
+          gameSocket.close();
         };
-        
-        setCurrentGame(crashedGame);
-        gameStateRef.current = null; // Clear current game
-        
-        setGameHistory(prev => [...prev.slice(-49), crashedGame]);
+
+      } catch (error) {
+        console.error('❌ Game Socket: Setup error:', error);
+        setConnectionError(`Setup failed: ${error}`);
+        setIsConnected(false);
+        socketInitRef.current = false;
       }
-    });
-
-    // Handle game sync responses
-    newSocket.on('gameSync', (data: any) => {
-
-      
-      if (data.serverTime) {
-        syncServerTime(data.serverTime);
-      }
-      
-      if (data.status) {
-        const syncedGame: GameState = {
-          id: data.gameId || '',
-          gameNumber: data.gameNumber || 0,
-          multiplier: data.multiplier || 1.0,
-          status: data.status,
-          totalBets: data.totalBets || 0,
-          totalPlayers: data.totalPlayers || 0,
-          boostedPlayerCount: data.boostedPlayerCount || data.totalPlayers || 0,
-          boostedTotalBets: data.boostedTotalBets || data.totalBets || 0,
-          startTime: data.startTime || 0,
-          serverTime: data.serverTime,
-          countdown: data.countdown,
-          canBet: data.canBet,
-          liquidityBreakdown: data.liquidityBreakdown,
-          artificialPlayerCount: data.artificialPlayerCount
-        };
-        
-        if (data.status === 'waiting' && data.countdown !== undefined) {
-          updateCountdownState(data.countdown, 'waiting');
-        }
-        
-        setCurrentGame(syncedGame);
-        gameStateRef.current = syncedGame;
-      }
-    });
-
-    // 🚀 ENHANCED: Game history with liquidity data
-    newSocket.on('gameHistory', (history: any[]) => {
-      const mappedHistory: GameState[] = history.map(game => ({
-        id: game.id || '',
-        gameNumber: game.gameNumber || 0,
-        multiplier: game.currentMultiplier || game.multiplier || 1.0,
-        status: game.status || 'crashed',
-        totalBets: game.totalBets || 0,
-        totalPlayers: game.totalPlayers || 0,
-        boostedPlayerCount: game.boostedPlayerCount || game.totalPlayers || 0,
-        boostedTotalBets: game.boostedTotalBets || game.totalBets || 0,
-        startTime: game.startTime || 0,
-        maxMultiplier: game.maxMultiplier,
-        serverTime: game.serverTime,
-        liquidityBreakdown: game.liquidityBreakdown,
-        artificialPlayerCount: game.artificialPlayerCount
-      }));
-      setGameHistory(mappedHistory);
-    });
-
-    // 🚀 ENHANCED: Bet placed with instant liquidity updates
-    newSocket.on('betPlaced', (data: any) => {
-      if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
-        const updatedGame = updateGameWithLiquidityData(
-          gameStateRef.current,
-          {
-            totalBets: data.totalBets,
-            totalPlayers: data.totalPlayers,
-            boostedPlayerCount: data.boostedPlayerCount,
-            boostedTotalBets: data.boostedTotalBets,
-            countdown: data.countdown
-          },
-          'betPlaced'
-        );
-        
-        setCurrentGame(updatedGame);
-        gameStateRef.current = updatedGame;
-      }
-    });
-
-    // 🚀 NEW: Handle custodial bet placed with liquidity updates
-    newSocket.on('custodialBetPlaced', (data: any) => {
-      if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
-        
-        const updatedGame = updateGameWithLiquidityData(
-          gameStateRef.current,
-          {
-            totalBets: data.totalBets,
-            totalPlayers: data.totalPlayers,
-            boostedPlayerCount: data.boostedPlayerCount,
-            boostedTotalBets: data.boostedTotalBets
-          },
-          'custodialBetPlaced'
-        );
-        
-        setCurrentGame(updatedGame);
-        gameStateRef.current = updatedGame;
-      }
-    });
-
-    // 🚀 NEW: Handle liquidity updates on player cashouts
-    newSocket.on('playerCashedOut', (data: any) => {
-      if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
-        
-        
-        // Liquidity should decrease when players cash out (server handles this)
-        // Just trigger a refresh to get latest boosted values
-        if (newSocket.connected) {
-          newSocket.emit('requestGameSync');
-        }
-      }
-    });
-
-    setSocket(newSocket);
-
-    // 🚀 ENHANCED: More frequent sync for liquidity updates
-    const syncInterval = setInterval(() => {
-      if (newSocket.connected && gameStateRef.current) {
-        newSocket.emit('requestGameSync');
-      } else if (!newSocket.connected) {
-        console.warn('⚠️ Socket disconnected during sync check');
-      }
-    }, 15000); // Reduced from 30s to 15s for more frequent liquidity updates
-
-    return () => {
-      clearInterval(syncInterval);
-      if (syncTimeoutRef.current) {
-        clearTimeout(syncTimeoutRef.current);
-      }
-      newSocket.close();
     };
-  }, [walletAddress, syncServerTime, updateCountdownState, updateGameWithLiquidityData]);
+
+    initConnection();
+  }, [walletAddress, userId, syncServerTime, updateCountdownState, updateGameWithLiquidityData]);
 
   // Enhanced place bet with pre-game betting support
   const placeBet = useCallback(async (
@@ -632,27 +713,27 @@ newSocket.on('connect', () => {
   ): Promise<boolean> => {
     return new Promise((resolve) => {
       if (!socket || !isConnected || !currentGame) {
-        console.log('❌ Cannot place bet: no socket, connection, or game');
+        console.log('❌ Game Socket: Cannot place bet: no socket, connection, or game');
         resolve(false);
         return;
       }
 
       if (currentGame.status !== 'active' && currentGame.status !== 'waiting') {
-        console.log('❌ Cannot place bet: game status is', currentGame.status);
+        console.log('❌ Game Socket: Cannot place bet: game status is', currentGame.status);
         resolve(false);
         return;
       }
 
       if (!canBet) {
-        console.log('❌ Cannot place bet: betting not allowed (too close to game start)');
+        console.log('❌ Game Socket: Cannot place bet: betting not allowed (too close to game start)');
         resolve(false);
         return;
       }
 
-      console.log('🎯 Placing bet via socket:', { walletAddress, amount, userId });
+      console.log('🎯 Game Socket: Placing bet via socket:', { walletAddress, amount, userId });
 
       const timeout = setTimeout(() => {
-        console.error('❌ Bet timeout');
+        console.error('❌ Game Socket: Bet timeout');
         resolve(false);
       }, 30000);
 
@@ -664,7 +745,6 @@ newSocket.on('connect', () => {
       
       socket.once('betResult', (data: BetResult) => {
         clearTimeout(timeout);
-       
         
         if (data.success) {
           resolve(true);
@@ -685,7 +765,7 @@ newSocket.on('connect', () => {
             gameStateRef.current = updatedGame;
           }
         } else {
-          console.error('❌ Bet failed:', data.reason);
+          console.error('❌ Game Socket: Bet failed:', data.reason);
           resolve(false);
         }
       });
@@ -700,10 +780,10 @@ newSocket.on('connect', () => {
         return;
       }
 
-      console.log('💸 Cashing out via socket:', { walletAddress });
+      console.log('💸 Game Socket: Cashing out via socket:', { walletAddress });
 
       const timeout = setTimeout(() => {
-        console.error('❌ Cashout timeout');
+        console.error('❌ Game Socket: Cashout timeout');
         resolve({ success: false, reason: 'Timeout' });
       }, 30000);
 
@@ -711,7 +791,6 @@ newSocket.on('connect', () => {
       
       socket.once('cashOutResult', (data: CashOutResult) => {
         clearTimeout(timeout);
-       
         resolve({
           success: data.success,
           payout: data.payout,
@@ -728,21 +807,20 @@ newSocket.on('connect', () => {
   ): Promise<boolean> => {
     return new Promise((resolve) => {
       if (!socket || !isConnected) {
-        console.log('❌ Cannot place custodial bet: not connected');
+        console.log('❌ Game Socket: Cannot place custodial bet: not connected');
         resolve(false);
         return;
       }
   
-      console.log('🎯 Placing custodial bet:', { userId, betAmount });
+      console.log('🎯 Game Socket: Placing custodial bet:', { userId, betAmount });
   
       const timeout = setTimeout(() => {
-        console.error('❌ Custodial bet timeout');
+        console.error('❌ Game Socket: Custodial bet timeout');
         resolve(false);
       }, 30000);
   
       socket.once('custodialBetResult', (data: any) => {
         clearTimeout(timeout);
-        
         
         if (data.success && data.gameState && gameStateRef.current) {
           const updatedGame = updateGameWithLiquidityData(
@@ -777,16 +855,15 @@ newSocket.on('connect', () => {
         return;
       }
 
-      console.log('💸 Custodial cashout:', { userId, walletAddress });
+      console.log('💸 Game Socket: Custodial cashout:', { userId, walletAddress });
 
       const timeout = setTimeout(() => {
-        console.error('❌ Custodial cashout timeout');
+        console.error('❌ Game Socket: Custodial cashout timeout');
         resolve({ success: false, reason: 'Timeout' });
       }, 30000);
 
       socket.once('custodialCashOutResult', (data: any) => {
         clearTimeout(timeout);
-       
         
         resolve({
           success: data.success,
@@ -808,18 +885,17 @@ newSocket.on('connect', () => {
       }
 
       const timeout = setTimeout(() => {
-        console.error('❌ Get custodial balance timeout');
+        console.error('❌ Game Socket: Get custodial balance timeout');
         resolve(null);
       }, 10000);
 
       socket.once('custodialBalanceResponse', (data: any) => {
         clearTimeout(timeout);
         
-        
         if (data.success) {
           resolve(data.custodialBalance);
         } else {
-          console.error('❌ Failed to get custodial balance:', data.error);
+          console.error('❌ Game Socket: Failed to get custodial balance:', data.error);
           resolve(null);
         }
       });
@@ -858,15 +934,15 @@ export const initializeUser = async (
   toast: any
 ): Promise<void> => {
   try {
-    console.log(`🔗 Initializing user with embedded wallet: ${walletAddress}`);
+    console.log(`🔗 Game Socket: Initializing user with embedded wallet: ${walletAddress}`);
     
     const userData = await UserAPI.getUserOrCreate(walletAddress);
     if (userData) {
-      console.log(`👤 User ID: ${userData.id}`);
+      console.log(`👤 Game Socket: User ID: ${userData.id}`);
       
       const socket = (window as any).gameSocket;
       if (socket && socket.connected) {
-        console.log('📡 Initializing user via socket...');
+        console.log('📡 Game Socket: Initializing user via socket...');
         
         socket.emit('initializeUser', { 
           userId: userData.id, 
@@ -874,12 +950,12 @@ export const initializeUser = async (
         });
         
         socket.once('userInitializeResult', (result: UserInitResult) => {
-          console.log('📡 User initialization result:', result);
+          console.log('📡 Game Socket: User initialization result:', result);
           
           if (result.success) {
-            console.log(`✅ User ${userData.id} initialized successfully`);
-            console.log(`💰 Custodial balance: ${result.custodialBalance?.toFixed(6)} SOL`);
-            console.log(`💼 Embedded balance: ${result.embeddedBalance?.toFixed(6)} SOL`);
+            console.log(`✅ Game Socket: User ${userData.id} initialized successfully`);
+            console.log(`💰 Game Socket: Custodial balance: ${result.custodialBalance?.toFixed(6)} SOL`);
+            console.log(`💼 Game Socket: Embedded balance: ${result.embeddedBalance?.toFixed(6)} SOL`);
             
             updateCustodialBalance();
             updateRuggedBalance();
@@ -888,20 +964,20 @@ export const initializeUser = async (
               toast.success('Wallet connected! Ready to play.');
             }
           } else {
-            console.warn('⚠️ User initialization failed:', result.error);
+            console.warn('⚠️ Game Socket: User initialization failed:', result.error);
             toast.error(`Initialization failed: ${result.error}`);
           }
         });
         
         setTimeout(() => {
-          console.warn('⚠️ User initialization timeout');
+          console.warn('⚠️ Game Socket: User initialization timeout');
         }, 10000);
         
       } else {
-        console.warn('⚠️ Socket not connected, retrying initialization...');
+        console.warn('⚠️ Game Socket: Socket not connected, retrying initialization...');
         setTimeout(() => {
           if ((window as any).gameSocket?.connected) {
-            console.log('🔄 Retrying user initialization...');
+            console.log('🔄 Game Socket: Retrying user initialization...');
             (window as any).gameSocket.emit('initializeUser', { 
               userId: userData.id, 
               walletAddress 
@@ -911,7 +987,7 @@ export const initializeUser = async (
       }
     }
   } catch (error) {
-    console.error('❌ Could not initialize user:', error);
+    console.error('❌ Game Socket: Could not initialize user:', error);
     toast.error('Failed to initialize wallet');
   }
 };

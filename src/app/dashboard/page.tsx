@@ -1,4 +1,4 @@
-// src/app/dashboard/page.tsx - OPTIMIZED with ENHANCED real-time functionality
+// src/app/dashboard/page.tsx - FIXED Socket Connection Version
 'use client';
 
 import { FC, useState, useEffect, useContext, useCallback, useRef } from 'react';
@@ -42,6 +42,146 @@ const getSupabaseClient = () => {
   return supabaseClient;
 };
 
+// 🚀 FIXED: Enhanced socket connection hook
+const useSocketConnection = () => {
+  const [socket, setSocket] = useState<any>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const socketInitRef = useRef(false);
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (socketInitRef.current) return;
+    
+    console.log('🔌 Dashboard: Initializing socket connection...');
+    
+    const initializeSocket = () => {
+      try {
+        // Check if socket already exists on window
+        let gameSocket = (window as any).gameSocket;
+        
+        if (!gameSocket) {
+          console.log('🔌 Dashboard: No existing socket found, checking for io...');
+          
+          // Check if socket.io is available
+          const io = (window as any).io;
+          if (!io) {
+            console.warn('⚠️ Dashboard: Socket.io not found on window. Checking if it needs to be loaded...');
+            
+            // Try to load socket.io if not present
+            if (typeof window !== 'undefined' && !document.querySelector('script[src*="socket.io"]')) {
+              console.log('🔌 Dashboard: Loading socket.io from CDN...');
+              const script = document.createElement('script');
+              script.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js';
+              script.onload = () => {
+                console.log('✅ Dashboard: Socket.io loaded from CDN');
+                // Retry initialization after loading
+                retryTimeoutRef.current = setTimeout(initializeSocket, 1000);
+              };
+              document.head.appendChild(script);
+            }
+            return;
+          }
+          
+          // Create new socket connection
+          const GAME_SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'ws://localhost:3001';
+          console.log(`🔌 Dashboard: Creating new socket connection to: ${GAME_SERVER_URL}`);
+          
+          gameSocket = io(GAME_SERVER_URL, {
+            autoConnect: true,
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 20000,
+            transports: ['websocket', 'polling']
+          });
+          
+          // Store socket on window for other components
+          (window as any).gameSocket = gameSocket;
+        }
+        
+        if (gameSocket) {
+          console.log('✅ Dashboard: Socket object found:', {
+            connected: gameSocket.connected,
+            id: gameSocket.id || 'not-connected',
+            transport: gameSocket.io?.engine?.transport?.name || 'none'
+          });
+          
+          setSocket(gameSocket);
+          setIsConnected(gameSocket.connected);
+          socketInitRef.current = true;
+          
+          // Connection event handlers
+          gameSocket.on('connect', () => {
+            console.log('🔌 Dashboard: Socket connected successfully:', gameSocket.id);
+            setIsConnected(true);
+            setConnectionAttempts(0);
+          });
+          
+          gameSocket.on('disconnect', (reason: string) => {
+            console.log('🔌 Dashboard: Socket disconnected:', reason);
+            setIsConnected(false);
+          });
+          
+          gameSocket.on('connect_error', (error: any) => {
+            console.error('❌ Dashboard: Socket connection error:', error);
+            setConnectionAttempts(prev => prev + 1);
+            setIsConnected(false);
+          });
+          
+          gameSocket.on('reconnect', (attemptNumber: number) => {
+            console.log('🔌 Dashboard: Socket reconnected after', attemptNumber, 'attempts');
+            setIsConnected(true);
+            setConnectionAttempts(0);
+          });
+          
+          gameSocket.on('reconnect_error', (error: any) => {
+            console.error('❌ Dashboard: Socket reconnection error:', error);
+            setConnectionAttempts(prev => prev + 1);
+          });
+          
+          // If socket exists but isn't connected, try to connect
+          if (!gameSocket.connected) {
+            console.log('🔌 Dashboard: Socket exists but not connected, attempting connection...');
+            gameSocket.connect();
+          }
+        }
+        
+      } catch (error) {
+        console.error('❌ Dashboard: Error initializing socket:', error);
+        setConnectionAttempts(prev => prev + 1);
+      }
+    };
+    
+    // Try to initialize immediately
+    initializeSocket();
+    
+    // If no socket found, retry after a delay
+    retryTimeoutRef.current = setTimeout(() => {
+      if (!socket && !socketInitRef.current) {
+        console.log('🔌 Dashboard: Retrying socket initialization...');
+        initializeSocket();
+      }
+    }, 2000);
+    
+    return () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+      }
+      if (socket) {
+        socket.off('connect');
+        socket.off('disconnect');
+        socket.off('connect_error');
+        socket.off('reconnect');
+        socket.off('reconnect_error');
+      }
+    };
+  }, []);
+
+  return { socket, isConnected, connectionAttempts };
+};
+
 interface PlayerBet {
   bet_amount: number;
   profit_loss: number;
@@ -55,12 +195,14 @@ const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<number>(0);
-  const [isConnected, setIsConnected] = useState<boolean>(false);
   
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastUserIdRef = useRef<string>('');
   const socketListenersRef = useRef<boolean>(false);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Get socket connection status
+  const { socket, isConnected } = useSocketConnection();
 
   const updateCustodialBalance = useCallback(async (skipDebounce = false) => {
     if (!userId) return;
@@ -120,7 +262,7 @@ const useCustodialBalance = (userId: string) => {
     await updateCustodialBalance(true);
   }, [userId, updateCustodialBalance]);
   
-  // 🚀 ENHANCED: Setup effect with better connection tracking
+  // Setup polling
   useEffect(() => {
     if (userId && userId !== lastUserIdRef.current) {
       console.log(`🎯 Dashboard: Setting up custodial balance polling for user: ${userId}`);
@@ -149,99 +291,80 @@ const useCustodialBalance = (userId: string) => {
     }
   }, [userId, updateCustodialBalance, loading]);
    
-  // 🚀 ENHANCED: Real-time socket listeners with connection status
+  // 🚀 FIXED: Real-time socket listeners with proper connection handling
   useEffect(() => {
-    if (!userId || socketListenersRef.current) return;
+    if (!userId || !socket || socketListenersRef.current) return;
     
-    const socket = (window as any).gameSocket;
-    if (socket) {
-      console.log(`🔌 Dashboard: Setting up REAL-TIME custodial balance listeners for user: ${userId}`);
-      socketListenersRef.current = true;
-      setIsConnected(socket.connected);
-      
-      // Connection status tracking
-      const handleConnect = () => {
-        console.log('🔌 Dashboard: Socket connected');
-        setIsConnected(true);
-      };
-
-      const handleDisconnect = () => {
-        console.log('🔌 Dashboard: Socket disconnected');
-        setIsConnected(false);
-      };
-      
-      const handleCustodialBalanceUpdate = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`💰 Dashboard REAL-TIME: Custodial balance update - ${data.custodialBalance?.toFixed(6)} SOL`);
-          
-          if (debounceTimeoutRef.current) {
-            clearTimeout(debounceTimeoutRef.current);
-          }
-          
-          debounceTimeoutRef.current = setTimeout(() => {
-            setCustodialBalance(parseFloat(data.custodialBalance) || 0);
-            setLastUpdated(Date.now());
-            
-            if (data.updateType === 'deposit_processed') {
-              toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL`);
-            } else if (data.updateType === 'cashout_processed') {
-              toast.success(`Cashout: +${data.change?.toFixed(3)} SOL`);
-            }
-          }, 1000);
-        }
-      };
-
-      const handleUserBalanceUpdate = (data: any) => {
-        if (data.userId === userId && data.balanceType === 'custodial') {
-          console.log(`💰 Dashboard REAL-TIME: User balance update - ${data.newBalance?.toFixed(6)} SOL`);
-          
-          if (debounceTimeoutRef.current) {
-            clearTimeout(debounceTimeoutRef.current);
-          }
-          
-          debounceTimeoutRef.current = setTimeout(() => {
-            setCustodialBalance(parseFloat(data.newBalance) || 0);
-            setLastUpdated(Date.now());
-          }, 1000);
-        }
-      };
-
-      const handleDepositConfirmation = (data: any) => {
-        if (data.userId === userId) {
-          console.log(`💰 Dashboard REAL-TIME: Deposit confirmed for ${userId}`);
-          
-          setCustodialBalance(prev => prev + (parseFloat(data.depositAmount) || 0));
-          setLastUpdated(Date.now());
-          
-          setTimeout(() => {
-            updateCustodialBalance(true);
-          }, 3000);
-          
-          toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL!`);
-        }
-      };
-
-      socket.on('connect', handleConnect);
-      socket.on('disconnect', handleDisconnect);
-      socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-      socket.on('userBalanceUpdate', handleUserBalanceUpdate);
-      socket.on('depositConfirmed', handleDepositConfirmation);
-      
-      return () => {
-        console.log(`🔌 Dashboard: Cleaning up REAL-TIME custodial balance listeners for user: ${userId}`);
-        socket.off('connect', handleConnect);
-        socket.off('disconnect', handleDisconnect);
-        socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-        socket.off('userBalanceUpdate', handleUserBalanceUpdate);
-        socket.off('depositConfirmed', handleDepositConfirmation);
-        socketListenersRef.current = false;
+    console.log(`🔌 Dashboard: Setting up REAL-TIME custodial balance listeners for user: ${userId}`);
+    socketListenersRef.current = true;
+    
+    const handleCustodialBalanceUpdate = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`💰 Dashboard REAL-TIME: Custodial balance update - ${data.custodialBalance?.toFixed(6)} SOL`);
         
         if (debounceTimeoutRef.current) {
           clearTimeout(debounceTimeoutRef.current);
         }
-      };
-    }
-  }, [userId, updateCustodialBalance]);
+        
+        debounceTimeoutRef.current = setTimeout(() => {
+          setCustodialBalance(parseFloat(data.custodialBalance) || 0);
+          setLastUpdated(Date.now());
+          
+          if (data.updateType === 'deposit_processed') {
+            toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL`);
+          } else if (data.updateType === 'cashout_processed') {
+            toast.success(`Cashout: +${data.change?.toFixed(3)} SOL`);
+          }
+        }, 1000);
+      }
+    };
+
+    const handleUserBalanceUpdate = (data: any) => {
+      if (data.userId === userId && data.balanceType === 'custodial') {
+        console.log(`💰 Dashboard REAL-TIME: User balance update - ${data.newBalance?.toFixed(6)} SOL`);
+        
+        if (debounceTimeoutRef.current) {
+          clearTimeout(debounceTimeoutRef.current);
+        }
+        
+        debounceTimeoutRef.current = setTimeout(() => {
+          setCustodialBalance(parseFloat(data.newBalance) || 0);
+          setLastUpdated(Date.now());
+        }, 1000);
+      }
+    };
+
+    const handleDepositConfirmation = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`💰 Dashboard REAL-TIME: Deposit confirmed for ${userId}`);
+        
+        setCustodialBalance(prev => prev + (parseFloat(data.depositAmount) || 0));
+        setLastUpdated(Date.now());
+        
+        setTimeout(() => {
+          updateCustodialBalance(true);
+        }, 3000);
+        
+        toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL!`);
+      }
+    };
+
+    socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+    socket.on('userBalanceUpdate', handleUserBalanceUpdate);
+    socket.on('depositConfirmed', handleDepositConfirmation);
+    
+    return () => {
+      console.log(`🔌 Dashboard: Cleaning up REAL-TIME custodial balance listeners for user: ${userId}`);
+      socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+      socket.off('userBalanceUpdate', handleUserBalanceUpdate);
+      socket.off('depositConfirmed', handleDepositConfirmation);
+      socketListenersRef.current = false;
+      
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
+  }, [userId, socket, updateCustodialBalance]);
 
   return { 
     custodialBalance, 
@@ -273,7 +396,8 @@ const Dashboard: FC = () => {
   // Validate wallet address
   const isValidWallet = isConnected && isValidSolanaAddress(walletAddress);
 
-  // 🚀 ENHANCED: Use custodial balance hook with connection status
+  // 🚀 FIXED: Use socket connection hook and custodial balance hook
+  const { socket: gameSocket, isConnected: socketConnected, connectionAttempts } = useSocketConnection();
   const { 
     custodialBalance, 
     loading: custodialBalanceLoading, 
@@ -317,7 +441,7 @@ const Dashboard: FC = () => {
   const [statsLastUpdated, setStatsLastUpdated] = useState<number>(0);
   const [isStatsUpdating, setIsStatsUpdating] = useState<boolean>(false);
   
-  // 🚀 NEW: Real-time connection status tracking
+  // 🚀 FIXED: Real-time connection status tracking
   const [realTimeStatus, setRealTimeStatus] = useState({
     connected: false,
     lastHeartbeat: 0,
@@ -337,7 +461,17 @@ const Dashboard: FC = () => {
     lastUserId: ''
   });
 
-  // 🚀 ENHANCED: User initialization with better error handling
+  // 🚀 FIXED: Update real-time status based on socket connection
+  useEffect(() => {
+    setRealTimeStatus(prev => ({
+      ...prev,
+      connected: socketConnected,
+      lastHeartbeat: socketConnected ? Date.now() : prev.lastHeartbeat,
+      reconnectAttempts: connectionAttempts
+    }));
+  }, [socketConnected, connectionAttempts]);
+
+  // User initialization (simplified)
   useEffect(() => {
     if (!authenticated || !walletAddress) {
       return;
@@ -358,16 +492,8 @@ const Dashboard: FC = () => {
     initializationRef.current.attempted = true;
     initializationRef.current.lastWallet = walletAddress;
     
-    let initTimeout: NodeJS.Timeout | null = null;
-    
     const initUser = async () => {
       try {
-        if (userId && initializationRef.current.lastUserId === userId) {
-          console.log(`✅ Dashboard: User ${userId} already initialized for this wallet`);
-          initializationRef.current.completed = true;
-          return;
-        }
-        
         console.log(`📡 Dashboard: Getting user data for wallet: ${walletAddress}`);
         const userData = await UserAPI.getUserOrCreate(walletAddress);
         
@@ -375,59 +501,16 @@ const Dashboard: FC = () => {
           setUserId(userData.id);
           initializationRef.current.lastUserId = userData.id;
           console.log(`👤 Dashboard: User ID set: ${userData.id}`);
+          initializationRef.current.completed = true;
           
-          initTimeout = setTimeout(() => {
+          // Initialize user via socket if available
+          if (gameSocket && gameSocket.connected) {
             console.log(`📡 Dashboard: Initializing user via socket...`);
-            
-            const socket = (window as any).gameSocket;
-            if (socket) {
-              socket.emit('initializeUser', {
-                userId: userData.id,
-                walletAddress: walletAddress
-              });
-              
-              socket.once('userInitializeResult', (result: any) => {
-                console.log('📡 Dashboard: User initialization result:', result);
-                
-                if (result.success) {
-                  console.log(`✅ Dashboard: User ${result.userId} initialized successfully`);
-                  
-                  initializationRef.current.completed = true;
-                  initializationRef.current.lastUserId = result.userId;
-                  
-                  setRealTimeStatus(prev => ({
-                    ...prev,
-                    connected: true,
-                    lastHeartbeat: Date.now(),
-                    reconnectAttempts: 0
-                  }));
-                  
-                  setTimeout(() => {
-                    try {
-                      updateCustodialBalance();
-                    } catch (error) {
-                      console.warn('⚠️ Dashboard: Balance update failed during initialization:', error);
-                    }
-                  }, 500);
-                } else {
-                  console.error('❌ Dashboard: User initialization failed:', result.error);
-                  toast.error('Failed to initialize wallet');
-                  initializationRef.current.attempted = false;
-                  initializationRef.current.completed = false;
-                }
-              });
-            } else {
-              console.error('❌ Dashboard: Socket not available for user initialization');
-              initializationRef.current.attempted = false;
-              initializationRef.current.completed = false;
-              
-              setRealTimeStatus(prev => ({
-                ...prev,
-                connected: false,
-                reconnectAttempts: prev.reconnectAttempts + 1
-              }));
-            }
-          }, 1000);
+            gameSocket.emit('initializeUser', {
+              userId: userData.id,
+              walletAddress: walletAddress
+            });
+          }
         }
       } catch (error) {
         console.error('❌ Dashboard: Could not initialize user:', error);
@@ -438,11 +521,7 @@ const Dashboard: FC = () => {
     };
     
     initUser();
-    
-    return () => {
-      if (initTimeout) clearTimeout(initTimeout);
-    };
-  }, [authenticated, walletAddress, userId, updateCustodialBalance]);
+  }, [authenticated, walletAddress, gameSocket]);
 
   // Reset initialization tracking when wallet changes
   useEffect(() => {
@@ -454,65 +533,8 @@ const Dashboard: FC = () => {
         lastWallet: walletAddress,
         lastUserId: ''
       };
-      
-      setRealTimeStatus({
-        connected: false,
-        lastHeartbeat: 0,
-        reconnectAttempts: 0
-      });
     }
   }, [walletAddress]);
-
-  // 🚀 ENHANCED: Real-time status monitoring
-  useEffect(() => {
-    const socket = (window as any).gameSocket;
-    if (!socket) return;
-
-    const handleConnect = () => {
-      console.log('🔌 Dashboard: Real-time connection established');
-      setRealTimeStatus(prev => ({
-        ...prev,
-        connected: true,
-        lastHeartbeat: Date.now(),
-        reconnectAttempts: 0
-      }));
-    };
-
-    const handleDisconnect = () => {
-      console.log('🔌 Dashboard: Real-time connection lost');
-      setRealTimeStatus(prev => ({
-        ...prev,
-        connected: false
-      }));
-    };
-
-    const handleReconnect = () => {
-      console.log('🔌 Dashboard: Real-time connection restored');
-      setRealTimeStatus(prev => ({
-        ...prev,
-        connected: true,
-        lastHeartbeat: Date.now(),
-        reconnectAttempts: 0
-      }));
-    };
-
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-    socket.on('reconnect', handleReconnect);
-
-    // Initial status
-    setRealTimeStatus(prev => ({
-      ...prev,
-      connected: socket.connected,
-      lastHeartbeat: socket.connected ? Date.now() : prev.lastHeartbeat
-    }));
-
-    return () => {
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-      socket.off('reconnect', handleReconnect);
-    };
-  }, []);
 
   // Wallet balance fetch (optimized)
   useEffect(() => {
@@ -728,12 +750,9 @@ const Dashboard: FC = () => {
     fetchUserStats();
   }, [userId, walletAddress]);
 
-  // 🚀 ENHANCED: Real-time stats updates with better error handling
+  // 🚀 FIXED: Real-time stats updates with proper socket handling
   useEffect(() => {
-    if (!userId) return;
-    
-    const socket = (window as any).gameSocket;
-    if (!socket) return;
+    if (!userId || !gameSocket) return;
     
     console.log(`📊 Dashboard: Setting up ENHANCED LIVE stats listeners for user: ${userId}`);
     
@@ -856,93 +875,90 @@ const Dashboard: FC = () => {
       }
     };
 
-    socket.on('custodialBetPlaced', handleCustodialBetPlaced);
-    socket.on('custodialCashout', handleCustodialCashout);
-    socket.on('gameEnd', handleGameEnd);
-    socket.on('userStatsUpdate', handleUserStatsUpdate);
-    socket.on('betResult', handleBetResult);
+    gameSocket.on('custodialBetPlaced', handleCustodialBetPlaced);
+    gameSocket.on('custodialCashout', handleCustodialCashout);
+    gameSocket.on('gameEnd', handleGameEnd);
+    gameSocket.on('userStatsUpdate', handleUserStatsUpdate);
+    gameSocket.on('betResult', handleBetResult);
     
     return () => {
       console.log(`📊 Dashboard: Cleaning up ENHANCED LIVE stats listeners for user: ${userId}`);
-      socket.off('custodialBetPlaced', handleCustodialBetPlaced);
-      socket.off('custodialCashout', handleCustodialCashout);
-      socket.off('gameEnd', handleGameEnd);
-      socket.off('userStatsUpdate', handleUserStatsUpdate);
-      socket.off('betResult', handleBetResult);
+      gameSocket.off('custodialBetPlaced', handleCustodialBetPlaced);
+      gameSocket.off('custodialCashout', handleCustodialCashout);
+      gameSocket.off('gameEnd', handleGameEnd);
+      gameSocket.off('userStatsUpdate', handleUserStatsUpdate);
+      gameSocket.off('betResult', handleBetResult);
       
       if (statsRefreshTimeout) {
         clearTimeout(statsRefreshTimeout);
       }
     };
-  }, [userId]);
+  }, [userId, gameSocket]);
 
   // Transaction confirmation listener
   useEffect(() => {
-    if (!userId || !walletAddress) return;
+    if (!userId || !walletAddress || !gameSocket) return;
     
-    const socket = (window as any).gameSocket;
-    if (socket) {
-      console.log(`🔌 Dashboard: Setting up transaction listeners for user: ${userId}`);
+    console.log(`🔌 Dashboard: Setting up transaction listeners for user: ${userId}`);
+    
+    let walletRefreshTimeout: NodeJS.Timeout | null = null;
+    
+    const debouncedWalletRefresh = () => {
+      if (walletRefreshTimeout) {
+        clearTimeout(walletRefreshTimeout);
+      }
       
-      let walletRefreshTimeout: NodeJS.Timeout | null = null;
-      
-      const debouncedWalletRefresh = () => {
-        if (walletRefreshTimeout) {
-          clearTimeout(walletRefreshTimeout);
-        }
+      walletRefreshTimeout = setTimeout(async () => {
+        console.log(`💼 Dashboard: Debounced wallet refresh for ${walletAddress}`);
         
-        walletRefreshTimeout = setTimeout(async () => {
-          console.log(`💼 Dashboard: Debounced wallet refresh for ${walletAddress}`);
+        try {
+          const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+          const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
           
-          try {
-            const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-            const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+          if (rpcUrl) {
+            const connectionConfig: any = { commitment: 'confirmed' };
+            if (apiKey) connectionConfig.httpHeaders = { 'x-api-key': apiKey };
             
-            if (rpcUrl) {
-              const connectionConfig: any = { commitment: 'confirmed' };
-              if (apiKey) connectionConfig.httpHeaders = { 'x-api-key': apiKey };
+            const connection = new Connection(rpcUrl, connectionConfig);
+            const publicKey = safeCreatePublicKey(walletAddress);
+            
+            if (publicKey) {
+              const lamports = await connection.getBalance(publicKey);
+              const newBalance = lamports / LAMPORTS_PER_SOL;
               
-              const connection = new Connection(rpcUrl, connectionConfig);
-              const publicKey = safeCreatePublicKey(walletAddress);
-              
-              if (publicKey) {
-                const lamports = await connection.getBalance(publicKey);
-                const newBalance = lamports / LAMPORTS_PER_SOL;
-                
-                setWalletBalance(prevBalance => {
-                  if (Math.abs(prevBalance - newBalance) > 0.0001) {
-                    console.log(`💼 Dashboard: Wallet balance updated: ${newBalance.toFixed(6)} SOL`);
-                    return newBalance;
-                  }
-                  return prevBalance;
-                });
-              }
+              setWalletBalance(prevBalance => {
+                if (Math.abs(prevBalance - newBalance) > 0.0001) {
+                  console.log(`💼 Dashboard: Wallet balance updated: ${newBalance.toFixed(6)} SOL`);
+                  return newBalance;
+                }
+                return prevBalance;
+              });
             }
-          } catch (error) {
-            console.error('❌ Dashboard: Failed to refresh wallet balance:', error);
           }
-        }, 3000);
-      };
-
-      const handleTransactionConfirmed = (data: any) => {
-        if (data.userId === userId || data.walletAddress === walletAddress) {
-          console.log(`🔗 Dashboard REAL-TIME: Transaction confirmed - scheduling wallet refresh`);
-          debouncedWalletRefresh();
+        } catch (error) {
+          console.error('❌ Dashboard: Failed to refresh wallet balance:', error);
         }
-      };
+      }, 3000);
+    };
 
-      socket.on('transactionConfirmed', handleTransactionConfirmed);
+    const handleTransactionConfirmed = (data: any) => {
+      if (data.userId === userId || data.walletAddress === walletAddress) {
+        console.log(`🔗 Dashboard REAL-TIME: Transaction confirmed - scheduling wallet refresh`);
+        debouncedWalletRefresh();
+      }
+    };
+
+    gameSocket.on('transactionConfirmed', handleTransactionConfirmed);
+    
+    return () => {
+      console.log(`🔌 Dashboard: Cleaning up transaction listeners for user: ${userId}`);
+      gameSocket.off('transactionConfirmed', handleTransactionConfirmed);
       
-      return () => {
-        console.log(`🔌 Dashboard: Cleaning up transaction listeners for user: ${userId}`);
-        socket.off('transactionConfirmed', handleTransactionConfirmed);
-        
-        if (walletRefreshTimeout) clearTimeout(walletRefreshTimeout);
-      };
-    }
-  }, [userId, walletAddress]);
+      if (walletRefreshTimeout) clearTimeout(walletRefreshTimeout);
+    };
+  }, [userId, walletAddress, gameSocket]);
 
-  // 🚀 ENHANCED: Refresh function with better feedback
+  // Enhanced refresh function
   const refreshData = useCallback(async () => {
     if (!isValidWallet || !userId) {
       console.log('🔄 Dashboard: Cannot refresh - wallet or user not ready');
@@ -1057,7 +1073,7 @@ const Dashboard: FC = () => {
                 <div className="flex items-center gap-4">
                   <h1 className="text-3xl font-bold text-white">Dashboard</h1>
                   
-                  {/* 🚀 NEW: Real-time status indicator */}
+                  {/* 🚀 FIXED: Real-time status indicator */}
                   <div className="flex items-center gap-2">
                     {realTimeStatus.connected ? (
                       <div className="flex items-center text-sm text-green-400">
@@ -1099,7 +1115,7 @@ const Dashboard: FC = () => {
                 )}
               </div>
 
-              {/* Player Profile (same as before but with enhanced indicators) */}
+              {/* Player Profile (unchanged) */}
               {isValidWallet && userId && (
                 <div className="bg-gray-900 rounded-lg p-6 mb-8">
                   <h2 className="text-xl font-bold text-white mb-4">Player Profile</h2>
@@ -1444,7 +1460,7 @@ const Dashboard: FC = () => {
                 </div>
               )}
 
-              {/* Quick Actions (unchanged) */}
+              {/* Quick Actions */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 <div className="bg-gray-900 rounded-lg p-6">
                   <h3 className="text-lg font-bold text-white mb-4">Quick Actions</h3>

@@ -1,4 +1,4 @@
-// src/app/leaderboard/page.tsx - ENHANCED with REAL-TIME updates
+// src/app/leaderboard/page.tsx - FIXED Socket Connection Version
 'use client';
 
 import { FC, useState, useEffect, useRef, useCallback } from 'react';
@@ -20,11 +20,154 @@ interface LeaderboardStats {
   topPlayerProfit: number;
 }
 
+// 🚀 FIXED: Enhanced socket connection hook
+const useSocketConnection = () => {
+  const [socket, setSocket] = useState<any>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const socketInitRef = useRef(false);
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (socketInitRef.current) return;
+    
+    console.log('🔌 Leaderboard: Initializing socket connection...');
+    
+    const initializeSocket = () => {
+      try {
+        // Check if socket already exists on window
+        let gameSocket = (window as any).gameSocket;
+        
+        if (!gameSocket) {
+          console.log('🔌 Leaderboard: No existing socket found, checking for io...');
+          
+          // Check if socket.io is available
+          const io = (window as any).io;
+          if (!io) {
+            console.warn('⚠️ Leaderboard: Socket.io not found on window. Checking if it needs to be loaded...');
+            
+            // Try to load socket.io if not present
+            if (typeof window !== 'undefined' && !document.querySelector('script[src*="socket.io"]')) {
+              console.log('🔌 Leaderboard: Loading socket.io from CDN...');
+              const script = document.createElement('script');
+              script.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js';
+              script.onload = () => {
+                console.log('✅ Leaderboard: Socket.io loaded from CDN');
+                // Retry initialization after loading
+                retryTimeoutRef.current = setTimeout(initializeSocket, 1000);
+              };
+              document.head.appendChild(script);
+            }
+            return;
+          }
+          
+          // Create new socket connection
+          const GAME_SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'ws://localhost:3001';
+          console.log(`🔌 Leaderboard: Creating new socket connection to: ${GAME_SERVER_URL}`);
+          
+          gameSocket = io(GAME_SERVER_URL, {
+            autoConnect: true,
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 20000,
+            transports: ['websocket', 'polling']
+          });
+          
+          // Store socket on window for other components
+          (window as any).gameSocket = gameSocket;
+        }
+        
+        if (gameSocket) {
+          console.log('✅ Leaderboard: Socket object found:', {
+            connected: gameSocket.connected,
+            id: gameSocket.id || 'not-connected',
+            transport: gameSocket.io?.engine?.transport?.name || 'none'
+          });
+          
+          setSocket(gameSocket);
+          setIsConnected(gameSocket.connected);
+          socketInitRef.current = true;
+          
+          // Connection event handlers
+          gameSocket.on('connect', () => {
+            console.log('🔌 Leaderboard: Socket connected successfully:', gameSocket.id);
+            setIsConnected(true);
+            setConnectionAttempts(0);
+          });
+          
+          gameSocket.on('disconnect', (reason: string) => {
+            console.log('🔌 Leaderboard: Socket disconnected:', reason);
+            setIsConnected(false);
+          });
+          
+          gameSocket.on('connect_error', (error: any) => {
+            console.error('❌ Leaderboard: Socket connection error:', error);
+            setConnectionAttempts(prev => prev + 1);
+            setIsConnected(false);
+          });
+          
+          gameSocket.on('reconnect', (attemptNumber: number) => {
+            console.log('🔌 Leaderboard: Socket reconnected after', attemptNumber, 'attempts');
+            setIsConnected(true);
+            setConnectionAttempts(0);
+          });
+          
+          gameSocket.on('reconnect_error', (error: any) => {
+            console.error('❌ Leaderboard: Socket reconnection error:', error);
+            setConnectionAttempts(prev => prev + 1);
+          });
+          
+          // If socket exists but isn't connected, try to connect
+          if (!gameSocket.connected) {
+            console.log('🔌 Leaderboard: Socket exists but not connected, attempting connection...');
+            gameSocket.connect();
+          }
+        }
+        
+      } catch (error) {
+        console.error('❌ Leaderboard: Error initializing socket:', error);
+        setConnectionAttempts(prev => prev + 1);
+      }
+    };
+    
+    // Try to initialize immediately
+    initializeSocket();
+    
+    // If no socket found, retry after a delay
+    retryTimeoutRef.current = setTimeout(() => {
+      if (!socket && !socketInitRef.current) {
+        console.log('🔌 Leaderboard: Retrying socket initialization...');
+        initializeSocket();
+      }
+    }, 2000);
+    
+    return () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+      }
+      if (socket) {
+        socket.off('connect');
+        socket.off('disconnect');
+        socket.off('connect_error');
+        socket.off('reconnect');
+        socket.off('reconnect_error');
+      }
+    };
+  }, []);
+
+  return { socket, isConnected, connectionAttempts };
+};
+
 const LeaderboardPage: FC = () => {
   // Hooks
   const { authenticated } = usePrivy();
   const { wallets } = useSolanaWallets();
   const { isAuthenticated } = useUser();
+  
+  // 🚀 FIXED: Use socket connection hook
+  const { socket: gameSocket, isConnected: socketConnected, connectionAttempts } = useSocketConnection();
   
   // State
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
@@ -43,13 +186,13 @@ const LeaderboardPage: FC = () => {
   const [currentUserData, setCurrentUserData] = useState<LeaderboardEntry | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
-  // 🚀 NEW: Real-time state
+  // 🚀 FIXED: Real-time state with proper socket connection
   const [isRealTimeConnected, setIsRealTimeConnected] = useState(false);
   const [lastRealTimeUpdate, setLastRealTimeUpdate] = useState<number>(0);
   const [pendingUpdates, setPendingUpdates] = useState<number>(0);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
 
-  // 🚀 NEW: Real-time update tracking
+  // Real-time update tracking
   const realTimeUpdateRef = useRef<NodeJS.Timeout | null>(null);
   const socketListenersSetup = useRef(false);
   const lastPeriodRef = useRef<Period>(period);
@@ -57,6 +200,11 @@ const LeaderboardPage: FC = () => {
   // Get current user's wallet
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   const currentUserWallet = embeddedWallet?.address || '';
+
+  // 🚀 FIXED: Update real-time connection status based on socket
+  useEffect(() => {
+    setIsRealTimeConnected(socketConnected);
+  }, [socketConnected]);
 
   // User initialization
   useEffect(() => {
@@ -108,7 +256,7 @@ const LeaderboardPage: FC = () => {
     };
   };
 
-  // 🚀 NEW: Debounced real-time leaderboard refresh
+  // Debounced real-time leaderboard refresh
   const debouncedLeaderboardRefresh = useCallback(() => {
     if (!autoRefreshEnabled) {
       console.log('🔄 Leaderboard: Auto-refresh disabled, skipping update');
@@ -182,30 +330,12 @@ const LeaderboardPage: FC = () => {
     }, 3000); // 3 second debounce for real-time updates
   }, [period, isAuthenticated, currentUserWallet, userId, autoRefreshEnabled]);
 
-  // 🚀 NEW: Real-time socket listeners setup
+  // 🚀 FIXED: Real-time socket listeners setup with proper socket handling
   useEffect(() => {
-    if (socketListenersSetup.current) return;
-
-    const socket = (window as any).gameSocket;
-    if (!socket) {
-      setIsRealTimeConnected(false);
-      return;
-    }
+    if (!gameSocket || socketListenersSetup.current) return;
 
     console.log('🔌 Leaderboard: Setting up REAL-TIME socket listeners...');
     socketListenersSetup.current = true;
-    setIsRealTimeConnected(socket.connected);
-
-    // Connection status tracking
-    const handleConnect = () => {
-      console.log('🔌 Leaderboard: Socket connected');
-      setIsRealTimeConnected(true);
-    };
-
-    const handleDisconnect = () => {
-      console.log('🔌 Leaderboard: Socket disconnected');
-      setIsRealTimeConnected(false);
-    };
 
     // Game event listeners that should trigger leaderboard updates
     const handleGameEnd = (data: any) => {
@@ -234,23 +364,19 @@ const LeaderboardPage: FC = () => {
     };
 
     // Set up listeners
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-    socket.on('gameEnd', handleGameEnd);
-    socket.on('custodialCashout', handleCustodialCashout);
-    socket.on('userStatsUpdate', handleUserStatsUpdate);
-    socket.on('betResult', handleBetResult);
-    socket.on('leaderboardUpdate', handleLeaderboardUpdate);
+    gameSocket.on('gameEnd', handleGameEnd);
+    gameSocket.on('custodialCashout', handleCustodialCashout);
+    gameSocket.on('userStatsUpdate', handleUserStatsUpdate);
+    gameSocket.on('betResult', handleBetResult);
+    gameSocket.on('leaderboardUpdate', handleLeaderboardUpdate);
 
     return () => {
       console.log('🔌 Leaderboard: Cleaning up REAL-TIME socket listeners');
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-      socket.off('gameEnd', handleGameEnd);
-      socket.off('custodialCashout', handleCustodialCashout);
-      socket.off('userStatsUpdate', handleUserStatsUpdate);
-      socket.off('betResult', handleBetResult);
-      socket.off('leaderboardUpdate', handleLeaderboardUpdate);
+      gameSocket.off('gameEnd', handleGameEnd);
+      gameSocket.off('custodialCashout', handleCustodialCashout);
+      gameSocket.off('userStatsUpdate', handleUserStatsUpdate);
+      gameSocket.off('betResult', handleBetResult);
+      gameSocket.off('leaderboardUpdate', handleLeaderboardUpdate);
       
       if (realTimeUpdateRef.current) {
         clearTimeout(realTimeUpdateRef.current);
@@ -258,7 +384,7 @@ const LeaderboardPage: FC = () => {
       
       socketListenersSetup.current = false;
     };
-  }, [debouncedLeaderboardRefresh]);
+  }, [gameSocket, debouncedLeaderboardRefresh]);
 
   // Fetch leaderboard data
   const fetchLeaderboardData = async (showRefreshing = false) => {
@@ -355,7 +481,7 @@ const LeaderboardPage: FC = () => {
     toast.success('Leaderboard refreshed!', { duration: 2000 });
   }, [period, isAuthenticated, currentUserWallet, userId]);
 
-  // 🚀 NEW: Toggle auto-refresh
+  // Toggle auto-refresh
   const toggleAutoRefresh = useCallback(() => {
     setAutoRefreshEnabled(prev => {
       const newValue = !prev;
@@ -413,7 +539,7 @@ const LeaderboardPage: FC = () => {
                     <div className="flex items-center gap-3 mt-1">
                       <p className="text-xs text-gray-500">{getPeriodDescription(period)}</p>
                       
-                      {/* 🚀 NEW: Real-time status indicator */}
+                      {/* 🚀 FIXED: Real-time status indicator */}
                       <div className="flex items-center gap-2">
                         {isRealTimeConnected ? (
                           <div className="flex items-center text-xs text-green-400">
@@ -429,6 +555,9 @@ const LeaderboardPage: FC = () => {
                           <div className="flex items-center text-xs text-red-400">
                             <WifiOff size={12} className="mr-1" />
                             <span>Offline</span>
+                            {connectionAttempts > 0 && (
+                              <span className="ml-1">({connectionAttempts})</span>
+                            )}
                           </div>
                         )}
                         
@@ -442,7 +571,7 @@ const LeaderboardPage: FC = () => {
                   </div>
                 </div>
                 
-                {/* 🚀 NEW: Enhanced controls with auto-refresh toggle */}
+                {/* Enhanced controls with auto-refresh toggle */}
                 <div className="flex items-center gap-3">
                   <button
                     onClick={toggleAutoRefresh}

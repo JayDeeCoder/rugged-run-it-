@@ -1,4 +1,4 @@
-// src/components/layout/Navbar.tsx - Updated with Settings in main navigation
+// src/components/layout/Navbar.tsx - Enhanced with better level display and responsiveness
 import { FC, useState, useEffect, useRef, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
@@ -159,13 +159,16 @@ const Navbar: FC = () => {
     }
   };
 
+  // Get user level with proper fallbacks
+  const getUserLevel = () => {
+    return currentUser?.level || userLevel || 1;
+  };
+
   // Calculate experience progress for current level
   const getExperienceProgress = () => {
-    // Use real data from currentUser (now comes from database)
-    const currentLevel = currentUser?.level || 1;
-    const currentXP = currentUser?.experience_points || 0;
+    const currentLevel = getUserLevel();
+    const currentXP = currentUser?.experience_points || experience || 0;
     
-    // Calculate experience needed for next level (100 XP per level)
     const experienceNeeded = 100;
     const experienceInLevel = currentXP % 100;
     const progressPercentage = (experienceInLevel / experienceNeeded) * 100;
@@ -177,8 +180,19 @@ const Navbar: FC = () => {
     };
   };
 
+  // Get level color and styling based on level value
+  const getLevelColor = () => {
+    const level = getUserLevel();
+    if (level >= 20) return 'bg-purple-600/90 text-purple-200 border-purple-400';
+    if (level >= 15) return 'bg-red-600/90 text-red-200 border-red-400';
+    if (level >= 10) return 'bg-green-600/90 text-green-200 border-green-400';
+    if (level >= 5) return 'bg-blue-600/90 text-blue-200 border-blue-400';
+    return 'bg-gray-600/90 text-gray-200 border-gray-400';
+  };
+
   const xpData = getExperienceProgress();
-  const displayLevel = currentUser?.level || 1;
+  const displayLevel = getUserLevel();
+  const levelColorClass = getLevelColor();
 
   // Debug logging in development
   useEffect(() => {
@@ -229,6 +243,23 @@ const Navbar: FC = () => {
               </div>
               <div className="text-sm text-gray-400 truncate">
                 {user?.email?.address || user?.phone?.number || 'No contact info'}
+              </div>
+              {/* Level and XP in dropdown */}
+              <div className="flex items-center space-x-2 mt-2">
+                <span className={`text-xs rounded px-2 py-1 font-medium border ${levelColorClass}`}>
+                  Lv.{displayLevel}
+                </span>
+                <div className="flex-1">
+                  <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500" 
+                      style={{ width: `${xpData.progress}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    {xpData.current}/{xpData.needed} XP
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -362,7 +393,7 @@ const Navbar: FC = () => {
             </Link>
 
             {/* Main Navigation - Dashboard and RUGGER Board only */}
-            <nav className="hidden md:flex items-center">
+            <nav className="hidden lg:flex items-center">
               <Link href="/dashboard" className="px-3 py-1 hover:text-gray-300 text-sm transition-colors">
                 Dashboard
               </Link>
@@ -375,73 +406,62 @@ const Navbar: FC = () => {
           <div className="flex items-center">
             {authenticated ? (
               <>
-                {/* User Stats - Avatar + Level + Progress */}
-                <div className="hidden md:flex items-center mr-3 space-x-2">
-                  {/* User Avatar */}
+                {/* User Stats - Enhanced for all screen sizes */}
+                <div className="flex items-center mr-3 space-x-2">
+                  {/* User Avatar - Always visible */}
                   <div className="flex items-center">
                     <span className="text-lg" title={`${getUserDisplayName()}'s avatar`}>
                       {currentUser?.avatar || '👤'}
                     </span>
                   </div>
 
-                  {/* Level Display */}
-                  {displayLevel && displayLevel > 1 && (
-                    <div className="flex items-center bg-gray-800 rounded-full px-2 py-1">
-                      <span className="text-xs text-gray-400 mr-1">Lv.</span>
-                      <span className="text-sm font-medium text-yellow-400">{displayLevel}</span>
-                    </div>
-                  )}
+                  {/* Level Display - ALWAYS show on all screens with enhanced styling */}
+                  <div className={`flex items-center rounded-full px-2 py-1 border ${levelColorClass}`}>
+                    <span className="text-xs font-medium mr-1">Lv.</span>
+                    <span className="text-sm font-bold">{displayLevel}</span>
+                  </div>
 
-                  {/* Experience Progress Bar */}
-                  <div className="flex flex-col items-center">
-                    <div className="h-1.5 w-16 bg-gray-700 rounded-full overflow-hidden">
+                  {/* Experience Progress Bar - Responsive sizing, hidden on extra small screens */}
+                  <div className="hidden xs:flex flex-col items-center">
+                    <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden w-10 sm:w-12 md:w-14 lg:w-16">
                       <div 
                         className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500 ease-out" 
                         style={{ width: `${xpData.progress}%` }}
                       ></div>
                     </div>
-                    <div className="text-xs text-gray-400 mt-0.5">
-                      {xpData.current}/{xpData.needed} XP
+                    <div className="text-xs text-gray-400 mt-0.5 hidden sm:block">
+                      {xpData.current}/{xpData.needed}
                     </div>
                   </div>
                 </div>
 
-                {/* User Menu Button - Enhanced for mobile */}
+                {/* User Menu Button - Enhanced for mobile/tablet */}
                 <button
                   ref={userButtonRef}
                   className="flex items-center bg-gray-800 hover:bg-gray-700 rounded-md px-2 py-1 transition-colors"
                   onClick={() => setShowUserMenu(!showUserMenu)}
                   aria-label="User menu"
                 >
-                  {/* Mobile: Show avatar, name, level, XP */}
-                  <div className="md:hidden flex items-center space-x-2">
-                    <span className="text-lg">{currentUser?.avatar || '👤'}</span>
+                  {/* Mobile/Tablet View */}
+                  <div className="lg:hidden flex items-center space-x-2">
                     <div className="flex flex-col">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-sm font-medium">{getUserDisplayName()}</span>
-                        {displayLevel && displayLevel > 1 && (
-                          <span className="text-xs bg-gray-700 text-yellow-400 px-1.5 py-0.5 rounded-full">
-                            Lv.{displayLevel}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="h-1 w-16 bg-gray-700 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500" 
-                            style={{ width: `${xpData.progress}%` }}
-                          ></div>
-                        </div>
-                        <span className="text-xs text-gray-400">
-                          {xpData.current}/{xpData.needed}
+                      <div className="flex items-center space-x-1">
+                        <span className="text-sm font-medium truncate max-w-16 xs:max-w-20 sm:max-w-24">
+                          {getUserDisplayName()}
                         </span>
                       </div>
+                      {/* Show balance on tablet and up */}
+                      {isWalletConnected && (
+                        <div className="text-xs text-gray-400 hidden md:block">
+                          {isLoadingBalance ? 'Loading...' : `${walletBalance.toFixed(2)} SOL`}
+                        </div>
+                      )}
                     </div>
                     <ChevronDown size={14} className={`transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
                   </div>
 
-                  {/* Desktop: Compact view */}
-                  <div className="hidden md:flex items-center">
+                  {/* Desktop View */}
+                  <div className="hidden lg:flex items-center">
                     <User size={18} className="mr-1" />
                     <div className="text-left mr-1">
                       <div className="text-xs font-medium">{getUserDisplayName()}</div>
@@ -472,8 +492,9 @@ const Navbar: FC = () => {
               </button>
             )}
 
+            {/* Mobile menu toggle - Show for tablet and below */}
             <button 
-              className="ml-3 md:hidden" 
+              className="ml-3 lg:hidden" 
               onClick={() => setShowMobileMenu(!showMobileMenu)}
               aria-label="Mobile menu"
             >
@@ -482,25 +503,48 @@ const Navbar: FC = () => {
           </div>
         </div>
 
-        {/* Mobile Menu */}
+        {/* Mobile Menu - Enhanced for iPad */}
         {showMobileMenu && (
-          <div className="md:hidden bg-gray-800 mt-3 rounded-md p-2">
+          <div className="lg:hidden bg-gray-800 mt-3 rounded-md p-2">
             <nav className="flex flex-col">
               {/* Mobile Navigation Links */}
               <Link 
                 href="/dashboard" 
-                className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm transition-colors"
+                className="px-4 py-3 hover:bg-gray-700 rounded-md text-sm transition-colors flex items-center"
                 onClick={() => setShowMobileMenu(false)}
               >
+                <BarChart2 size={16} className="mr-3" />
                 Dashboard
               </Link>
               <Link 
                 href="/leaderboard" 
-                className="px-4 py-2 hover:bg-gray-700 rounded-md text-sm transition-colors"
+                className="px-4 py-3 hover:bg-gray-700 rounded-md text-sm transition-colors flex items-center"
                 onClick={() => setShowMobileMenu(false)}
               >
+                <Trophy size={16} className="mr-3" />
                 RUGGER Board
               </Link>
+              
+              {/* Show XP progress in mobile menu for authenticated users */}
+              {authenticated && (
+                <div className="px-4 py-3 border-t border-gray-700 mt-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-gray-400">Your Progress</span>
+                    <span className={`text-xs rounded px-2 py-1 font-medium border ${levelColorClass}`}>
+                      Lv.{displayLevel}
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-700 rounded-full h-2 mb-1">
+                    <div 
+                      className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500" 
+                      style={{ width: `${xpData.progress}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-xs text-gray-400 text-center">
+                    {xpData.current}/{xpData.needed} XP to next level
+                  </div>
+                </div>
+              )}
             </nav>
           </div>
         )}

@@ -1,4 +1,4 @@
-// src/components/chat/ChatMessage.tsx
+// src/components/chat/ChatMessage.tsx - Enhanced with better level and badge display
 import { FC } from 'react';
 import { ChatMessage as ChatMessageType } from '../../services/api';
 
@@ -7,16 +7,16 @@ interface ChatMessageProps {
 }
 
 const ChatMessage: FC<ChatMessageProps> = ({ message }) => {
-  const { 
-    username, 
-    message: text, 
-    created_at, 
-    avatar, 
-    level, 
-    badge, 
-    message_type 
+  const {
+    username,
+    message: text,
+    created_at,
+    avatar,
+    level,
+    badge,
+    message_type
   } = message;
-  
+
   const formattedTime = new Date(created_at).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit'
@@ -54,61 +54,85 @@ const ChatMessage: FC<ChatMessageProps> = ({ message }) => {
 
   // Get badge display
   const getBadgeDisplay = () => {
-    if (isModerator) return { icon: '🛡️', color: 'text-red-400' };
-    if (isVerified) return { icon: '✓', color: 'text-purple-400' };
-    if (badge === 'premium') return { icon: '⭐', color: 'text-yellow-400' };
+    if (isModerator) return { icon: '🛡️', color: 'text-red-400', label: 'MOD' };
+    if (isVerified) return { icon: '✓', color: 'text-purple-400', label: 'Verified' };
+    if (badge === 'premium') return { icon: '⭐', color: 'text-yellow-400', label: 'Premium' };
     return null;
+  };
+
+  // Get level color based on level value
+  const getLevelColor = () => {
+    if (!level || level <= 1) return 'bg-gray-700/80 text-gray-300';
+    if (level >= 20) return 'bg-purple-600/80 text-purple-200';
+    if (level >= 15) return 'bg-red-600/80 text-red-200';
+    if (level >= 10) return 'bg-green-600/80 text-green-200';
+    if (level >= 5) return 'bg-blue-600/80 text-blue-200';
+    return 'bg-gray-600/80 text-gray-200';
   };
 
   const userColor = getUserColor();
   const badgeDisplay = getBadgeDisplay();
+  const levelColorClass = getLevelColor();
 
   return (
-    <div className="mb-3 hover:bg-gray-800/30 p-1 rounded transition-colors">
+    <div className="mb-3 hover:bg-gray-800/30 p-1.5 rounded transition-colors">
       <div className="flex items-center justify-between">
         <div className="flex items-center flex-1 min-w-0">
           {/* Avatar */}
           {avatar && (
-            <span className="mr-2 text-sm flex-shrink-0">{avatar}</span>
+            <span className="mr-2 text-sm flex-shrink-0" title={`${username}'s avatar`}>
+              {avatar}
+            </span>
           )}
-          
-          {/* Level badge */}
+
+          {/* Level badge - Always show if level exists and > 1 */}
           {level && level > 1 && (
-            <span className="text-xs bg-gray-700/80 text-gray-300 rounded px-1.5 py-0.5 mr-2 flex-shrink-0 font-medium">
+            <span 
+              className={`text-xs rounded px-1.5 py-0.5 mr-2 flex-shrink-0 font-medium ${levelColorClass}`}
+              title={`Level ${level}`}
+            >
               Lv.{level}
             </span>
           )}
-          
+
           {/* Username */}
-          <span className={`font-medium text-sm ${userColor} truncate flex-shrink`}>
+          <span className={`font-medium text-sm ${userColor} truncate flex-shrink mr-1`}>
             {username}
           </span>
-          
-          {/* Badge icon */}
+
+          {/* Badge icon and label */}
           {badgeDisplay && (
-            <span className={`ml-1 ${badgeDisplay.color} flex-shrink-0`}>
-              {badgeDisplay.icon}
-            </span>
+            <div className="flex items-center flex-shrink-0 ml-1">
+              <span className={`${badgeDisplay.color}`} title={badgeDisplay.label}>
+                {badgeDisplay.icon}
+              </span>
+              {/* Optional badge text for moderators */}
+              {isModerator && (
+                <span className="text-xs bg-red-600/80 text-red-200 rounded px-1.5 py-0.5 ml-1">
+                  MOD
+                </span>
+              )}
+            </div>
           )}
-          
+
           {/* Custom badge text (for non-standard badges) */}
-          {badge && 
-           badge !== 'newcomer' && 
-           badge !== 'verified' && 
-           badge !== 'moderator' && 
-           badge !== 'premium' && (
+          {badge &&
+            badge !== 'newcomer' &&
+            badge !== 'verified' &&
+            badge !== 'moderator' &&
+            badge !== 'premium' && (
             <span className="text-xs bg-yellow-600/80 text-white rounded px-1.5 py-0.5 ml-2 flex-shrink-0">
-              {badge}
+              {badge.toUpperCase()}
             </span>
           )}
         </div>
-        
+
         {/* Timestamp */}
         <span className="text-xs text-gray-500 ml-2 flex-shrink-0">{formattedTime}</span>
       </div>
-      
+
       {/* Message text */}
-      <div className="mt-1 text-gray-300 text-xs break-words leading-relaxed">
+      <div className="mt-1 text-gray-300 text-xs break-words leading-relaxed pl-1">
         {text}
       </div>
     </div>

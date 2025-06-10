@@ -1,4 +1,4 @@
-// src/app/page.tsx - Fixed version with LeaderboardContainer
+// src/app/page.tsx - Updated with real ChatBox integration and proper scrolling
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -16,69 +16,44 @@ const LeaderboardContainer = dynamic(() => import('../components/leaderboard/Lea
 export default function Home() {
   const [isLeaderboardVisible, setIsLeaderboardVisible] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  
   const { authenticated, login } = usePrivy();
   const { width, height } = useWindowSize();
   
-  // More granular screen size detection
-  const isExtraSmall = width ? width < 375 : false;  // iPhone SE and smaller
-  const isSmall = width ? width < 640 : false;       // Most phones
-  const isMobile = width ? width < 768 : false;      // Mobile devices
-  const isTablet = width ? width >= 768 && width < 1024 : false;
-  const isDesktop = width ? width >= 1024 : false;
+  // Enhanced screen size detection with iPad support
+  const isExtraSmall = width ? width < 375 : false;    // iPhone SE and smaller
+  const isSmall = width ? width < 640 : false;         // Most phones
+  const isMobile = width ? width < 768 : false;        // Mobile devices
+  const isTablet = width ? width >= 768 && width < 1024 : false;  // iPad and tablets
+  const isDesktop = width ? width >= 1024 : false;     // Desktop
+  const isMobileOrTablet = width ? width < 1024 : false; // Combined mobile/tablet check
 
   // Track mount state to prevent hydration issues
   useEffect(() => {
     setIsMounted(true);
     // Show leaderboard immediately on mobile/tablet, or after a short delay on desktop
-    if (width && width < 1024) {
+    if (isMobileOrTablet) {
       setIsLeaderboardVisible(true);
     } else {
       // For desktop, show after a brief delay or on scroll
       const timer = setTimeout(() => setIsLeaderboardVisible(true), 2000);
       return () => clearTimeout(timer);
     }
-  }, [width]);
+  }, [isMobileOrTablet]);
 
-  // Simplified scroll handler - more aggressive visibility
-  const handleScroll = useCallback(() => {
-    if (typeof window === 'undefined' || !isMounted) return;
+  // Simplified scroll handler for main content area
+  const handleMainContentScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (!isMounted || isMobileOrTablet) return;
     
-    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    const windowHeight = window.innerHeight;
-    // Much lower threshold - show after scrolling just 20% on desktop
-    const threshold = isDesktop ? windowHeight * 0.2 : 0;
+    const element = e.target as HTMLDivElement;
+    const scrollTop = element.scrollTop;
+    const scrollHeight = element.scrollHeight;
+    const clientHeight = element.clientHeight;
     
-    setIsLeaderboardVisible(scrollTop > threshold);
-  }, [isDesktop, isMounted]);
-
-  // Set up window scroll listener with debouncing
-  useEffect(() => {
-    if (!isMounted) return;
-
-    // For mobile/tablet, always show leaderboard
-    if (isMobile || isTablet) {
-      setIsLeaderboardVisible(true);
-      return;
-    }
-
-    let ticking = false;
-    const scrollHandler = () => {
-      if (!ticking) {
-        requestAnimationFrame(() => {
-          handleScroll();
-          ticking = false;
-        });
-        ticking = true;
-      }
-    };
-
-    window.addEventListener('scroll', scrollHandler, { passive: true });
-    handleScroll(); // Initial check
-
-    return () => {
-      window.removeEventListener('scroll', scrollHandler);
-    };
-  }, [handleScroll, isMounted, isMobile, isTablet]);
+    // Show leaderboard when scrolled past 30% of content
+    const scrollPercentage = scrollTop / (scrollHeight - clientHeight);
+    setIsLeaderboardVisible(scrollPercentage > 0.3);
+  }, [isMounted, isMobileOrTablet]);
 
   const handleLoginClick = () => {
     login();
@@ -88,7 +63,7 @@ export default function Home() {
   if (!isMounted) {
     return (
       <Layout>
-        <div className="flex items-center justify-center min-h-screen">
+        <div className="flex items-center justify-center h-full">
           <div className="animate-pulse text-gray-400">Loading...</div>
         </div>
       </Layout>
@@ -97,48 +72,52 @@ export default function Home() {
 
   return (
     <Layout>
-      {/* Main container */}
-      <div className="w-full min-h-screen bg-[#0B0E16]">
+      <div className="flex h-full bg-[#0B0E16]">
         
-        {/* Content wrapper - single column on mobile, side-by-side on desktop */}
-        <div className="flex flex-col lg:flex-row min-h-screen">
-          
-          {/* Desktop Chat Sidebar - completely hidden on mobile/tablet */}
-          {isDesktop && (
-            <div className="w-1/4 xl:w-1/5 border-r border-gray-800 flex-shrink-0">
-              <div className="sticky top-0 h-screen overflow-hidden">
-                <ChatBox />
-              </div>
-            </div>
-          )}
-          
-          {/* Mobile Chat - floating overlay, doesn't affect layout */}
-          {isMobile && <MobileChat />}
-          
-          {/* Main Content Area */}
-          <div className="flex-1 flex flex-col w-full">
+        {/* Real ChatBox with Collapsible Functionality - Hidden on mobile, shown on tablet+ */}
+        {!isMobile && (
+          <div className="flex-shrink-0">
+            <ChatBox />
+          </div>
+        )}
+        
+        {/* Mobile Chat - floating overlay, doesn't affect layout */}
+        {isMobile && <MobileChat />}
+        
+        {/* Main Content Area - Scrollable */}
+        <div 
+          className="flex-1 overflow-y-auto overflow-x-hidden"
+          onScroll={handleMainContentScroll}
+        >
+          <div className="min-h-full flex flex-col">
             
-            {/* Login Prompt - fully responsive */}
+            {/* Login Prompt - Enhanced responsiveness */}
             {!authenticated && (
               <div className={`
-                bg-gray-900 rounded-lg text-center
-                ${isExtraSmall ? 'mx-1 my-2 p-3' : 
-                  isSmall ? 'mx-2 my-3 p-4' : 
-                  'mx-4 my-4 p-6 lg:p-8'}
+                bg-gray-900 rounded-lg text-center mx-auto
+                ${isExtraSmall ? 'mx-2 my-3 p-4 max-w-sm' : 
+                  isSmall ? 'mx-3 my-4 p-5 max-w-md' : 
+                  isMobile ? 'mx-4 my-5 p-6 max-w-lg' :
+                  isTablet ? 'mx-6 my-6 p-8 max-w-xl' :
+                  'mx-8 my-8 p-10 max-w-2xl'}
               `}>
                 <h2 className={`
-                  font-bold mb-3 text-white
+                  font-bold mb-4 text-white
                   ${isExtraSmall ? 'text-lg' : 
                     isSmall ? 'text-xl' : 
-                    'text-2xl'}
+                    isMobile ? 'text-2xl' :
+                    isTablet ? 'text-3xl' :
+                    'text-4xl'}
                 `}>
                   Login to Start Trading
                 </h2>
                 <p className={`
-                  text-gray-400 mb-4
-                  ${isExtraSmall ? 'text-xs' : 
-                    isSmall ? 'text-sm' : 
-                    'text-base'}
+                  text-gray-400 mb-6
+                  ${isExtraSmall ? 'text-sm' : 
+                    isSmall ? 'text-base' : 
+                    isMobile ? 'text-lg' :
+                    isTablet ? 'text-xl' :
+                    'text-xl'}
                 `}>
                   Connect your wallet to access all trading features and participate in the game.
                 </p>
@@ -146,9 +125,11 @@ export default function Home() {
                   onClick={handleLoginClick}
                   className={`
                     bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold transition-colors
-                    ${isExtraSmall ? 'px-3 py-2 text-sm' : 
-                      isSmall ? 'px-4 py-2 text-sm' : 
-                      'px-6 py-3 text-base'}
+                    ${isExtraSmall ? 'px-4 py-2 text-sm' : 
+                      isSmall ? 'px-5 py-3 text-base' : 
+                      isMobile ? 'px-6 py-3 text-lg' :
+                      isTablet ? 'px-8 py-4 text-xl' :
+                      'px-10 py-4 text-xl'}
                   `}
                 >
                   Login to Continue
@@ -160,63 +141,58 @@ export default function Home() {
             <div className={`
               flex-1 w-full
               ${authenticated ? '' : 'opacity-50 pointer-events-none'}
-              ${isExtraSmall ? 'px-1' : isSmall ? 'px-2' : 'px-4 lg:px-0'}
+              ${isExtraSmall ? 'px-1' : 
+                isSmall ? 'px-2' : 
+                isMobile ? 'px-3' :
+                isTablet ? 'px-4' :
+                'px-6'}
             `}>
-              <div className="w-full">
+              <div className="w-full h-full">
                 <ChartContainer useMobileHeight={isMobile} />
               </div>
             </div>
             
             {/* Scroll Indicator - only show on desktop when leaderboard is hidden */}
             {isDesktop && !isLeaderboardVisible && (
-              <div className="text-center py-4 text-gray-400 transition-opacity duration-300 animate-bounce">
+              <div className="text-center py-6 text-gray-400 transition-opacity duration-300 animate-bounce">
                 <div className="flex flex-col items-center">
-                  <span className="text-sm">Scroll Down To See TOP RUGGERS</span>
-                  <span className="text-lg">▼</span>
+                  <span className="text-base">Scroll Down To See TOP RUGGERS</span>
+                  <span className="text-2xl">▼</span>
                 </div>
               </div>
             )}
 
-            {/* FIXED: Leaderboard Section using LeaderboardContainer */}
+            {/* Leaderboard Section */}
             <div className={`
               w-full
-              ${isExtraSmall ? 'mt-2 mb-2 px-1' : 
-                isSmall ? 'mt-4 mb-4 px-2' : 
-                isMobile ? 'mt-6 mb-6 px-2' : 
-                'mt-12 mb-8 px-4'}
+              ${isExtraSmall ? 'mt-4 mb-4 px-2' : 
+                isSmall ? 'mt-6 mb-6 px-3' : 
+                isMobile ? 'mt-8 mb-8 px-4' :
+                isTablet ? 'mt-10 mb-10 px-6' :
+                'mt-12 mb-12 px-8'}
               transition-all duration-500 ease-in-out
-              ${(isLeaderboardVisible || isMobile || isTablet) ? 
+              ${(isLeaderboardVisible || isMobileOrTablet) ? 
                 'opacity-100 translate-y-0 pointer-events-auto' : 
-                'opacity-0 translate-y-4 pointer-events-none'
+                'opacity-0 translate-y-8 pointer-events-none'
               }
             `}>
-              <div className="w-full">
+              <div className="w-full max-w-6xl mx-auto">
                 <LeaderboardContainer 
                   period="daily"
-                  limit={10}
+                  limit={isTablet ? 15 : isMobile ? 10 : 20}
                   showHeader={true}
-                  showRefresh={false}
+                  showRefresh={!isMobile}
                 />
               </div>
             </div>
             
-            {/* Debug info - remove this in production */}
-            {process.env.NODE_ENV === 'development' && (
-              <div className="fixed bottom-4 right-4 bg-black/80 text-white p-2 rounded text-xs z-50">
-                <div>Width: {width}px</div>
-                <div>Mounted: {isMounted ? 'Yes' : 'No'}</div>
-                <div>Mobile: {isMobile ? 'Yes' : 'No'}</div>
-                <div>Tablet: {isTablet ? 'Yes' : 'No'}</div>
-                <div>Desktop: {isDesktop ? 'Yes' : 'No'}</div>
-                <div>Leaderboard Visible: {isLeaderboardVisible ? 'Yes' : 'No'}</div>
-              </div>
-            )}
-            
             {/* Bottom spacing for complete scroll */}
             <div className={`
-              ${isExtraSmall ? 'h-4' : 
-                isSmall ? 'h-8' : 
-                'h-12'}
+              ${isExtraSmall ? 'h-8' : 
+                isSmall ? 'h-12' : 
+                isMobile ? 'h-16' :
+                isTablet ? 'h-20' :
+                'h-24'}
             `} />
           </div>
         </div>

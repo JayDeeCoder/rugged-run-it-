@@ -1,4 +1,4 @@
-// src/components/layout/Layout.tsx - Fixed version with proper z-index stacking
+// src/components/layout/Layout.tsx - Fixed layout with sticky navbar and proper scrolling
 import { FC, ReactNode } from 'react';
 import Navbar from './Navbar';
 
@@ -8,15 +8,15 @@ interface LayoutProps {
 
 const Layout: FC<LayoutProps> = ({ children }) => {
   return (
-    <div className="flex flex-col h-screen bg-[#0d0d0f] text-white relative">
-      {/* Navbar with high z-index to ensure dropdowns appear above content */}
-      <div className="relative z-50">
+    <div className="h-screen bg-[#0d0d0f] text-white overflow-hidden">
+      {/* Fixed Navbar - always stays at top */}
+      <div className="fixed top-0 left-0 right-0 z-50 bg-[#0d0d0f] border-b border-gray-800">
         <Navbar />
       </div>
       
-      {/* Main content area with lower z-index */}
-      <div className="flex flex-1 overflow-hidden relative z-10">
-        <main className="flex-1 overflow-auto">
+      {/* Main content area - accounts for navbar height and handles scrolling */}
+      <div className="pt-16 h-full flex">
+        <main className="flex-1 h-full overflow-hidden">
           {children}
         </main>
       </div>

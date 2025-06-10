@@ -1223,3 +1223,62 @@ body {
   outline: 1px solid rgba(255, 0, 0, 0.3) !important;
 }
 */
+/* Add to your globals.css */
+
+/* Mobile chat specific optimizations */
+.mobile-chat-container {
+  /* Ensure it doesn't interfere with the navbar */
+  top: 4rem !important;
+}
+
+/* Better touch scrolling for mobile chat */
+.mobile-chat-container .scrollbar-thin {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent zoom on input focus in mobile chat */
+.mobile-chat-container input {
+  font-size: 16px !important;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Safe area handling for phones with notches */
+@supports (padding: max(0px)) {
+  .mobile-chat-container {
+    padding-top: max(0px, env(safe-area-inset-top));
+    padding-bottom: max(0px, env(safe-area-inset-bottom));
+    padding-left: max(0px, env(safe-area-inset-left));
+    padding-right: max(0px, env(safe-area-inset-right));
+  }
+}
+
+/* Extra small screens optimization */
+@media (max-width: 374px) {
+  .mobile-chat-container {
+    padding: 0;
+  }
+  
+  .mobile-chat-container .p-4 {
+    padding: 1rem;
+  }
+  
+  .chat-toggle-btn {
+    width: 3rem !important;
+    height: 3rem !important;
+    bottom: 1rem !important;
+    right: 1rem !important;
+  }
+  
+  .chat-toggle-btn svg {
+    width: 1.25rem !important;
+    height: 1.25rem !important;
+  }
+}
+
+/* Medium phones */
+@media (max-width: 639px) {
+  .mobile-chat-container .bg-\[#0d0d0f\] {
+    width: 100% !important;
+  }
+}

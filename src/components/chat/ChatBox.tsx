@@ -87,10 +87,10 @@ const ChatBox: FC = () => {
 
   return (
     <div className={`
-      flex flex-col font-dynapuff bg-[#0d0d0f] border-r border-gray-800 transition-all duration-300 ease-in-out
-      ${isCollapsed ? 'w-12' : 'w-64 md:w-72 lg:w-80'}
-      ${isMobile ? 'h-[75vh] max-h-[400px]' : 'h-full max-h-[950px]'}
-      min-h-[350px]
+      flex flex-col font-dynapuff bg-[#0d0d0f] transition-all duration-300 ease-in-out
+      ${isCollapsed ? 'w-12' : 'w-full'}
+      h-full
+      border-r border-gray-800
     `}>
       
       {/* Header with collapse toggle */}

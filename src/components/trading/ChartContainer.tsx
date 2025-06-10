@@ -31,6 +31,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   const [triggerSellEffect, setTriggerSellEffect] = useState<boolean>(false);
   const [sellSuccess, setSellSuccess] = useState<boolean>(false);
   const [gameResults, setGameResults] = useState<GameResult[]>([]);
+  const [showTopInfo, setShowTopInfo] = useState<boolean>(true);
   
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
@@ -403,27 +404,24 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
 
   return (
     <div className="p-2 flex flex-col">
-      {/* Game Identification and Status */}
-      <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg flex items-center justify-between border border-gray-800 ${isMobile ? 'text-xs' : 'text-sm md:text-base'}`}>
+      {/* Info Toggle */}
+      <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg flex items-center justify-between border border-gray-800 ${isMobile ? 'text-xs' : 'text-sm'}`}>
+        <button
+          onClick={() => setShowTopInfo(!showTopInfo)}
+          className={`px-3 py-1 rounded-md font-medium transition-colors ${
+            showTopInfo 
+              ? 'bg-blue-600 text-white' 
+              : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+          }`}
+        >
+          {showTopInfo ? 'Hide Info' : 'Show Info'}
+        </button>
+        
+        {/* Always show basic game info */}
         <div className="flex items-center">
           <span className="text-gray-400 mr-1">Round #</span>
           <span className="font-bold text-white">{gameId}</span>
           {!isConnected && <span className="ml-2 text-red-400 text-xs">(OFFLINE)</span>}
-        </div>
-        
-        <div className="flex items-center">
-          <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
-            !isConnected ? 'bg-red-600 text-white' :
-            gameStatus === 'active' ? 'bg-green-600 text-white' : 
-            gameStatus === 'crashed' ? 'bg-red-600 text-white' :
-            gameStatus === 'waiting' ? 'bg-yellow-600 text-white' :
-            'bg-gray-600 text-white'
-          }`}>
-            {!isConnected ? 'OFFLINE' :
-             gameStatus === 'active' ? 'ACTIVE' : 
-             gameStatus === 'crashed' ? 'RUGGED' : 
-             gameStatus === 'waiting' ? 'WAITING' : 'UNKNOWN'}
-          </span>
         </div>
         
         <div className="flex items-center">
@@ -434,72 +432,93 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         </div>
       </div>
 
-      {/* 🚀 FIXED: Position Display - Buy, Entry, Balance, Cashout, P&L */}
-      <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg flex flex-wrap justify-between border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>
-        <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
-          <span className="text-gray-400">Buy:</span>
-          <span className={`ml-1 font-bold ${hasActiveGame ? 'text-blue-400' : 'text-gray-500'}`}>
-            {activeBet ? activeBet.amount.toFixed(3) : '0.000'} SOL
-          </span>
-        </div>
-        
-        <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
-          <span className="text-gray-400">Entry:</span>
-          <span className={`ml-1 font-bold ${hasActiveGame ? 'text-purple-400' : 'text-gray-500'}`}>
-            {activeBet ? activeBet.entryMultiplier.toFixed(2) + 'x' : '-'}
-          </span>
-        </div>
-        <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
-          <span className="text-gray-400">Cashout:</span>
-          <span className={`ml-1 font-bold ${hasActiveGame ? 'text-green-400' : 'text-gray-500'}`}>
-            {positionData.cashoutValue.toFixed(3)} SOL
-          </span>
-        </div>
-        
-        {/* 🚀 FIXED: Show P&L with correct calculation and color coding */}
-        {activeBet && (
-          <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
-            <span className="text-gray-400">P&L:</span>
-            <span className={`ml-1 font-bold ${positionData.isProfit ? 'text-green-400' : 'text-red-400'}`}>
-              {positionData.isProfit ? '+' : ''}{positionData.profit.toFixed(3)} SOL
+      {/* Collapsible Top Information */}
+      {showTopInfo && (
+        <>
+          {/* Game Status */}
+          <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg flex items-center justify-center border border-gray-800 ${isMobile ? 'text-xs' : 'text-sm md:text-base'}`}>
+            <span className={`px-3 py-1 rounded-md text-xs font-medium ${
+              !isConnected ? 'bg-red-600 text-white' :
+              gameStatus === 'active' ? 'bg-green-600 text-white' : 
+              gameStatus === 'crashed' ? 'bg-red-600 text-white' :
+              gameStatus === 'waiting' ? 'bg-yellow-600 text-white' :
+              'bg-gray-600 text-white'
+            }`}>
+              {!isConnected ? 'OFFLINE' :
+               gameStatus === 'active' ? 'ACTIVE' : 
+               gameStatus === 'crashed' ? 'RUGGED' : 
+               gameStatus === 'waiting' ? 'WAITING' : 'UNKNOWN'}
             </span>
           </div>
-        )}
-      </div>
 
-      {currentGame && (
-        <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs'} text-gray-400`}>
-          <div className="flex justify-between items-center flex-wrap">
-            <span>RUGGERS: {currentGame.boostedPlayerCount || currentGame.totalPlayers || 0}</span>
-            <span>Total Liq: {(currentGame.boostedTotalBets || currentGame.totalBets || 0).toFixed(2)} SOL</span>
-            {showCountdown && (
-              <span className="text-blue-400 animate-pulse">Next: {countdownSeconds}s</span>
-            )}
-            {hasActiveGame && (
-              <span className={`font-medium ${
-                isPlacingBet ? 'text-blue-400 animate-pulse' : 
-                isCashingOut ? 'text-yellow-400 animate-pulse' : 
-                'text-green-400'
-              }`}>
-                {isPlacingBet ? 'Placing...' : isCashingOut ? 'Cashing...' : 'Active Bet'}
+          {/* Position Display */}
+          <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg flex flex-wrap justify-between border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>
+            <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
+              <span className="text-gray-400">Buy:</span>
+              <span className={`ml-1 font-bold ${hasActiveGame ? 'text-blue-400' : 'text-gray-500'}`}>
+                {activeBet ? activeBet.amount.toFixed(3) : '0.000'} SOL
               </span>
+            </div>
+            
+            <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
+              <span className="text-gray-400">Entry:</span>
+              <span className={`ml-1 font-bold ${hasActiveGame ? 'text-purple-400' : 'text-gray-500'}`}>
+                {activeBet ? activeBet.entryMultiplier.toFixed(2) + 'x' : '-'}
+              </span>
+            </div>
+            <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
+              <span className="text-gray-400">Cashout:</span>
+              <span className={`ml-1 font-bold ${hasActiveGame ? 'text-green-400' : 'text-gray-500'}`}>
+                {positionData.cashoutValue.toFixed(3)} SOL
+              </span>
+            </div>
+            
+            {activeBet && (
+              <div className={`${isMobile ? 'px-1 py-0.5' : 'px-2 py-1'}`}>
+                <span className="text-gray-400">P&L:</span>
+                <span className={`ml-1 font-bold ${positionData.isProfit ? 'text-green-400' : 'text-red-400'}`}>
+                  {positionData.isProfit ? '+' : ''}{positionData.profit.toFixed(3)} SOL
+                </span>
+              </div>
             )}
           </div>
-        </div>
+
+          {/* Game Info */}
+          {currentGame && (
+            <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg border border-gray-800 ${isMobile ? 'text-xs' : 'text-xs'} text-gray-400`}>
+              <div className="flex justify-between items-center flex-wrap">
+                <span>RUGGERS: {currentGame.boostedPlayerCount || currentGame.totalPlayers || 0}</span>
+                <span>Total Liq: {(currentGame.boostedTotalBets || currentGame.totalBets || 0).toFixed(2)} SOL</span>
+                {showCountdown && (
+                  <span className="text-blue-400 animate-pulse">Next: {countdownSeconds}s</span>
+                )}
+                {hasActiveGame && (
+                  <span className={`font-medium ${
+                    isPlacingBet ? 'text-blue-400 animate-pulse' : 
+                    isCashingOut ? 'text-yellow-400 animate-pulse' : 
+                    'text-green-400'
+                  }`}>
+                    {isPlacingBet ? 'Placing...' : isCashingOut ? 'Cashing...' : 'Active Bet'}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Mini charts */}
+          <div className="mb-2">
+            <MiniCharts 
+              data={gameResults} 
+              maxCharts={isMobile ? 4 : 8}
+              onNewGame={(result) => {
+                console.log('New game result:', result);
+              }}
+            />
+          </div>
+        </>
       )}
 
-      {/* Mini charts showing recent game results */}
-      <div className="mb-2">
-        <MiniCharts 
-          data={gameResults} 
-          maxCharts={isMobile ? 4 : 8}
-          onNewGame={(result) => {
-            console.log('New game result:', result);
-          }}
-        />
-      </div>
-
-      {/* Mobile optimized layout */}
+      {/* Main layout - Chart and Trading Controls always visible */}
       <div className={`grid grid-cols-1 ${isMobile ? '' : 'md:grid-cols-4'} gap-4`}>
         {/* Chart container */}
         <div 
@@ -544,7 +563,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
           )}
         </div>
 
-        {/* 🚀 ENHANCED: Trading controls - Using shared state for perfect consistency */}
+        {/* Trading controls - Always visible */}
         <div className={`${isMobile ? '' : 'md:col-span-1'}`}>
           <TradingControls 
             onBuy={handleBuy} 
@@ -561,26 +580,28 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
         </div>
       </div>
 
-      {/* 🚀 ENHANCED: Game Statistics with better formatting */}
-      <div className={`mt-4 bg-[#0d0d0f] p-3 rounded-lg border border-gray-800 ${isMobile ? 'p-2' : 'p-3'}`}>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="text-center">
-            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Average</div>
-            <div className={`font-bold text-green-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.average}x</div>
-          </div>
-          <div className="text-center">
-            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Best</div>
-            <div className={`font-bold text-yellow-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.highest}x</div>
-          </div>
-          <div className="text-center">
-            <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Rounds</div>
-            <div className={`font-bold text-blue-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameResults.length}</div>
+      {/* Game Statistics - Collapsible */}
+      {showTopInfo && (
+        <div className={`mt-4 bg-[#0d0d0f] p-3 rounded-lg border border-gray-800 ${isMobile ? 'p-2' : 'p-3'}`}>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="text-center">
+              <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Average</div>
+              <div className={`font-bold text-green-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.average}x</div>
+            </div>
+            <div className="text-center">
+              <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Best</div>
+              <div className={`font-bold text-yellow-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameStats.highest}x</div>
+            </div>
+            <div className="text-center">
+              <div className={`text-gray-400 ${isMobile ? 'text-xs' : 'text-xs md:text-sm'}`}>Rounds</div>
+              <div className={`font-bold text-blue-400 ${isMobile ? 'text-sm' : 'text-base md:text-lg'}`}>{gameResults.length}</div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* 🚀 FIXED: Debug information with correct position values */}
-      {process.env.NODE_ENV === 'development' && (
+      {/* Debug information - Collapsible */}
+      {showTopInfo && process.env.NODE_ENV === 'development' && (
         <div className="mt-2 p-2 bg-gray-900 rounded text-xs text-gray-400 space-y-1">
           <div>
             <strong>Position Debug (Fixed Calculation):</strong>

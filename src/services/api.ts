@@ -787,7 +787,7 @@ export class UserAPI {
       // Update user stats if we have userId and profitLoss
       if (userId && profitLoss !== undefined) {
         const isWin = profitLoss > 0;
-        await this.updateUserStatsAfterBet(userId, betAmount, profitLoss, cashoutMultiplier, isWin);
+        await UserAPI.updateUserStatsOnly(userId, betAmount, profitLoss, multiplier);
       }
 
       return true;

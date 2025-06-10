@@ -766,3 +766,460 @@ body {
 .z-modal {
   z-index: 10000;
 }
+/* Add these styles to your existing src/app/globals.css file */
+
+/* ===== COLLAPSIBLE SIDEBAR STYLES ===== */
+.collapsible-sidebar {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: width;
+}
+
+.sidebar-collapsed {
+  width: 3rem; /* 48px */
+}
+
+.sidebar-expanded {
+  width: 16rem; /* 256px */
+}
+
+/* Responsive sidebar widths */
+@media (min-width: 768px) {
+  .sidebar-expanded {
+    width: 18rem; /* 288px */
+  }
+}
+
+@media (min-width: 1024px) {
+  .sidebar-expanded {
+    width: 20rem; /* 320px */
+  }
+}
+
+/* ===== ENHANCED SCROLLBAR STYLES ===== */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #374151 transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: #374151;
+  border-radius: 3px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: #4B5563;
+}
+
+.scrollbar-thumb-gray-700 {
+  scrollbar-color: #374151 transparent;
+}
+
+.scrollbar-thumb-gray-700::-webkit-scrollbar-thumb {
+  background-color: #374151;
+}
+
+.scrollbar-track-transparent {
+  scrollbar-color: #374151 transparent;
+}
+
+.scrollbar-track-transparent::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ===== LEVEL BADGE STYLES ===== */
+.level-badge {
+  position: relative;
+  overflow: hidden;
+}
+
+.level-badge::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  transition: left 0.5s ease;
+}
+
+.level-badge:hover::before {
+  left: 100%;
+}
+
+/* Level color variants */
+.level-gray {
+  background-color: rgba(107, 114, 128, 0.8);
+  color: rgb(209, 213, 219);
+  border-color: rgb(107, 114, 128);
+}
+
+.level-blue {
+  background-color: rgba(59, 130, 246, 0.8);
+  color: rgb(191, 219, 254);
+  border-color: rgb(59, 130, 246);
+}
+
+.level-green {
+  background-color: rgba(34, 197, 94, 0.8);
+  color: rgb(187, 247, 208);
+  border-color: rgb(34, 197, 94);
+}
+
+.level-red {
+  background-color: rgba(239, 68, 68, 0.8);
+  color: rgb(254, 202, 202);
+  border-color: rgb(239, 68, 68);
+}
+
+.level-purple {
+  background-color: rgba(147, 51, 234, 0.8);
+  color: rgb(221, 214, 254);
+  border-color: rgb(147, 51, 234);
+}
+
+/* ===== FIXED LAYOUT ENHANCEMENTS ===== */
+.fixed-navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+}
+
+.content-with-navbar {
+  padding-top: 4rem; /* Adjust based on navbar height */
+}
+
+.main-layout {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.scrollable-content {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ===== ANIMATION ENHANCEMENTS ===== */
+.gpu-accelerated {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+.smooth-transition {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-animation {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.2s ease-in-out;
+}
+
+/* Collapsible sidebar content animations */
+.sidebar-content-fade {
+  transition: opacity 0.2s ease-in-out;
+}
+
+.sidebar-content-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sidebar-content-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ===== ENHANCED MOBILE OPTIMIZATIONS ===== */
+@media (max-width: 767px) {
+  /* Force sidebar to be hidden on mobile */
+  .sidebar-mobile-hidden {
+    display: none !important;
+  }
+  
+  /* Ensure mobile chat doesn't interfere with layout */
+  .mobile-chat-overlay {
+    position: fixed;
+    top: 4rem; /* Account for navbar */
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 40;
+    max-width: calc(100vw - 2rem);
+  }
+  
+  /* Better touch targets for mobile */
+  .mobile-touch-target {
+    min-height: 44px;
+    min-width: 44px;
+    touch-action: manipulation;
+  }
+  
+  /* Prevent unwanted zoom on level badges */
+  .level-badge {
+    font-size: 0.75rem !important;
+    -webkit-text-size-adjust: 100%;
+  }
+}
+
+/* ===== TABLET OPTIMIZATIONS ===== */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .tablet-optimized {
+    -webkit-overflow-scrolling: touch;
+    touch-action: manipulation;
+  }
+  
+  /* Enhanced touch targets for iPad */
+  button, [role="button"], .clickable {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  
+  /* Better sidebar sizing for tablets */
+  .sidebar-expanded {
+    width: 18rem;
+  }
+  
+  /* Optimize level badge for tablet viewing */
+  .level-badge {
+    font-size: 0.875rem;
+    padding: 0.25rem 0.5rem;
+  }
+}
+
+/* ===== ENHANCED FOCUS STYLES ===== */
+.focus-visible:focus {
+  outline: 2px solid #3B82F6;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
+}
+
+.sidebar-toggle:focus {
+  outline: 2px solid #22c55e;
+  outline-offset: 2px;
+}
+
+/* ===== LOADING STATES FOR NEW COMPONENTS ===== */
+.navbar-loading {
+  background: linear-gradient(90deg, #1F2937 25%, #374151 50%, #1F2937 75%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.sidebar-loading {
+  background: linear-gradient(
+    90deg,
+    rgba(31, 41, 55, 0.8) 25%,
+    rgba(55, 65, 81, 0.8) 50%,
+    rgba(31, 41, 55, 0.8) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ===== DROPDOWN ENHANCEMENTS ===== */
+.dropdown-enter {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.95);
+}
+
+.dropdown-enter-active {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition: opacity 200ms ease-out, transform 200ms ease-out;
+}
+
+.dropdown-exit {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.dropdown-exit-active {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.95);
+  transition: opacity 150ms ease-in, transform 150ms ease-in;
+}
+
+/* ===== XP PROGRESS BAR ENHANCEMENTS ===== */
+.xp-progress-bar {
+  background: linear-gradient(90deg, #1F2937, #374151);
+  overflow: hidden;
+  position: relative;
+}
+
+.xp-progress-fill {
+  background: linear-gradient(90deg, #3B82F6, #8B5CF6);
+  transition: width 0.5s ease-out;
+  position: relative;
+}
+
+.xp-progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.3),
+    transparent
+  );
+  animation: xp-shimmer 2s infinite;
+}
+
+@keyframes xp-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* ===== RESPONSIVE UTILITY CLASSES ===== */
+.xs\:block {
+  display: block;
+}
+
+@media (min-width: 375px) {
+  .xs\:block {
+    display: block;
+  }
+  
+  .xs\:flex {
+    display: flex;
+  }
+  
+  .xs\:hidden {
+    display: none;
+  }
+}
+
+/* ===== PERFORMANCE OPTIMIZATIONS ===== */
+.will-change-width {
+  will-change: width;
+}
+
+.will-change-opacity {
+  will-change: opacity;
+}
+
+.will-change-transform {
+  will-change: transform;
+}
+
+/* Remove will-change after animations complete */
+.animation-complete {
+  will-change: auto;
+}
+
+/* ===== ACCESSIBILITY ENHANCEMENTS ===== */
+@media (prefers-reduced-motion: reduce) {
+  .collapsible-sidebar,
+  .sidebar-animation,
+  .smooth-transition,
+  .xp-progress-fill {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .level-badge {
+    border: 2px solid currentColor;
+  }
+  
+  .sidebar-toggle {
+    border: 2px solid currentColor;
+    background-color: transparent;
+  }
+}
+
+/* ===== DARK MODE REFINEMENTS ===== */
+@media (prefers-color-scheme: dark) {
+  .level-badge {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  }
+  
+  .sidebar-toggle:hover {
+    background-color: rgba(55, 65, 81, 0.8);
+  }
+}
+
+/* ===== PRINT OPTIMIZATIONS ===== */
+@media print {
+  .collapsible-sidebar,
+  .mobile-chat-overlay,
+  .sidebar-toggle,
+  .navbar-container {
+    display: none !important;
+  }
+  
+  .main-content {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+}
+
+/* ===== CONTAINER QUERY SUPPORT (Future-proofing) ===== */
+@supports (container-type: inline-size) {
+  .sidebar-container {
+    container-type: inline-size;
+  }
+  
+  @container (max-width: 200px) {
+    .sidebar-content {
+      font-size: 0.75rem;
+    }
+  }
+}
+
+/* ===== DEBUG HELPERS (Remove in production) ===== */
+.debug-layout {
+  outline: 1px solid red !important;
+}
+
+.debug-sidebar {
+  background: rgba(255, 0, 0, 0.1) !important;
+}
+
+.debug-main-content {
+  background: rgba(0, 255, 0, 0.1) !important;
+}
+
+/* Uncomment to debug layout issues */
+/*
+.debug-mode * {
+  outline: 1px solid rgba(255, 0, 0, 0.3) !important;
+}
+*/

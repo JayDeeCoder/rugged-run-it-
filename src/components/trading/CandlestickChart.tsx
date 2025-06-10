@@ -363,7 +363,7 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
   const [lastServerMultiplier, setLastServerMultiplier] = useState<number>(1.0);
   const [cashoutMultiplier, setCashoutMultiplier] = useState<number | undefined>(undefined);
   
-  // Visual effect states - PRESERVED
+  // Visual effect states - ENHANCED with timeout tracking
   const [isShaking, setIsShaking] = useState(false);
   const [shakeIntensity, setShakeIntensity] = useState(0);
   const [showExplosion, setShowExplosion] = useState(false);
@@ -376,12 +376,35 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
   const [showRugEffect, setShowRugEffect] = useState(false);
   const [peakMultiplier, setPeakMultiplier] = useState<number>(1.0);
 
-  // Milestone tracking - PRESERVED with mobile optimization
+  // Timeout tracking for proper cleanup
+  const timeoutsRef = useRef<NodeJS.Timeout[]>([]);
+
+  // Milestone tracking - ENHANCED with mobile optimization
   const lastMilestoneRef = useRef<number>(0);
   const milestones = useMemo(() => isMobile ? [2, 5, 10, 20, 50] : [2, 3, 5, 10, 15, 20, 25, 50, 75, 100], [isMobile]);
   
   // User context
   const { currentUser } = useContext(UserContext);
+
+  // Helper function to clear all pending timeouts
+  const clearAllTimeouts = useCallback(() => {
+    if (timeoutsRef.current.length > 0) {
+      console.log(`🧹 Clearing ${timeoutsRef.current.length} pending timeouts`);
+      timeoutsRef.current.forEach(timeout => clearTimeout(timeout));
+      timeoutsRef.current = [];
+    }
+  }, []);
+
+  // Helper function to add tracked timeout
+  const addTimeout = useCallback((callback: () => void, delay: number) => {
+    const timeout = setTimeout(() => {
+      callback();
+      // Remove from tracking array when executed
+      timeoutsRef.current = timeoutsRef.current.filter(t => t !== timeout);
+    }, delay);
+    timeoutsRef.current.push(timeout);
+    return timeout;
+  }, []);
   
   // ENHANCED: Y-axis scale with mobile consideration - using recent candles for better scaling
   const yScale = useMemo(() => {
@@ -405,7 +428,15 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
     }
   }, []);
 
-  // Visual effects based on server multiplier - PRESERVED
+  // Component cleanup - clear all timeouts on unmount
+  useEffect(() => {
+    return () => {
+      clearAllTimeouts();
+      console.log('🧹 Component unmounting - All timeouts cleared');
+    };
+  }, [clearAllTimeouts]);
+
+  // 🔥 ENHANCED: Visual effects with MASSIVELY INCREASED INTENSITY
   const checkForEffects = useCallback((price: number) => {
     // Danger/safe level indicators
     if (price < 1.0) {
@@ -418,45 +449,45 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
       setDangerLevel(0);
     }
     
-    // Milestone effects with mobile optimization
+    // 🚀 MASSIVELY ENHANCED milestone effects
     for (const milestone of milestones) {
       if (price >= milestone && lastMilestoneRef.current < milestone) {
         lastMilestoneRef.current = milestone;
         let intensity, color, textColor, shakeDuration;
         
-        // Reduced intensity for mobile
-        const mobileMultiplier = isMobile ? 0.6 : 1.0;
+        // 🔥 TRIPLED INTENSITY - Now super dramatic!
+        const mobileMultiplier = isMobile ? 2.0 : 3.0; // MASSIVE increase
         
         if (milestone <= 2) {
-          intensity = 2 * mobileMultiplier;
-          color = 'rgba(74, 222, 128, 0.6)';
+          intensity = 8 * mobileMultiplier; // Was 2, now 8
+          color = 'rgba(74, 222, 128, 0.9)'; // More intense
           textColor = '#4ADE80';
-          shakeDuration = 400;
+          shakeDuration = 800; // Longer
         } else if (milestone <= 3) {
-          intensity = 4 * mobileMultiplier;
-          color = 'rgba(34, 211, 238, 0.6)';
+          intensity = 12 * mobileMultiplier; // Was 4, now 12
+          color = 'rgba(34, 211, 238, 0.9)';
           textColor = '#22D3EE';
-          shakeDuration = 500;
+          shakeDuration = 1000;
         } else if (milestone <= 5) {
-          intensity = 5 * mobileMultiplier;
-          color = 'rgba(251, 191, 36, 0.6)';
+          intensity = 15 * mobileMultiplier; // Was 5, now 15
+          color = 'rgba(251, 191, 36, 0.9)';
           textColor = '#FACC15';
-          shakeDuration = 600;
+          shakeDuration = 1200;
         } else if (milestone <= 10) {
-          intensity = 7 * mobileMultiplier;
-          color = 'rgba(249, 115, 22, 0.6)';
+          intensity = 20 * mobileMultiplier; // Was 7, now 20
+          color = 'rgba(249, 115, 22, 0.9)';
           textColor = '#F97316';
-          shakeDuration = 700;
+          shakeDuration = 1400;
         } else if (milestone <= 20) {
-          intensity = 8 * mobileMultiplier;
-          color = 'rgba(239, 68, 68, 0.6)';
+          intensity = 25 * mobileMultiplier; // Was 8, now 25
+          color = 'rgba(239, 68, 68, 0.9)';
           textColor = '#EF4444';
-          shakeDuration = 800;
+          shakeDuration = 1600;
         } else {
-          intensity = 10 * mobileMultiplier;
-          color = 'rgba(217, 70, 239, 0.6)';
+          intensity = 30 * mobileMultiplier; // Was 10, now 30
+          color = 'rgba(217, 70, 239, 0.9)';
           textColor = '#D946EF';
-          shakeDuration = 900;
+          shakeDuration = 1800;
         }
         
         setShakeIntensity(intensity);
@@ -464,18 +495,19 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
         setMilestoneTextColor(textColor);
         
         setIsShaking(true);
-        setTimeout(() => setIsShaking(false), shakeDuration);
+        addTimeout(() => setIsShaking(false), shakeDuration);
         
-        setMilestoneText(`${milestone}X ${isMobile ? '!' : '!!'}`);
+        setMilestoneText(`${milestone}X ${isMobile ? '!!!' : '!!!!'}`); // More excitement
         setShowExplosion(true);
         setMilestoneOpacity(1);
         
-        setTimeout(() => {
+        // 🎊 ENHANCED celebration timing - much longer with tracked timeouts
+        addTimeout(() => {
           setMilestoneOpacity(0);
-          setTimeout(() => {
+          addTimeout(() => {
             setShowExplosion(false);
-          }, 800);
-        }, isMobile ? 1200 : 1500);
+          }, 1500); // Longer fade out
+        }, isMobile ? 2500 : 3000); // Much longer display time
         
         break;
       }
@@ -485,36 +517,49 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
     if (price < lastMilestoneRef.current * 0.8) {
       lastMilestoneRef.current = Math.floor(price);
     }
-  }, [milestones, isMobile]);
+  }, [milestones, isMobile, addTimeout]);
 
-  // Rug effect animation - PRESERVED with mobile optimization
+  // 💥 MASSIVELY ENHANCED Rug effect animation with tracked cleanup
   const triggerRugEffect = useCallback((rugPrice: number) => {
-    setShakeIntensity(isMobile ? 6 : 10);
-    setIsShaking(true);
+    // Clear any existing effects first to prevent sticking
+    clearAllTimeouts(); // Clear all pending timeouts
+    setIsShaking(false);
+    setShowExplosion(false);
+    setShowRugEffect(false);
+    setMilestoneOpacity(0);
     
-    setExplosionColor('rgba(239, 68, 68, 0.8)');
-    setMilestoneTextColor('#EF4444');
-    setMilestoneText(isMobile ? `RUGGED!` : `RUGGED @ ${peakMultiplier.toFixed(2)}X!`);
-    setShowExplosion(true);
-    setMilestoneOpacity(1);
-    setShowRugEffect(true);
-    
-    if (onGameCrash) {
-      onGameCrash(peakMultiplier);
-    }
-    
-    setTimeout(() => {
-      setIsShaking(false);
-    }, isMobile ? 1500 : 2000);
-    
-    setTimeout(() => {
-      setMilestoneOpacity(0);
-      setTimeout(() => {
-        setShowExplosion(false);
-        setShowRugEffect(false);
-      }, 800);
-    }, isMobile ? 2000 : 3000);
-  }, [onGameCrash, peakMultiplier, isMobile]);
+    // Start SUPER ENHANCED rug effect after brief cleanup
+    addTimeout(() => {
+      console.log('🔥 TRIGGERING ENHANCED RUG EFFECT');
+      setShakeIntensity(isMobile ? 40 : 60); // MASSIVE INTENSITY
+      setIsShaking(true);
+      
+      setExplosionColor('rgba(239, 68, 68, 0.95)'); // Very intense red
+      setMilestoneTextColor('#EF4444');
+      setMilestoneText(isMobile ? `RUGGED!!!` : `RUGGED @ ${peakMultiplier.toFixed(2)}X!!!`);
+      setShowExplosion(true);
+      setMilestoneOpacity(1);
+      setShowRugEffect(true);
+      
+      if (onGameCrash) {
+        onGameCrash(peakMultiplier);
+      }
+      
+      // Much longer shake duration with tracked timeout
+      addTimeout(() => {
+        setIsShaking(false);
+      }, isMobile ? 4000 : 5000); // MUCH longer
+      
+      // Much longer text display, then proper cleanup with tracked timeouts
+      addTimeout(() => {
+        setMilestoneOpacity(0);
+        addTimeout(() => {
+          setShowExplosion(false);
+          setShowRugEffect(false);
+        }, 1500); // Longer fade out
+      }, isMobile ? 4500 : 5500); // Much longer display
+    }, 100); // Brief delay for cleanup
+  }, [onGameCrash, peakMultiplier, isMobile, clearAllTimeouts, addTimeout]);
 
   // ENHANCED: Real server data synchronization with FULL candle history kept
   useEffect(() => {
@@ -525,8 +570,10 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
       setPeakMultiplier(serverMultiplier);
     }
 
-    // Handle game crash from server - CREATE FINAL RUG PULL CANDLE
+    // 🔥 ENHANCED: Handle game crash from server - FORCE RUG EFFECT EVERY TIME
     if (serverGameStatus === 'crashed' && lastServerMultiplier !== serverMultiplier) {
+      console.log('💥 GAME CRASHED - FORCING ENHANCED RUG EFFECT');
+      
       // Finalize current candle and create dramatic crash candle
       setCandleData(prev => {
         if (prev.length === 0) return prev;
@@ -550,6 +597,7 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
         return updatedCandles;
       });
 
+      // 🚀 FORCE rug effect trigger - GUARANTEED to happen every crash
       triggerRugEffect(serverMultiplier);
       setPeakMultiplier(1.0);
       lastMilestoneRef.current = 0;
@@ -611,14 +659,20 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
       }
     }
 
-    // Reset for new game - COMPLETE CLEAN SLATE
+    // 🧹 ENHANCED: Reset for new game - COMPLETE CLEAN SLATE with tracked timeout cleanup
     if (serverGameStatus === 'waiting' && candleData.length > 0) {
+      console.log('🧹 STARTING COMPLETE GAME RESET WITH TIMEOUT CLEANUP');
+      
+      // FIRST: Clear all pending timeouts to prevent interference
+      clearAllTimeouts();
+      
+      // THEN: Reset all data
       setCandleData([]);
       setCashoutMultiplier(undefined);
       lastMilestoneRef.current = 0;
       setPeakMultiplier(1.0);
       
-      // ENHANCED: Reset ALL visual effects for clean slate
+      // FINALLY: Complete effect cleanup
       setIsShaking(false);
       setShakeIntensity(0);
       setShowExplosion(false);
@@ -630,7 +684,7 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
       setSafeLevel(0);
       setShowRugEffect(false);
       
-      console.log('🧹 Chart reset - Clean slate for new game');
+      console.log('✅ Chart reset complete - All effects and timeouts cleared');
     }
 
     setLastServerMultiplier(serverMultiplier);
@@ -649,12 +703,12 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
       className="w-full relative bg-black border border-gray-800 rounded-lg overflow-hidden" 
       style={{ 
         height: `${chartHeight}px`,
-        animation: isShaking ? `shake-${Math.ceil(shakeIntensity)} 0.5s cubic-bezier(.36,.07,.19,.97) both` : 'none'
+        animation: isShaking ? `shake-${Math.min(Math.ceil(shakeIntensity), 60)} 0.3s cubic-bezier(.36,.07,.19,.97) both` : 'none' // Faster shake
       }}
     >
       {/* Status indicators with mobile optimization */}
       <div className={`absolute top-1 left-1 px-2 py-1 rounded ${isMobile ? 'text-xs' : 'text-sm'} font-bold z-10 ${
-        serverGameStatus === 'crashed' ? 'bg-red-500 text-white' : 'bg-yellow-500 text-black'
+        serverGameStatus === 'crashed' ? 'bg-red-500 text-white animate-pulse' : 'bg-yellow-500 text-black' // Added pulse for crash
       }`}>
         {serverMultiplier.toFixed(2)}x {isMobile ? '' : currency}
       </div>
@@ -667,7 +721,7 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
       }`}>
         {!isServerConnected ? 'OFF' :
          serverGameStatus === 'active' ? (isMobile ? 'ON' : 'ACTIVE') : 
-         serverGameStatus === 'crashed' ? 'END' : 'WAIT'}
+         serverGameStatus === 'crashed' ? 'RUGGED' : 'WAIT'} {/* Changed to RUGGED */}
       </div>
       
       {/* Active bet indicator with mobile optimization */}
@@ -677,13 +731,13 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
         </div>
       )}
       
-      {/* Visual effect overlays - PRESERVED with mobile optimization */}
+      {/* Visual effect overlays - ENHANCED */}
       {dangerLevel > 0 && (
         <div 
           className="absolute inset-0 pointer-events-none z-20"
           style={{ 
-            background: `linear-gradient(transparent, rgba(220, 38, 38, ${dangerLevel/(isMobile ? 300 : 200)}))`,
-            transition: 'opacity 0.5s ease'
+            background: `linear-gradient(transparent, rgba(220, 38, 38, ${dangerLevel/(isMobile ? 200 : 150)}))`, // More intense
+            transition: 'opacity 0.3s ease' // Faster transition
           }}
         />
       )}
@@ -692,8 +746,8 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
         <div 
           className="absolute inset-0 pointer-events-none z-20"
           style={{ 
-            background: `linear-gradient(transparent, rgba(16, 185, 129, ${safeLevel/(isMobile ? 300 : 200)}))`,
-            transition: 'opacity 0.5s ease'
+            background: `linear-gradient(transparent, rgba(16, 185, 129, ${safeLevel/(isMobile ? 200 : 150)}))`, // More intense
+            transition: 'opacity 0.3s ease' // Faster transition
           }}
         />
       )}
@@ -724,26 +778,26 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
         )}
       </div>
       
-      {/* Explosion effect and milestone text - PRESERVED with mobile optimization */}
+      {/* 🎆 ENHANCED: Explosion effect and milestone text with MUCH more intensity */}
       {showExplosion && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
           <div className="relative">
             <div 
-              className={`absolute ${isMobile ? '-inset-8' : '-inset-12'} animate-pulse`} 
+              className={`absolute ${isMobile ? '-inset-16' : '-inset-24'} animate-pulse`} // Bigger explosion
               style={{ 
                 background: `radial-gradient(circle, ${explosionColor} 0%, transparent 70%)`,
-                animation: 'pulse 1s cubic-bezier(0,0,0.2,1) infinite',
-                transform: 'scale(1)'
+                animation: 'pulse 0.6s cubic-bezier(0,0,0.2,1) infinite', // Faster pulse
+                transform: 'scale(1.5)' // Bigger scale
               }} 
             />
             
             <div 
-              className={`${isMobile ? 'text-3xl' : 'text-6xl'} font-dynapuff font-extrabold`}
+              className={`${isMobile ? 'text-4xl' : 'text-8xl'} font-dynapuff font-extrabold`} // Bigger text
               style={{ 
                 color: milestoneTextColor,
                 opacity: milestoneOpacity,
-                transition: 'opacity 1s ease',
-                textShadow: `0 0 10px ${explosionColor}, 0 0 20px ${explosionColor}`
+                transition: 'opacity 1.5s ease', // Longer transition
+                textShadow: `0 0 20px ${explosionColor}, 0 0 40px ${explosionColor}, 0 0 60px ${explosionColor}` // Multiple shadows
               }}
             >
               {milestoneText}
@@ -752,20 +806,20 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
         </div>
       )}
       
-      {/* Rug Effect animation - PRESERVED with mobile optimization */}
+      {/* 💥 MASSIVELY ENHANCED Rug Effect animation */}
       {showRugEffect && (
         <div className="absolute inset-0 pointer-events-none z-40">
           <div className="absolute inset-0" style={{
-            background: 'radial-gradient(circle, rgba(255,0,0,0.4) 0%, transparent 70%)',
-            animation: 'rug-pulse 0.8s ease-in-out infinite'
+            background: 'radial-gradient(circle, rgba(255,0,0,0.8) 0%, transparent 70%)', // More intense
+            animation: 'rug-pulse 0.4s ease-in-out infinite' // Faster pulse
           }} />
           
           <div className="absolute top-0 w-full h-full overflow-hidden">
-            {Array.from({ length: isMobile ? 25 : 50 }).map((_, i) => {
-              const size = Math.random() * (isMobile ? 8 : 12) + (isMobile ? 3 : 5);
-              const opacity = Math.random() * 0.7 + 0.3;
-              const delay = Math.random() * 2;
-              const duration = Math.random() * 2 + 1;
+            {Array.from({ length: isMobile ? 60 : 120 }).map((_, i) => { // WAY more particles
+              const size = Math.random() * (isMobile ? 16 : 24) + (isMobile ? 6 : 8); // Bigger particles
+              const opacity = Math.random() * 0.9 + 0.5; // More visible
+              const delay = Math.random() * 1.0; // Faster start
+              const duration = Math.random() * 1.2 + 0.6; // Faster fall
               const leftPos = Math.random() * 100;
               
               return (
@@ -775,13 +829,14 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
                   style={{
                     width: `${size}px`,
                     height: `${size}px`,
-                    backgroundColor: i % 3 === 0 ? '#FF0000' : i % 3 === 1 ? '#FF5500' : '#FF0000',
+                    backgroundColor: i % 5 === 0 ? '#FF0000' : i % 5 === 1 ? '#FF3300' : i % 5 === 2 ? '#FF6600' : i % 5 === 3 ? '#CC0000' : '#AA0000',
                     borderRadius: '50%',
                     left: `${leftPos}%`,
-                    top: '-20px',
+                    top: '-40px', // Start higher
                     opacity,
                     animation: `fall-down ${duration}s linear forwards`,
                     animationDelay: `${delay}s`,
+                    boxShadow: '0 0 12px rgba(255, 0, 0, 1)' // Stronger glow
                   }}
                 />
               );
@@ -790,70 +845,41 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
         </div>
       )}
       
-      {/* CSS animations - PRESERVED */}
+      {/* 🔥 MASSIVELY ENHANCED CSS animations with extreme shake effects */}
       <style jsx>{`
-        @keyframes shake-1 {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-1px); }
-          20%, 40%, 60%, 80% { transform: translateX(1px); }
-        }
-        @keyframes shake-2 {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-2px); }
-          20%, 40%, 60%, 80% { transform: translateX(2px); }
-        }
-        @keyframes shake-3 {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
-          20%, 40%, 60%, 80% { transform: translateX(3px); }
-        }
-        @keyframes shake-4 {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); }
-          20%, 40%, 60%, 80% { transform: translateX(3px); }
-        }
-        @keyframes shake-5 {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
-          20%, 40%, 60%, 80% { transform: translateX(4px); }
-        }
-        @keyframes shake-6 {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
-          20%, 40%, 60%, 80% { transform: translateX(5px); }
-        }
-        @keyframes shake-7 {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-6px); }
-          20%, 40%, 60%, 80% { transform: translateX(6px); }
-        }
-        @keyframes shake-8 {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-6px); }
-          20%, 40%, 60%, 80% { transform: translateX(6px); }
-        }
-        @keyframes shake-9 {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-7px); }
-          20%, 40%, 60%, 80% { transform: translateX(7px); }
-        }
-        @keyframes shake-10 {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); }
-          20%, 40%, 60%, 80% { transform: translateX(8px); }
-        }
+        @keyframes shake-1 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-1px); } 20%, 40%, 60%, 80% { transform: translateX(1px); } }
+        @keyframes shake-2 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-2px); } 20%, 40%, 60%, 80% { transform: translateX(2px); } }
+        @keyframes shake-3 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-3px); } 20%, 40%, 60%, 80% { transform: translateX(3px); } }
+        @keyframes shake-4 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); } 20%, 40%, 60%, 80% { transform: translateX(4px); } }
+        @keyframes shake-5 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); } 20%, 40%, 60%, 80% { transform: translateX(5px); } }
+        @keyframes shake-6 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-6px); } 20%, 40%, 60%, 80% { transform: translateX(6px); } }
+        @keyframes shake-7 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-7px); } 20%, 40%, 60%, 80% { transform: translateX(7px); } }
+        @keyframes shake-8 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); } 20%, 40%, 60%, 80% { transform: translateX(8px); } }
+        @keyframes shake-9 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-9px); } 20%, 40%, 60%, 80% { transform: translateX(9px); } }
+        @keyframes shake-10 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); } 20%, 40%, 60%, 80% { transform: translateX(10px); } }
+        @keyframes shake-15 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-15px); } 20%, 40%, 60%, 80% { transform: translateX(15px); } }
+        @keyframes shake-20 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-20px); } 20%, 40%, 60%, 80% { transform: translateX(20px); } }
+        @keyframes shake-25 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-25px); } 20%, 40%, 60%, 80% { transform: translateX(25px); } }
+        @keyframes shake-30 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-30px); } 20%, 40%, 60%, 80% { transform: translateX(30px); } }
+        @keyframes shake-35 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-35px); } 20%, 40%, 60%, 80% { transform: translateX(35px); } }
+        @keyframes shake-40 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-40px); } 20%, 40%, 60%, 80% { transform: translateX(40px); } }
+        @keyframes shake-45 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-45px); } 20%, 40%, 60%, 80% { transform: translateX(45px); } }
+        @keyframes shake-50 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-50px); } 20%, 40%, 60%, 80% { transform: translateX(50px); } }
+        @keyframes shake-55 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-55px); } 20%, 40%, 60%, 80% { transform: translateX(55px); } }
+        @keyframes shake-60 { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-60px); } 20%, 40%, 60%, 80% { transform: translateX(60px); } }
+        
         @keyframes pulse {
           0%, 100% { transform: scale(1); opacity: 1; }
-          50% { transform: scale(1.1); opacity: 0.8; }
+          50% { transform: scale(1.2); opacity: 0.7; }
         }
         
         @keyframes fall-down {
-          0% { transform: translateY(0); }
-          100% { transform: translateY(100vh); }
+          0% { transform: translateY(0) rotate(0deg); }
+          100% { transform: translateY(120vh) rotate(360deg); }
         }
         
         @keyframes rug-pulse {
-          0%, 100% { opacity: 0.6; }
+          0%, 100% { opacity: 0.8; }
           50% { opacity: 1; }
         }
       `}</style>

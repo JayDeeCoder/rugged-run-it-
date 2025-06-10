@@ -1,3 +1,4 @@
+// src/app/dashboard/page.tsx - COMPLETE FIX with proper scrolling and all existing functionality
 'use client';
 
 import { FC, useState, useEffect, useContext, useCallback, useRef } from 'react';
@@ -20,11 +21,9 @@ const FALLBACK_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3M
 let supabaseClient: any = null;
 const getSupabaseClient = () => {
   if (!supabaseClient) {
-    // Try environment variables first, fallback to hardcoded values
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || FALLBACK_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || FALLBACK_SUPABASE_ANON_KEY;
     
-    // Debug logging
     console.log('🔧 Supabase initialization:', {
       envUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'FOUND' : 'MISSING',
       envKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'FOUND' : 'MISSING',
@@ -36,7 +35,6 @@ const getSupabaseClient = () => {
       supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
       console.log('✅ Supabase client created successfully');
       
-      // Test the connection
       supabaseClient.from('player_bets').select('count').limit(1)
         .then(() => console.log('✅ Supabase connection test passed'))
         .catch((err: any) => console.warn('⚠️ Supabase test query failed:', err.message));
@@ -49,7 +47,6 @@ const getSupabaseClient = () => {
   return supabaseClient;
 };
 
-// 🚀 FIX: TypeScript interface for bet data from Supabase
 interface PlayerBet {
   bet_amount: number;
   profit_loss: number;
@@ -68,16 +65,13 @@ const useCustodialBalance = (userId: string) => {
   const socketListenersRef = useRef<boolean>(false);
   const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 🚀 OPTIMIZED: Debounced update function to prevent rapid refreshes
   const updateCustodialBalance = useCallback(async (skipDebounce = false) => {
     if (!userId) return;
     
-    // Prevent multiple simultaneous requests
     if (loading) return;
     
-    // Skip if updated recently (unless forced)
     const timeSinceLastUpdate = Date.now() - lastUpdated;
-    if (!skipDebounce && timeSinceLastUpdate < 5000) { // 5 second minimum between updates
+    if (!skipDebounce && timeSinceLastUpdate < 5000) {
       console.log(`⏭️ Dashboard: Skipping update, last updated ${timeSinceLastUpdate}ms ago`);
       return;
     }
@@ -102,9 +96,8 @@ const useCustodialBalance = (userId: string) => {
       if (data.custodialBalance !== undefined) {
         const newBalance = parseFloat(data.custodialBalance) || 0;
         
-        // Only update if balance actually changed to prevent unnecessary re-renders
         setCustodialBalance(prevBalance => {
-          if (Math.abs(prevBalance - newBalance) > 0.000001) { // Only update if significant change
+          if (Math.abs(prevBalance - newBalance) > 0.000001) {
             console.log(`💰 Dashboard: Balance updated: ${prevBalance.toFixed(6)} → ${newBalance.toFixed(6)} SOL`);
             setLastUpdated(Date.now());
             return newBalance;
@@ -114,46 +107,38 @@ const useCustodialBalance = (userId: string) => {
       }
     } catch (error) {
       console.error('❌ Dashboard: Failed to fetch custodial balance:', error);
-      // Don't reset balance on error, keep previous value
     } finally {
-      // 🚀 FIX: Always set loading to false with timeout protection
       setTimeout(() => setLoading(false), 100);
     }
   }, [userId, loading, lastUpdated]);
 
-  // 🚀 OPTIMIZED: Debounced force refresh
   const forceRefresh = useCallback(async () => {
     if (!userId) return;
     
-    // Clear any existing debounce
     if (debounceTimeoutRef.current) {
       clearTimeout(debounceTimeoutRef.current);
     }
     
     console.log(`🔄 Dashboard: Force refresh requested for ${userId}...`);
-    await updateCustodialBalance(true); // Skip debounce for manual refresh
+    await updateCustodialBalance(true);
   }, [userId, updateCustodialBalance]);
   
-  // 🚀 OPTIMIZED: Longer polling interval (60 seconds instead of 15)
   useEffect(() => {
     if (userId && userId !== lastUserIdRef.current) {
       console.log(`🎯 Dashboard: Setting up custodial balance polling for user: ${userId}`);
       lastUserIdRef.current = userId;
       
-      // Clear existing interval
       if (updateIntervalRef.current) {
         clearInterval(updateIntervalRef.current);
       }
       
-      // Initial fetch
       updateCustodialBalance(true);
       
-      // 🚀 OPTIMIZED: Set interval for periodic updates (60 seconds instead of 15)
       updateIntervalRef.current = setInterval(() => {
         if (!loading) {
           updateCustodialBalance();
         }
-      }, 60000); // 60 seconds - much less aggressive
+      }, 60000);
       
       return () => {
         if (updateIntervalRef.current) {
@@ -166,7 +151,6 @@ const useCustodialBalance = (userId: string) => {
     }
   }, [userId, updateCustodialBalance, loading]);
    
-  // 🚀 OPTIMIZED: Debounced real-time socket listeners
   useEffect(() => {
     if (!userId || socketListenersRef.current) return;
     
@@ -175,37 +159,31 @@ const useCustodialBalance = (userId: string) => {
       console.log(`🔌 Dashboard: Setting up REAL-TIME custodial balance listeners for user: ${userId}`);
       socketListenersRef.current = true;
       
-      // 🚀 OPTIMIZED: Debounced balance update handler
       const handleCustodialBalanceUpdate = (data: any) => {
         if (data.userId === userId) {
           console.log(`💰 Dashboard REAL-TIME: Custodial balance update - ${data.custodialBalance?.toFixed(6)} SOL`);
           
-          // Clear existing debounce
           if (debounceTimeoutRef.current) {
             clearTimeout(debounceTimeoutRef.current);
           }
           
-          // Debounce rapid updates
           debounceTimeoutRef.current = setTimeout(() => {
             setCustodialBalance(parseFloat(data.custodialBalance) || 0);
             setLastUpdated(Date.now());
             
-            // Show toast for significant changes (less frequently)
             if (data.updateType === 'deposit_processed') {
               toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL`);
             } else if (data.updateType === 'cashout_processed') {
               toast.success(`Cashout: +${data.change?.toFixed(3)} SOL`);
             }
-          }, 1000); // 1 second debounce
+          }, 1000);
         }
       };
 
-      // 🚀 OPTIMIZED: Less aggressive user balance update
       const handleUserBalanceUpdate = (data: any) => {
         if (data.userId === userId && data.balanceType === 'custodial') {
           console.log(`💰 Dashboard REAL-TIME: User balance update - ${data.newBalance?.toFixed(6)} SOL`);
           
-          // Debounce this update too
           if (debounceTimeoutRef.current) {
             clearTimeout(debounceTimeoutRef.current);
           }
@@ -217,25 +195,21 @@ const useCustodialBalance = (userId: string) => {
         }
       };
 
-      // 🚀 OPTIMIZED: Deposit confirmation with controlled refresh
       const handleDepositConfirmation = (data: any) => {
         if (data.userId === userId) {
           console.log(`💰 Dashboard REAL-TIME: Deposit confirmed for ${userId}`);
           
-          // Update immediately for deposits (important)
           setCustodialBalance(prev => prev + (parseFloat(data.depositAmount) || 0));
           setLastUpdated(Date.now());
           
-          // Force refresh after longer delay to ensure accuracy
           setTimeout(() => {
             updateCustodialBalance(true);
-          }, 3000); // 3 seconds instead of 1.5
+          }, 3000);
           
           toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL!`);
         }
       };
 
-      // Register all event listeners
       socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
       socket.on('userBalanceUpdate', handleUserBalanceUpdate);
       socket.on('depositConfirmed', handleDepositConfirmation);
@@ -299,7 +273,6 @@ const Dashboard: FC = () => {
     profitLoss: 0
   });
 
-  // Add these with your other useState declarations:
   const [levelData, setLevelData] = useState({
     level: 1,
     experience: 0,
@@ -316,9 +289,8 @@ const Dashboard: FC = () => {
     bestWinStreak: 0
   });
   const [isLoadingStats, setIsLoadingStats] = useState<boolean>(false);
-  const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false); // 🚀 FIX: Separate manual refresh state
+  const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false);
   
-  // 🚀 ENHANCED: Add these state variables for live updates
   const [statsLastUpdated, setStatsLastUpdated] = useState<number>(0);
   const [isStatsUpdating, setIsStatsUpdating] = useState<boolean>(false);
   
@@ -393,7 +365,6 @@ const Dashboard: FC = () => {
                   initializationRef.current.completed = true;
                   initializationRef.current.lastUserId = result.userId;
                   
-                  // Trigger balance and stats refresh after initialization
                   setTimeout(() => {
                     try {
                       updateCustodialBalance();
@@ -455,11 +426,10 @@ const Dashboard: FC = () => {
     const fetchWalletBalance = async () => {
       setIsLoadingBalance(true);
       
-      // 🚀 FIX: Add timeout protection for wallet balance loading
       const balanceTimeout = setTimeout(() => {
         console.log('⏰ Dashboard: Wallet balance loading timeout - forcing completion');
         setIsLoadingBalance(false);
-      }, 10000); // 10 second timeout
+      }, 10000);
       
       try {
         const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
@@ -486,9 +456,8 @@ const Dashboard: FC = () => {
         const lamports = await connection.getBalance(publicKey);
         const solBalance = lamports / LAMPORTS_PER_SOL;
         
-        // Only update if balance actually changed to prevent unnecessary re-renders
         setWalletBalance(prevBalance => {
-          if (Math.abs(prevBalance - solBalance) > 0.0001) { // Only update if significant change
+          if (Math.abs(prevBalance - solBalance) > 0.0001) {
             console.log(`💼 Dashboard: Wallet balance updated: ${prevBalance.toFixed(6)} → ${solBalance.toFixed(6)} SOL`);
             return solBalance;
           }
@@ -497,19 +466,15 @@ const Dashboard: FC = () => {
         
       } catch (error) {
         console.error('Failed to fetch wallet balance:', error);
-        // Don't reset balance on error
       } finally {
         clearTimeout(balanceTimeout);
-        // 🚀 FIX: Always set loading to false with small delay
         setTimeout(() => setIsLoadingBalance(false), 100);
       }
     };
 
-    // Initial fetch
     fetchWalletBalance();
     
-    // 🚀 OPTIMIZED: Set up wallet balance polling every 2 minutes (less aggressive)
-    walletBalanceInterval = setInterval(fetchWalletBalance, 120000); // 2 minutes
+    walletBalanceInterval = setInterval(fetchWalletBalance, 120000);
 
     return () => {
       if (walletBalanceInterval) {
@@ -548,7 +513,6 @@ const Dashboard: FC = () => {
       const currentLevel = user.level || 1;
       const currentXP = user.experience_points || 0;
       
-      // Calculate XP needed for next level
       const baseXP = 100;
       const xpForNextLevel = baseXP * Math.pow(1.5, currentLevel - 1);
       const xpForCurrentLevel = currentLevel > 1 ? baseXP * Math.pow(1.5, currentLevel - 2) : 0;
@@ -572,14 +536,13 @@ const Dashboard: FC = () => {
     }
   }, [userId, supabase]);
 
-  // ADD the useEffect RIGHT AFTER fetchLevelData:
   useEffect(() => {
     if (userId) {
       fetchLevelData();
     }
   }, [userId, fetchLevelData]);
 
-  // 🚀 ENHANCED: Live dashboard stats - Replace your existing fetchUserStats useEffect with this:
+  // Enhanced: Live dashboard stats
   useEffect(() => {
     const fetchUserStats = async () => {
       if (!userId) {
@@ -668,7 +631,7 @@ const Dashboard: FC = () => {
     fetchUserStats();
   }, [userId, walletAddress]);
 
-  // 🚀 NEW: Add this separate effect for LIVE stats updates via socket events
+  // NEW: Add this separate effect for LIVE stats updates via socket events
   useEffect(() => {
     if (!userId) return;
     
@@ -679,13 +642,11 @@ const Dashboard: FC = () => {
     
     let statsRefreshTimeout: NodeJS.Timeout | null = null;
     
-    // 🚀 LIVE: Debounced stats refresh function
     const refreshStatsDebounced = () => {
       if (statsRefreshTimeout) {
         clearTimeout(statsRefreshTimeout);
       }
       
-      // Show updating indicator
       setIsStatsUpdating(true);
       
       statsRefreshTimeout = setTimeout(async () => {
@@ -705,10 +666,9 @@ const Dashboard: FC = () => {
                 profitLoss: userStats.net_profit
               };
               
-              // Only update if there's a meaningful change
               if (JSON.stringify(prevStats) !== JSON.stringify(newStats)) {
                 console.log(`📊 Dashboard LIVE: Stats changed - updating display`);
-                setStatsLastUpdated(Date.now()); // 🚀 NEW: Track update time
+                setStatsLastUpdated(Date.now());
                 return newStats;
               }
               return prevStats;
@@ -732,19 +692,16 @@ const Dashboard: FC = () => {
         } catch (error) {
           console.error('❌ Dashboard LIVE: Failed to refresh stats:', error);
         } finally {
-          // Hide updating indicator
           setTimeout(() => setIsStatsUpdating(false), 500);
         }
-      }, 2000); // 2 second debounce to avoid rapid updates
+      }, 2000);
     };
     
-    // 🚀 LIVE: Socket event handlers for real-time stats updates
     const handleCustodialBetPlaced = (data: any) => {
       if (data.userId === userId) {
         console.log(`🎯 Dashboard LIVE: Bet placed for ${userId} - refreshing stats...`);
         refreshStatsDebounced();
         
-        // Show immediate feedback
         toast.success(`Bet placed: ${data.betAmount} SOL`, { 
           duration: 2000,
           id: 'bet-placed' 
@@ -757,7 +714,6 @@ const Dashboard: FC = () => {
         console.log(`💸 Dashboard LIVE: Cashout processed for ${userId} - refreshing stats...`);
         refreshStatsDebounced();
         
-        // Show immediate feedback with payout info
         if (data.payout && data.multiplier) {
           toast.success(`Cashed out at ${data.multiplier.toFixed(2)}x: +${data.payout.toFixed(3)} SOL!`, { 
             duration: 3000,
@@ -768,7 +724,6 @@ const Dashboard: FC = () => {
     };
 
     const handleGameEnd = (data: any) => {
-      // Refresh stats when any game ends (in case user was playing)
       console.log(`🎮 Dashboard LIVE: Game ended - refreshing stats for active players...`);
       refreshStatsDebounced();
     };
@@ -777,7 +732,6 @@ const Dashboard: FC = () => {
       if (data.userId === userId) {
         console.log(`📊 Dashboard LIVE: Direct stats update received for ${userId}`);
         
-        // Immediate update from socket data if available
         if (data.stats) {
           setUserStats({
             totalWagered: data.stats.total_wagered || 0,
@@ -793,7 +747,6 @@ const Dashboard: FC = () => {
             bestWinStreak: data.stats.best_win_streak || 0
           });
         } else {
-          // Fallback to API fetch
           refreshStatsDebounced();
         }
       }
@@ -806,7 +759,6 @@ const Dashboard: FC = () => {
       }
     };
 
-    // Register all live stats event listeners
     socket.on('custodialBetPlaced', handleCustodialBetPlaced);
     socket.on('custodialCashout', handleCustodialCashout);
     socket.on('gameEnd', handleGameEnd);
@@ -827,7 +779,7 @@ const Dashboard: FC = () => {
     };
   }, [userId]);
 
-  // 🚀 ENHANCED: Updated refreshData function with better feedback
+  // ENHANCED: Updated refreshData function with better feedback
   const refreshData = useCallback(async () => {
     if (!isValidWallet || !userId) {
       console.log('🔄 Dashboard: Cannot refresh - wallet or user not ready');
@@ -840,15 +792,13 @@ const Dashboard: FC = () => {
     const refreshTimeout = setTimeout(() => {
       console.log('⏰ Dashboard: Manual refresh timeout - forcing completion');
       setIsManualRefreshing(false);
-    }, 15000); // Increased timeout for manual refresh
+    }, 15000);
     
     try {
       toast.loading('Refreshing dashboard data...', { id: 'dashboard-refresh' });
       
-      // Refresh custodial balance
       await refreshCustodialBalance();
       
-      // Refresh level data
       try {
         await fetchLevelData();
         console.log('🎯 Dashboard: Level data refreshed');
@@ -856,7 +806,6 @@ const Dashboard: FC = () => {
         console.error('❌ Dashboard: Failed to refresh level data:', error);
       }
       
-      // Refresh wallet balance
       try {
         const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
         const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
@@ -877,7 +826,6 @@ const Dashboard: FC = () => {
         console.error('❌ Dashboard: Failed to refresh embedded wallet balance:', error);
       }
 
-      // 🚀 ENHANCED: Refresh user stats with better error handling
       try {
         console.log('📊 Dashboard: Manual stats refresh...');
         const userStats = await UserAPI.getUserStats(userId);
@@ -916,7 +864,7 @@ const Dashboard: FC = () => {
     }
   }, [isValidWallet, userId, walletAddress, refreshCustodialBalance, fetchLevelData]);
 
-  // 🚀 OPTIMIZED: Real-time socket listeners WITHOUT automatic stats refresh
+  // OPTIMIZED: Real-time socket listeners WITHOUT automatic stats refresh
   useEffect(() => {
     if (!userId || !walletAddress) return;
     
@@ -926,7 +874,6 @@ const Dashboard: FC = () => {
       
       let walletRefreshTimeout: NodeJS.Timeout | null = null;
       
-      // 🚀 OPTIMIZED: Debounced wallet balance refresh (keep this)
       const debouncedWalletRefresh = () => {
         if (walletRefreshTimeout) {
           clearTimeout(walletRefreshTimeout);
@@ -962,7 +909,7 @@ const Dashboard: FC = () => {
           } catch (error) {
             console.error('❌ Dashboard: Failed to refresh wallet balance:', error);
           }
-        }, 3000); // 3 second debounce for wallet
+        }, 3000);
       };
 
       const handleTransactionConfirmed = (data: any) => {
@@ -972,14 +919,12 @@ const Dashboard: FC = () => {
         }
       };
 
-      // Register socket event listeners
       socket.on('transactionConfirmed', handleTransactionConfirmed);
       
       return () => {
         console.log(`🔌 Dashboard: Cleaning up optimized real-time listeners for user: ${userId}`);
         socket.off('transactionConfirmed', handleTransactionConfirmed);
         
-        // Clear any pending timeouts
         if (walletRefreshTimeout) clearTimeout(walletRefreshTimeout);
       };
     }
@@ -989,9 +934,15 @@ const Dashboard: FC = () => {
   if (!ready) {
     return (
       <Layout>
-        <div className="max-w-7xl mx-auto px-4 py-8">
-          <div className="flex justify-center items-center h-64">
-            <div className="animate-spin h-8 w-8 border-2 border-blue-400 border-t-transparent rounded-full"></div>
+        <div className="scrollable-page-container">
+          <div className="scrollable-content-area">
+            <div className="scrollable-inner-content">
+              <div className="max-w-7xl mx-auto px-4 py-8">
+                <div className="flex justify-center items-center h-64">
+                  <div className="animate-spin h-8 w-8 border-2 border-blue-400 border-t-transparent rounded-full"></div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </Layout>
@@ -1000,360 +951,369 @@ const Dashboard: FC = () => {
 
   return (
     <Layout>
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold text-white">Dashboard</h1>
-          {(isValidWallet && userId) && (
-            <button
-              onClick={refreshData}
-              className="flex items-center bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-md transition-colors"
-              disabled={isManualRefreshing}
-            >
-              <RefreshCw size={16} className={`mr-2 ${isManualRefreshing ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-          )}
-        </div>
-
-        {/* Enhanced Player Profile with Real Level System */}
-        {isValidWallet && userId && (
-          <div className="bg-gray-900 rounded-lg p-6 mb-8">
-            <h2 className="text-xl font-bold text-white mb-4">Player Profile</h2>
-            
-            {isLoadingLevel ? (
-              <div className="animate-pulse space-y-4">
-                <div className="h-6 bg-gray-700 rounded w-32"></div>
-                <div className="h-4 bg-gray-700 rounded w-full"></div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="h-16 bg-gray-700 rounded"></div>
-                  <div className="h-16 bg-gray-700 rounded"></div>
-                  <div className="h-16 bg-gray-700 rounded"></div>
-                </div>
+      <div className="scrollable-page-container">
+        <div className="scrollable-content-area">
+          <div className="scrollable-inner-content">
+            <div className="max-w-7xl mx-auto px-4 py-8">
+              {/* Header */}
+              <div className="flex justify-between items-center mb-6">
+                <h1 className="text-3xl font-bold text-white">Dashboard</h1>
+                {(isValidWallet && userId) && (
+                  <button
+                    onClick={refreshData}
+                    className="flex items-center bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-md transition-colors"
+                    disabled={isManualRefreshing}
+                  >
+                    <RefreshCw size={16} className={`mr-2 ${isManualRefreshing ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                )}
               </div>
-            ) : (
-              <div className="space-y-6">
-                {/* Level and XP Section */}
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center space-x-4">
-                      <div className="bg-purple-600 rounded-full w-12 h-12 flex items-center justify-center">
-                        <span className="text-white font-bold text-lg">{levelData.level}</span>
-                      </div>
-                      <div>
-                        <h3 className="text-white font-bold text-lg">Level {levelData.level}</h3>
-                        <p className="text-gray-400 text-sm">{levelData.experiencePoints} Experience Points</p>
+
+              {/* Enhanced Player Profile with Real Level System */}
+              {isValidWallet && userId && (
+                <div className="bg-gray-900 rounded-lg p-6 mb-8">
+                  <h2 className="text-xl font-bold text-white mb-4">Player Profile</h2>
+                  
+                  {isLoadingLevel ? (
+                    <div className="animate-pulse space-y-4">
+                      <div className="h-6 bg-gray-700 rounded w-32"></div>
+                      <div className="h-4 bg-gray-700 rounded w-full"></div>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="h-16 bg-gray-700 rounded"></div>
+                        <div className="h-16 bg-gray-700 rounded"></div>
+                        <div className="h-16 bg-gray-700 rounded"></div>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-purple-400 font-semibold">
-                        {levelData.experienceToNextLevel > 0 
-                          ? `${levelData.experienceToNextLevel} XP to Level ${levelData.level + 1}`
-                          : "Max Level Reached!"
-                        }
-                      </p>
+                  ) : (
+                    <div className="space-y-6">
+                      {/* Level and XP Section */}
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center space-x-4">
+                            <div className="bg-purple-600 rounded-full w-12 h-12 flex items-center justify-center">
+                              <span className="text-white font-bold text-lg">{levelData.level}</span>
+                            </div>
+                            <div>
+                              <h3 className="text-white font-bold text-lg">Level {levelData.level}</h3>
+                              <p className="text-gray-400 text-sm">{levelData.experiencePoints} Experience Points</p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-purple-400 font-semibold">
+                              {levelData.experienceToNextLevel > 0 
+                                ? `${levelData.experienceToNextLevel} XP to Level ${levelData.level + 1}`
+                                : "Max Level Reached!"
+                              }
+                            </p>
+                          </div>
+                        </div>
+                        
+                        {/* Enhanced Progress Bar */}
+                        <div className="relative">
+                          <div className="w-full bg-gray-700 rounded-full h-3">
+                            <div 
+                              className="bg-gradient-to-r from-purple-500 via-blue-500 to-purple-600 h-3 rounded-full transition-all duration-700 ease-out relative"
+                              style={{ width: `${Math.max(5, levelData.progressPercentage)}%` }}
+                            >
+                              <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-blue-400 rounded-full blur-sm opacity-60"></div>
+                            </div>
+                          </div>
+                          <div className="flex justify-between mt-1 text-xs text-gray-400">
+                            <span>{levelData.progressPercentage.toFixed(1)}% Complete</span>
+                            <span>Level {levelData.level + 1}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Stats Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="bg-gray-800 rounded-lg p-4 text-center">
+                          <div className="text-2xl font-bold text-purple-400">{levelData.level}</div>
+                          <div className="text-gray-400 text-sm">Current Level</div>
+                        </div>
+                        <div className="bg-gray-800 rounded-lg p-4 text-center">
+                          <div className="text-2xl font-bold text-blue-400">{levelData.experiencePoints}</div>
+                          <div className="text-gray-400 text-sm">Total XP</div>
+                        </div>
+                        <div className="bg-gray-800 rounded-lg p-4 text-center">
+                          <div className="text-2xl font-bold text-green-400">{levelData.experienceToNextLevel}</div>
+                          <div className="text-gray-400 text-sm">XP to Next Level</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Wallet Status */}
+              <div className="bg-gray-900 rounded-lg p-6 mb-8">
+                <h2 className="text-xl font-bold text-white mb-4 flex items-center">
+                  <Wallet size={20} className="mr-2" />
+                  Wallet Status
+                </h2>
+                
+                {!authenticated ? (
+                  <div className="text-center py-6">
+                    <p className="text-gray-400 mb-4">Please log in to view your wallet and stats</p>
+                    <button 
+                      onClick={() => window.location.href = '/'}
+                      className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md transition-colors"
+                    >
+                      Login
+                    </button>
+                  </div>
+                ) : isValidWallet ? (
+                  <div className="space-y-4">
+                    {/* Wallet Address */}
+                    <div>
+                      <div className="text-gray-400 mb-1">Wallet Address</div>
+                      <div className="text-white font-mono text-sm">
+                        {walletAddress.substring(0, 8)}...{walletAddress.substring(walletAddress.length - 8)}
+                      </div>
+                      <div className="text-green-400 text-sm mt-1">✓ Connected</div>
+                    </div>
+                    
+                    {/* Primary balance is now custodial game balance */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="bg-gray-800 rounded-lg p-4">
+                        <div className="text-green-400 mb-2 flex items-center">
+                          <span className="mr-2">🎮</span>
+                          Game Balance
+                        </div>
+                        <div className="text-2xl font-bold text-green-400">
+                          {custodialBalanceLoading ? (
+                            <div className="flex items-center">
+                              <div className="animate-spin h-5 w-5 border-2 border-green-400 border-t-transparent rounded-full mr-2"></div>
+                              Loading...
+                            </div>
+                          ) : (
+                            `${custodialBalance.toFixed(4)} SOL`
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1">
+                          For gaming • Last updated: {custodialLastUpdated ? new Date(custodialLastUpdated).toLocaleTimeString() : 'Never'}
+                        </div>
+                      </div>
+                      
+                      <div className="bg-gray-800 rounded-lg p-4">
+                        <div className="text-blue-400 mb-2 flex items-center">
+                          <span className="mr-2">💼</span>
+                          Wallet Balance
+                        </div>
+                        <div className="text-2xl font-bold text-blue-400">
+                          {isLoadingBalance ? (
+                            <div className="flex items-center">
+                              <div className="animate-spin h-5 w-5 border-2 border-blue-400 border-t-transparent rounded-full mr-2"></div>
+                              Loading...
+                            </div>
+                          ) : (
+                            `${walletBalance.toFixed(4)} SOL`
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-1">
+                          For deposits • Embedded wallet
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Balance transfer hint */}
+                    {walletBalance > 0.001 && (
+                      <div className="bg-yellow-900 bg-opacity-30 border border-yellow-800 rounded-lg p-3">
+                        <div className="text-yellow-400 text-sm flex items-center">
+                          <span className="mr-2">💡</span>
+                          Transfer SOL from wallet to game balance to start playing
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-6">
+                    <p className="text-yellow-400 mb-2">Wallet connection issue</p>
+                    <p className="text-gray-400 text-sm">Please reconnect your wallet</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Referral Section with real-time updates */}
+              {(isValidWallet && userId) && (
+                <ReferralSection 
+                  userId={userId} 
+                  walletAddress={walletAddress} 
+                  isValidWallet={isValidWallet} 
+                />
+              )}
+
+              {/* 🚀 ENHANCED: Game Statistics section with live updates */}
+              {isValidWallet && (
+                <div className="bg-gray-900 rounded-lg p-6 mb-8">
+                  <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-bold text-white flex items-center">
+                      <TrendingUp size={20} className="mr-2" />
+                      Game Statistics
+                      {/* 🚀 LIVE: Live update indicator */}
+                      {isStatsUpdating && (
+                        <div className="ml-3 flex items-center text-green-400 text-sm">
+                          <div className="animate-pulse w-2 h-2 bg-green-400 rounded-full mr-2"></div>
+                          Updating...
+                        </div>
+                      )}
+                    </h2>
+                    
+                    {/* 🚀 LIVE: Last updated timestamp */}
+                    <div className="text-xs text-gray-500">
+                      {statsLastUpdated > 0 && (
+                        <span>Last updated: {new Date(statsLastUpdated).toLocaleTimeString()}</span>
+                      )}
                     </div>
                   </div>
                   
-                  {/* Enhanced Progress Bar */}
-                  <div className="relative">
-                    <div className="w-full bg-gray-700 rounded-full h-3">
-                      <div 
-                        className="bg-gradient-to-r from-purple-500 via-blue-500 to-purple-600 h-3 rounded-full transition-all duration-700 ease-out relative"
-                        style={{ width: `${Math.max(5, levelData.progressPercentage)}%` }}
-                      >
-                        <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-blue-400 rounded-full blur-sm opacity-60"></div>
-                      </div>
+                  {isLoadingStats ? (
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                      {[1, 2, 3, 4].map((i) => (
+                        <div key={i} className="animate-pulse">
+                          <div className="h-4 bg-gray-700 rounded w-24 mb-2"></div>
+                          <div className="h-8 bg-gray-700 rounded w-20"></div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="flex justify-between mt-1 text-xs text-gray-400">
-                      <span>{levelData.progressPercentage.toFixed(1)}% Complete</span>
-                      <span>Level {levelData.level + 1}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="bg-gray-800 rounded-lg p-4 text-center">
-                    <div className="text-2xl font-bold text-purple-400">{levelData.level}</div>
-                    <div className="text-gray-400 text-sm">Current Level</div>
-                  </div>
-                  <div className="bg-gray-800 rounded-lg p-4 text-center">
-                    <div className="text-2xl font-bold text-blue-400">{levelData.experiencePoints}</div>
-                    <div className="text-gray-400 text-sm">Total XP</div>
-                  </div>
-                  <div className="bg-gray-800 rounded-lg p-4 text-center">
-                    <div className="text-2xl font-bold text-green-400">{levelData.experienceToNextLevel}</div>
-                    <div className="text-gray-400 text-sm">XP to Next Level</div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Wallet Status */}
-        <div className="bg-gray-900 rounded-lg p-6 mb-8">
-          <h2 className="text-xl font-bold text-white mb-4 flex items-center">
-            <Wallet size={20} className="mr-2" />
-            Wallet Status
-          </h2>
-          
-          {!authenticated ? (
-            <div className="text-center py-6">
-              <p className="text-gray-400 mb-4">Please log in to view your wallet and stats</p>
-              <button 
-                onClick={() => window.location.href = '/'}
-                className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md transition-colors"
-              >
-                Login
-              </button>
-            </div>
-          ) : isValidWallet ? (
-            <div className="space-y-4">
-              {/* Wallet Address */}
-              <div>
-                <div className="text-gray-400 mb-1">Wallet Address</div>
-                <div className="text-white font-mono text-sm">
-                  {walletAddress.substring(0, 8)}...{walletAddress.substring(walletAddress.length - 8)}
-                </div>
-                <div className="text-green-400 text-sm mt-1">✓ Connected</div>
-              </div>
-              
-              {/* Primary balance is now custodial game balance */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-gray-800 rounded-lg p-4">
-                  <div className="text-green-400 mb-2 flex items-center">
-                    <span className="mr-2">🎮</span>
-                    Game Balance
-                  </div>
-                  <div className="text-2xl font-bold text-green-400">
-                    {custodialBalanceLoading ? (
-                      <div className="flex items-center">
-                        <div className="animate-spin h-5 w-5 border-2 border-green-400 border-t-transparent rounded-full mr-2"></div>
-                        Loading...
+                  ) : (
+                    <>
+                      {/* Primary Stats Row with live update animations */}
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                        <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-50' : ''}`}>
+                          <div className="text-gray-400 mb-1">Total Wagered</div>
+                          <div className="text-2xl font-bold text-white">
+                            {userStats.totalWagered.toFixed(3)} SOL
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            All time betting volume
+                          </div>
+                        </div>
+                        
+                        <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-green-400 ring-opacity-50' : ''}`}>
+                          <div className="text-gray-400 mb-1">Total Won</div>
+                          <div className="text-2xl font-bold text-green-400">
+                            {userStats.totalPayouts.toFixed(3)} SOL
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Successful cashouts
+                          </div>
+                        </div>
+                        
+                        <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-purple-400 ring-opacity-50' : ''}`}>
+                          <div className="text-gray-400 mb-1">Games Played</div>
+                          <div className="text-2xl font-bold text-white">
+                            {userStats.gamesPlayed}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Rounds participated
+                          </div>
+                        </div>
+                        
+                        <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-yellow-400 ring-opacity-50' : ''}`}>
+                          <div className="text-gray-400 mb-1">Net Profit/Loss</div>
+                          <div className={`text-2xl font-bold ${userStats.profitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {userStats.profitLoss >= 0 ? '+' : ''}{userStats.profitLoss.toFixed(3)} SOL
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            {userStats.profitLoss >= 0 ? 'Total profit' : 'Total loss'}
+                          </div>
+                        </div>
                       </div>
-                    ) : (
-                      `${custodialBalance.toFixed(4)} SOL`
-                    )}
-                  </div>
-                  <div className="text-xs text-gray-400 mt-1">
-                    For gaming • Last updated: {custodialLastUpdated ? new Date(custodialLastUpdated).toLocaleTimeString() : 'Never'}
+
+                      {/* Enhanced Additional Stats */}
+                      {(enhancedUserStats.winRate > 0 || enhancedUserStats.bestMultiplier > 0 || userStats.gamesPlayed > 0) && (
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 border-t border-gray-700">
+                          <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-30' : ''}`}>
+                            <div className="text-gray-400 mb-1">Win Rate</div>
+                            <div className="text-lg font-bold text-blue-400">
+                            {enhancedUserStats.winRate.toFixed(1)}%
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              Success percentage
+                            </div>
+                          </div>
+                          
+                          <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-purple-400 ring-opacity-30' : ''}`}>
+                          <div className="text-gray-400 mb-1">Best Multiplier</div>
+                            <div className="text-lg font-bold text-purple-400">
+                              {enhancedUserStats.bestMultiplier.toFixed(2)}x
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              Highest cashout
+                            </div>
+                          </div>
+                          
+                          <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-yellow-400 ring-opacity-30' : ''}`}>
+                            <div className="text-gray-400 mb-1">Current Streak</div>
+                            <div className="text-lg font-bold text-yellow-400">
+                              {enhancedUserStats.currentWinStreak} wins
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              Active win streak
+                            </div>
+                          </div>
+                          
+                          <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-orange-400 ring-opacity-30' : ''}`}>
+                            <div className="text-gray-400 mb-1">Best Streak</div>
+                            <div className="text-lg font-bold text-orange-400">
+                              {enhancedUserStats.bestWinStreak} wins
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              Personal record
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 🚀 NEW: Live stats help text */}
+                      <div className="mt-4 pt-4 border-t border-gray-700">
+                        <div className="flex items-center text-xs text-gray-500">
+                          <div className="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div>
+                          <span>Stats update automatically when you play • Last sync: {statsLastUpdated > 0 ? new Date(statsLastUpdated).toLocaleTimeString() : 'Not yet synced'}</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Quick Actions */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div className="bg-gray-900 rounded-lg p-6">
+                  <h3 className="text-lg font-bold text-white mb-4">Quick Actions</h3>
+                  <div className="space-y-3">
+                    <Link 
+                      href="/" 
+                      className="block w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors text-center"
+                    >
+                      <GamepadIcon size={20} className="inline mr-2" />
+                      Play RUGGED 
+                    </Link>
+                    <Link 
+                      href="/leaderboard" 
+                      className="block w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors text-center"
+                    >
+                      View Top Rugger Board
+                    </Link>
                   </div>
                 </div>
                 
-                <div className="bg-gray-800 rounded-lg p-4">
-                  <div className="text-blue-400 mb-2 flex items-center">
-                    <span className="mr-2">💼</span>
-                    Wallet Balance
-                  </div>
-                  <div className="text-2xl font-bold text-blue-400">
-                    {isLoadingBalance ? (
-                      <div className="flex items-center">
-                        <div className="animate-spin h-5 w-5 border-2 border-blue-400 border-t-transparent rounded-full mr-2"></div>
-                        Loading...
-                      </div>
+                <div className="bg-gray-900 rounded-lg p-6">
+                  <h3 className="text-lg font-bold text-white mb-4">Recent Activity</h3>
+                  <div className="text-gray-400 text-center py-6">
+                    {isValidWallet ? (
+                      <p>No recent activity</p>
                     ) : (
-                      `${walletBalance.toFixed(4)} SOL`
+                      <p>Login to view wallet activity</p>
                     )}
                   </div>
-                  <div className="text-xs text-gray-400 mt-1">
-                    For deposits • Embedded wallet
-                  </div>
                 </div>
               </div>
-              
-              {/* Balance transfer hint */}
-              {walletBalance > 0.001 && (
-                <div className="bg-yellow-900 bg-opacity-30 border border-yellow-800 rounded-lg p-3">
-                  <div className="text-yellow-400 text-sm flex items-center">
-                    <span className="mr-2">💡</span>
-                    Transfer SOL from wallet to game balance to start playing
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="text-center py-6">
-              <p className="text-yellow-400 mb-2">Wallet connection issue</p>
-              <p className="text-gray-400 text-sm">Please reconnect your wallet</p>
-            </div>
-          )}
-        </div>
 
-        {/* Referral Section with real-time updates */}
-        {(isValidWallet && userId) && (
-          <ReferralSection 
-            userId={userId} 
-            walletAddress={walletAddress} 
-            isValidWallet={isValidWallet} 
-          />
-        )}
-
-        {/* 🚀 ENHANCED: Game Statistics section with live updates */}
-        {isValidWallet && (
-          <div className="bg-gray-900 rounded-lg p-6 mb-8">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-white flex items-center">
-                <TrendingUp size={20} className="mr-2" />
-                Game Statistics
-                {/* 🚀 LIVE: Live update indicator */}
-                {isStatsUpdating && (
-                  <div className="ml-3 flex items-center text-green-400 text-sm">
-                    <div className="animate-pulse w-2 h-2 bg-green-400 rounded-full mr-2"></div>
-                    Updating...
-                  </div>
-                )}
-              </h2>
-              
-              {/* 🚀 LIVE: Last updated timestamp */}
-              <div className="text-xs text-gray-500">
-                {statsLastUpdated > 0 && (
-                  <span>Last updated: {new Date(statsLastUpdated).toLocaleTimeString()}</span>
-                )}
-              </div>
-            </div>
-            
-            {isLoadingStats ? (
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} className="animate-pulse">
-                    <div className="h-4 bg-gray-700 rounded w-24 mb-2"></div>
-                    <div className="h-8 bg-gray-700 rounded w-20"></div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <>
-                {/* Primary Stats Row with live update animations */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-                  <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-50' : ''}`}>
-                    <div className="text-gray-400 mb-1">Total Wagered</div>
-                    <div className="text-2xl font-bold text-white">
-                      {userStats.totalWagered.toFixed(3)} SOL
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      All time betting volume
-                    </div>
-                  </div>
-                  
-                  <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-green-400 ring-opacity-50' : ''}`}>
-                    <div className="text-gray-400 mb-1">Total Won</div>
-                    <div className="text-2xl font-bold text-green-400">
-                      {userStats.totalPayouts.toFixed(3)} SOL
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      Successful cashouts
-                    </div>
-                  </div>
-                  
-                  <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-purple-400 ring-opacity-50' : ''}`}>
-                    <div className="text-gray-400 mb-1">Games Played</div>
-                    <div className="text-2xl font-bold text-white">
-                      {userStats.gamesPlayed}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      Rounds participated
-                    </div>
-                  </div>
-                  
-                  <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-yellow-400 ring-opacity-50' : ''}`}>
-                    <div className="text-gray-400 mb-1">Net Profit/Loss</div>
-                    <div className={`text-2xl font-bold ${userStats.profitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {userStats.profitLoss >= 0 ? '+' : ''}{userStats.profitLoss.toFixed(3)} SOL
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {userStats.profitLoss >= 0 ? 'Total profit' : 'Total loss'}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Enhanced Additional Stats */}
-                {(enhancedUserStats.winRate > 0 || enhancedUserStats.bestMultiplier > 0 || userStats.gamesPlayed > 0) && (
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 border-t border-gray-700">
-                    <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-30' : ''}`}>
-                      <div className="text-gray-400 mb-1">Win Rate</div>
-                      <div className="text-lg font-bold text-blue-400">
-                      {enhancedUserStats.winRate.toFixed(1)}%
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        Success percentage
-                      </div>
-                    </div>
-                    
-                    <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-purple-400 ring-opacity-30' : ''}`}>
-                    <div className="text-gray-400 mb-1">Best Multiplier</div>
-                      <div className="text-lg font-bold text-purple-400">
-                        {enhancedUserStats.bestMultiplier.toFixed(2)}x
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        Highest cashout
-                      </div>
-                    </div>
-                    
-                    <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-yellow-400 ring-opacity-30' : ''}`}>
-                      <div className="text-gray-400 mb-1">Current Streak</div>
-                      <div className="text-lg font-bold text-yellow-400">
-                        {enhancedUserStats.currentWinStreak} wins
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        Active win streak
-                      </div>
-                    </div>
-                    
-                    <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-orange-400 ring-opacity-30' : ''}`}>
-                      <div className="text-gray-400 mb-1">Best Streak</div>
-                      <div className="text-lg font-bold text-orange-400">
-                        {enhancedUserStats.bestWinStreak} wins
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        Personal record
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* 🚀 NEW: Live stats help text */}
-                <div className="mt-4 pt-4 border-t border-gray-700">
-                  <div className="flex items-center text-xs text-gray-500">
-                    <div className="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div>
-                    <span>Stats update automatically when you play • Last sync: {statsLastUpdated > 0 ? new Date(statsLastUpdated).toLocaleTimeString() : 'Not yet synced'}</span>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-          <div className="bg-gray-900 rounded-lg p-6">
-            <h3 className="text-lg font-bold text-white mb-4">Quick Actions</h3>
-            <div className="space-y-3">
-              <Link 
-                href="/" 
-                className="block w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors text-center"
-              >
-                <GamepadIcon size={20} className="inline mr-2" />
-                Play RUGGED 
-              </Link>
-              <Link 
-                href="/leaderboard" 
-                className="block w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors text-center"
-              >
-                View Top Rugger Board
-              </Link>
-            </div>
-          </div>
-          
-          <div className="bg-gray-900 rounded-lg p-6">
-            <h3 className="text-lg font-bold text-white mb-4">Recent Activity</h3>
-            <div className="text-gray-400 text-center py-6">
-              {isValidWallet ? (
-                <p>No recent activity</p>
-              ) : (
-                <p>Login to view wallet activity</p>
-              )}
+              {/* Bottom spacing for complete scroll */}
+              <div className="h-16"></div>
             </div>
           </div>
         </div>

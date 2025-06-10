@@ -1,4 +1,4 @@
-// src/services/api.ts - UPDATED FOR USERS_UNIFIED TABLE
+// src/services/api.ts - FIXED VERSION WITH NO TYPESCRIPT ERRORS
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { io, Socket } from 'socket.io-client';
 import logger from '../utils/logger';
@@ -590,6 +590,9 @@ export class UserAPI {
     }
   }
 
+  /**
+   * Update user stats after bet using the new stats-only method
+   */
   static async updateUserStatsAfterBet(
     userId: string, 
     betAmount: number, 
@@ -597,78 +600,9 @@ export class UserAPI {
     multiplier?: number,
     isWin: boolean = false
   ): Promise<boolean> {
-    try {
-      console.log(`📊 Updating user stats for bet: userId=${userId}, amount=${betAmount}, profit=${profitLoss}`);
-
-      // Get current user stats (excluding generated columns)
-      const { data: currentUser, error: fetchError } = await supabase
-        .from('users_unified')
-        .select(`
-          total_games_played,
-          total_bets_placed,
-          games_won,
-          games_lost,
-          total_wagered,
-          total_won,
-          total_lost,
-          largest_win,
-          largest_loss,
-          best_multiplier,
-          current_win_streak,
-          best_win_streak
-        `)
-        .eq('id', userId)
-        .single();
-
-      if (fetchError || !currentUser) {
-        console.error('❌ Error fetching user stats:', fetchError);
-        return false;
-      }
-
-      // Calculate new stats
-      const newStats = {
-        total_games_played: (currentUser.total_games_played || 0) + 1,
-        total_bets_placed: (currentUser.total_bets_placed || 0) + 1,
-        games_won: (currentUser.games_won || 0) + (isWin ? 1 : 0),
-        games_lost: (currentUser.games_lost || 0) + (isWin ? 0 : 1),
-        total_wagered: (parseFloat(currentUser.total_wagered) || 0) + betAmount,
-        total_won: (parseFloat(currentUser.total_won) || 0) + (profitLoss > 0 ? profitLoss + betAmount : 0),
-        total_lost: (parseFloat(currentUser.total_lost) || 0) + (profitLoss < 0 ? Math.abs(profitLoss) : 0),
-        largest_win: Math.max(parseFloat(currentUser.largest_win) || 0, profitLoss > 0 ? profitLoss : 0),
-        largest_loss: Math.max(parseFloat(currentUser.largest_loss) || 0, profitLoss < 0 ? Math.abs(profitLoss) : 0),
-        best_multiplier: Math.max(parseFloat(currentUser.best_multiplier) || 0, multiplier || 0),
-        current_win_streak: isWin ? (currentUser.current_win_streak || 0) + 1 : 0,
-        best_win_streak: Math.max(currentUser.best_win_streak || 0, isWin ? (currentUser.current_win_streak || 0) + 1 : currentUser.current_win_streak || 0),
-        updated_at: new Date().toISOString()
-        // EXCLUDED (auto-calculated by database):
-        // win_rate: calculated as (games_won / total_games_played) * 100
-        // net_profit: calculated as (total_won - total_lost)
-      };
-
-      // Update user stats (database will calculate win_rate and net_profit automatically)
-      const { error: updateError } = await supabase
-        .from('users_unified')
-        .update(newStats)
-        .eq('id', userId);
-
-      if (updateError) {
-        console.error('❌ Error updating user stats:', updateError);
-        return false;
-      }
-
-      console.log(`✅ Successfully updated user stats: games=${newStats.total_games_played}`);
-      
-      // If you need these values for logging/debugging (not stored in DB):
-      const calculatedWinRate = newStats.total_games_played > 0 ? (newStats.games_won / newStats.total_games_played) * 100 : 0;
-      const calculatedNetProfit = newStats.total_won - newStats.total_lost;
-      console.log(`📈 Calculated stats: win_rate=${calculatedWinRate.toFixed(1)}%, net_profit=${calculatedNetProfit.toFixed(2)}`);
-      
-      return true;
-
-    } catch (error) {
-      console.error('❌ Error in updateUserStatsAfterBet:', error);
-      return false;
-    }
+    console.log('🔄 Using new stats update method...');
+    const result = await this.updateUserStatsOnly(userId, betAmount, profitLoss, multiplier);
+    return result.success;
   }
 
   /**
@@ -1373,8 +1307,6 @@ export class UserAPI {
       console.error('❌ Test failed:', error);
     }
   }
-
-
 }
 
 // Keep existing APIs unchanged (LeaderboardAPI, ChartAPI, ChatAPI, SystemAPI)
@@ -1431,12 +1363,9 @@ export class LeaderboardAPI {
           risk_score,
           behavior_pattern
         `)
-        //.gt(profitColumn, 0) // Only show users with positive profit
-        //.gt('total_games_played', 0) // Only show users who have played games
         .order('win_rate', { ascending: false }) // 🎯 Primary: Best win rate first
-  .order('net_profit', { ascending: false }) // 🥈 Secondary: Highest profit
-  .order('total_games_played', { ascending: false }) // 🥉 Tertiary: Most active
- 
+        .order('net_profit', { ascending: false }) // 🥈 Secondary: Highest profit
+        .order('total_games_played', { ascending: false }) // 🥉 Tertiary: Most active
         .limit(100);
         
       if (error) {

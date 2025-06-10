@@ -1,4 +1,4 @@
-// src/components/chat/ChatBox.tsx - Updated with collapsible functionality
+// src/components/chat/ChatBox.tsx - Updated with highlighted toggle button
 import { FC, useEffect, useRef, useState, useContext } from 'react';
 import Image from 'next/image';
 import { ChevronLeft, ChevronRight, Users } from 'lucide-react';
@@ -96,66 +96,74 @@ const ChatBox: FC = () => {
       {/* Header with collapse toggle */}
       <div className="flex justify-between items-center p-3 border-b border-gray-800 bg-[#0d0d0f] flex-shrink-0">
         {!isCollapsed && (
-          <>
-            <h2 className="text-sm text-white font-medium flex items-center">
-              <span className={`h-2 w-2 ${isOnline ? 'bg-green-500' : 'bg-red-500'} rounded-full mr-2`}></span>
-              <div className="flex flex-col">
-                <div className="flex items-center">
-                  <span className="mr-1">ONLINE</span>
-                  <span className="font-bold">
-                    ({activeUserData.total > 0 ? activeUserData.total : '—'})
-                  </span>
+          <h2 className="text-sm text-white font-medium flex items-center">
+            <span className={`h-2 w-2 ${isOnline ? 'bg-green-500' : 'bg-red-500'} rounded-full mr-2`}></span>
+            <div className="flex flex-col">
+              <div className="flex items-center">
+                <span className="mr-1">ONLINE</span>
+                <span className="font-bold">
+                  ({activeUserData.total > 0 ? activeUserData.total : '—'})
+                </span>
+              </div>
+              {/* Show breakdown when there are users */}
+              {activeUserData.showBreakdown && (
+                <div className="text-xs text-gray-400 mt-0.5">
+                  Chat: {activeUserData.chat} | Game: {activeUserData.game}
                 </div>
-                {/* Show breakdown when there are users */}
-                {activeUserData.showBreakdown && (
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    Chat: {activeUserData.chat} | Game: {activeUserData.game}
-                  </div>
-                )}
-              </div>
-            </h2>
-            
-            <div className="flex items-center space-x-2">
-              {/* Social links - only show when expanded */}
-              <div className="flex space-x-2">
-                <a href="https://discord.gg/ZhhGJXB4yD" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300">
-                  <Image
-                    src="/images/icons8-discord.svg"
-                    width={16}
-                    height={16}
-                    alt="Discord"
-                  />
-                </a>
-                <a href="https://x.com/ruggeddotfun" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300">
-                  <Image 
-                    src="/images/x-social-media-white-icon.svg"
-                    width={16}
-                    height={16}
-                    alt="X"
-                  />
-                </a>
-                <a href="https://telegram.org/" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300">
-                  <Image
-                    src="/images/telegram-plane-svgrepo-com.svg"
-                    width={16}
-                    height={16}
-                    alt="Telegram"
-                  />
-                </a>
-              </div>
+              )}
             </div>
-          </>
+          </h2>
         )}
         
-        {/* Collapse toggle button */}
-        <button
-          onClick={toggleCollapse}
-          className="p-1 hover:bg-gray-800 rounded text-gray-400 hover:text-white transition-colors ml-auto"
-          title={isCollapsed ? 'Expand chat' : 'Collapse chat'}
-          aria-label={isCollapsed ? 'Expand chat' : 'Collapse chat'}
-        >
-          {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-        </button>
+        {/* Social links and toggle button grouped together */}
+        <div className="flex items-center space-x-1">
+          {/* Social links - only show when expanded */}
+          {!isCollapsed && (
+            <div className="flex space-x-1 mr-1">
+              <a href="https://discord.gg/ZhhGJXB4yD" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300 p-1 hover:bg-gray-700 rounded transition-colors">
+                <Image
+                  src="/images/icons8-discord.svg"
+                  width={16}
+                  height={16}
+                  alt="Discord"
+                />
+              </a>
+              <a href="https://x.com/ruggeddotfun" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300 p-1 hover:bg-gray-700 rounded transition-colors">
+                <Image 
+                  src="/images/x-social-media-white-icon.svg"
+                  width={16}
+                  height={16}
+                  alt="X"
+                />
+              </a>
+              <a href="https://telegram.org/" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300 p-1 hover:bg-gray-700 rounded transition-colors">
+                <Image
+                  src="/images/telegram-plane-svgrepo-com.svg"
+                  width={16}
+                  height={16}
+                  alt="Telegram"
+                />
+              </a>
+            </div>
+          )}
+          
+          {/* Enhanced collapse toggle button with better visibility */}
+          <button
+            onClick={toggleCollapse}
+            className={`
+              p-2 rounded-md transition-all duration-200 transform active:scale-95
+              ${isCollapsed 
+                ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/30' 
+                : 'bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white border border-gray-600'
+              }
+              focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800
+            `}
+            title={isCollapsed ? 'Expand chat' : 'Collapse chat'}
+            aria-label={isCollapsed ? 'Expand chat' : 'Collapse chat'}
+          >
+            {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          </button>
+        </div>
       </div>
 
       {/* Collapsed state - show minimal info */}
@@ -180,7 +188,7 @@ const ChatBox: FC = () => {
           
           {/* Vertical social links */}
           <div className="flex flex-col space-y-3 mt-auto mb-4">
-            <a href="https://discord.gg/ZhhGJXB4yD" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300">
+            <a href="https://discord.gg/ZhhGJXB4yD" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300 p-1 hover:bg-gray-700 rounded transition-colors">
               <Image
                 src="/images/icons8-discord.svg"
                 width={14}
@@ -188,7 +196,7 @@ const ChatBox: FC = () => {
                 alt="Discord"
               />
             </a>
-            <a href="https://x.com/ruggeddotfun" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300">
+            <a href="https://x.com/ruggeddotfun" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300 p-1 hover:bg-gray-700 rounded transition-colors">
               <Image 
                 src="/images/x-social-media-white-icon.svg"
                 width={14}
@@ -196,7 +204,7 @@ const ChatBox: FC = () => {
                 alt="X"
               />
             </a>
-            <a href="https://telegram.org/" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300">
+            <a href="https://telegram.org/" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300 p-1 hover:bg-gray-700 rounded transition-colors">
               <Image
                 src="/images/telegram-plane-svgrepo-com.svg"
                 width={14}

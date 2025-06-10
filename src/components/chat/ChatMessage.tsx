@@ -1,9 +1,9 @@
-// src/components/chat/ChatMessage.tsx - Enhanced with better level and badge display
+// src/components/chat/ChatMessage.tsx - Fixed TypeScript error
 import { FC } from 'react';
 import { ChatMessage as ChatMessageType } from '../../services/api';
 
 interface ChatMessageProps {
-  message: ChatMessageType;
+  message: ChatMessageType & { isPending?: boolean }; // Make isPending optional
 }
 
 const ChatMessage: FC<ChatMessageProps> = ({ message }) => {
@@ -14,7 +14,8 @@ const ChatMessage: FC<ChatMessageProps> = ({ message }) => {
     avatar,
     level,
     badge,
-    message_type
+    message_type,
+    isPending = false // Default to false if not provided
   } = message;
 
   const formattedTime = new Date(created_at).toLocaleTimeString([], {
@@ -60,22 +61,23 @@ const ChatMessage: FC<ChatMessageProps> = ({ message }) => {
     return null;
   };
 
-  // Get level color based on level value
+  // Get level color based on level value - with better fallbacks
   const getLevelColor = () => {
-    if (!level || level <= 1) return 'bg-gray-700/80 text-gray-300';
-    if (level >= 20) return 'bg-purple-600/80 text-purple-200';
-    if (level >= 15) return 'bg-red-600/80 text-red-200';
-    if (level >= 10) return 'bg-green-600/80 text-green-200';
-    if (level >= 5) return 'bg-blue-600/80 text-blue-200';
-    return 'bg-gray-600/80 text-gray-200';
+    const userLevel = level || 1; // Default to 1 if no level
+    if (userLevel >= 20) return 'bg-purple-600/80 text-purple-200 border border-purple-400';
+    if (userLevel >= 15) return 'bg-red-600/80 text-red-200 border border-red-400';
+    if (userLevel >= 10) return 'bg-green-600/80 text-green-200 border border-green-400';
+    if (userLevel >= 5) return 'bg-blue-600/80 text-blue-200 border border-blue-400';
+    return 'bg-gray-600/80 text-gray-200 border border-gray-400';
   };
 
   const userColor = getUserColor();
   const badgeDisplay = getBadgeDisplay();
   const levelColorClass = getLevelColor();
+  const displayLevel = level || 1;
 
   return (
-    <div className="mb-3 hover:bg-gray-800/30 p-1.5 rounded transition-colors">
+    <div className={`mb-3 hover:bg-gray-800/30 p-1.5 rounded transition-colors ${isPending ? 'opacity-75' : ''}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center flex-1 min-w-0">
           {/* Avatar */}
@@ -85,19 +87,18 @@ const ChatMessage: FC<ChatMessageProps> = ({ message }) => {
             </span>
           )}
 
-          {/* Level badge - Always show if level exists and > 1 */}
-          {level && level > 1 && (
-            <span 
-              className={`text-xs rounded px-1.5 py-0.5 mr-2 flex-shrink-0 font-medium ${levelColorClass}`}
-              title={`Level ${level}`}
-            >
-              Lv.{level}
-            </span>
-          )}
+          {/* Level badge - ALWAYS show */}
+          <span 
+            className={`text-xs rounded px-1.5 py-0.5 mr-2 flex-shrink-0 font-medium ${levelColorClass}`}
+            title={`Level ${displayLevel}`}
+          >
+            Lv.{displayLevel}
+          </span>
 
           {/* Username */}
           <span className={`font-medium text-sm ${userColor} truncate flex-shrink mr-1`}>
             {username}
+            {isPending && <span className="ml-1 text-xs text-gray-500">(sending...)</span>}
           </span>
 
           {/* Badge icon and label */}
@@ -106,7 +107,6 @@ const ChatMessage: FC<ChatMessageProps> = ({ message }) => {
               <span className={`${badgeDisplay.color}`} title={badgeDisplay.label}>
                 {badgeDisplay.icon}
               </span>
-              {/* Optional badge text for moderators */}
               {isModerator && (
                 <span className="text-xs bg-red-600/80 text-red-200 rounded px-1.5 py-0.5 ml-1">
                   MOD
@@ -115,7 +115,7 @@ const ChatMessage: FC<ChatMessageProps> = ({ message }) => {
             </div>
           )}
 
-          {/* Custom badge text (for non-standard badges) */}
+          {/* Custom badge text */}
           {badge &&
             badge !== 'newcomer' &&
             badge !== 'verified' &&

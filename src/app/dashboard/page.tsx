@@ -1,4 +1,4 @@
-// src/app/dashboard/page.tsx - COMPLETE FIX with proper scrolling and all existing functionality
+// src/app/dashboard/page.tsx - OPTIMIZED with ENHANCED real-time functionality
 'use client';
 
 import { FC, useState, useEffect, useContext, useCallback, useRef } from 'react';
@@ -9,12 +9,12 @@ import Layout from '../../components/layout/Layout';
 import Link from 'next/link';
 import { UserContext } from '../../context/UserContext';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../../utils/walletUtils';
-import { Wallet, TrendingUp, GamepadIcon, RefreshCw } from 'lucide-react';
+import { Wallet, TrendingUp, GamepadIcon, RefreshCw, Zap, Wifi, WifiOff, AlertCircle } from 'lucide-react';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import ReferralSection from '../../components/ReferralSection';
 
-// 🚀 FIX: Hardcoded Supabase config with environment variable fallback
+// Supabase config with fallback
 const FALLBACK_SUPABASE_URL = 'https://ineaxxqjkryoobobxrsw.supabase.co';
 const FALLBACK_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImluZWF4eHFqa3J5b29ib2J4cnN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc3NzMxMzIsImV4cCI6MjA2MzM0OTEzMn0.DiFLCCe5-UnzsGpG7dsqJWoUbxmaJxc_v89pxxsa1aA';
 
@@ -24,23 +24,18 @@ const getSupabaseClient = () => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || FALLBACK_SUPABASE_URL;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || FALLBACK_SUPABASE_ANON_KEY;
     
-    console.log('🔧 Supabase initialization:', {
-      envUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'FOUND' : 'MISSING',
-      envKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? 'FOUND' : 'MISSING',
-      usingFallback: !process.env.NEXT_PUBLIC_SUPABASE_URL,
-      finalUrl: supabaseUrl.substring(0, 30) + '...'
-    });
+    console.log('🔧 Dashboard: Supabase initialization');
     
     try {
       supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
-      console.log('✅ Supabase client created successfully');
+      console.log('✅ Dashboard: Supabase client created successfully');
       
       supabaseClient.from('player_bets').select('count').limit(1)
-        .then(() => console.log('✅ Supabase connection test passed'))
-        .catch((err: any) => console.warn('⚠️ Supabase test query failed:', err.message));
+        .then(() => console.log('✅ Dashboard: Supabase connection test passed'))
+        .catch((err: any) => console.warn('⚠️ Dashboard: Supabase test query failed:', err.message));
         
     } catch (error) {
-      console.error('❌ Failed to create Supabase client:', error);
+      console.error('❌ Dashboard: Failed to create Supabase client:', error);
       throw error;
     }
   }
@@ -55,11 +50,13 @@ interface PlayerBet {
   status: string;
 }
 
-// 🚀 OPTIMIZED: Custodial balance hook with controlled refresh timing
+// 🚀 ENHANCED: Real-time custodial balance hook with better state management
 const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<number>(0);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastUserIdRef = useRef<string>('');
   const socketListenersRef = useRef<boolean>(false);
@@ -72,7 +69,7 @@ const useCustodialBalance = (userId: string) => {
     
     const timeSinceLastUpdate = Date.now() - lastUpdated;
     if (!skipDebounce && timeSinceLastUpdate < 5000) {
-      console.log(`⏭️ Dashboard: Skipping update, last updated ${timeSinceLastUpdate}ms ago`);
+      console.log(`⏭️ Dashboard: Skipping custodial balance update, last updated ${timeSinceLastUpdate}ms ago`);
       return;
     }
     
@@ -98,7 +95,7 @@ const useCustodialBalance = (userId: string) => {
         
         setCustodialBalance(prevBalance => {
           if (Math.abs(prevBalance - newBalance) > 0.000001) {
-            console.log(`💰 Dashboard: Balance updated: ${prevBalance.toFixed(6)} → ${newBalance.toFixed(6)} SOL`);
+            console.log(`💰 Dashboard: Custodial balance updated: ${prevBalance.toFixed(6)} → ${newBalance.toFixed(6)} SOL`);
             setLastUpdated(Date.now());
             return newBalance;
           }
@@ -119,10 +116,11 @@ const useCustodialBalance = (userId: string) => {
       clearTimeout(debounceTimeoutRef.current);
     }
     
-    console.log(`🔄 Dashboard: Force refresh requested for ${userId}...`);
+    console.log(`🔄 Dashboard: Force refresh custodial balance for ${userId}...`);
     await updateCustodialBalance(true);
   }, [userId, updateCustodialBalance]);
   
+  // 🚀 ENHANCED: Setup effect with better connection tracking
   useEffect(() => {
     if (userId && userId !== lastUserIdRef.current) {
       console.log(`🎯 Dashboard: Setting up custodial balance polling for user: ${userId}`);
@@ -151,6 +149,7 @@ const useCustodialBalance = (userId: string) => {
     }
   }, [userId, updateCustodialBalance, loading]);
    
+  // 🚀 ENHANCED: Real-time socket listeners with connection status
   useEffect(() => {
     if (!userId || socketListenersRef.current) return;
     
@@ -158,6 +157,18 @@ const useCustodialBalance = (userId: string) => {
     if (socket) {
       console.log(`🔌 Dashboard: Setting up REAL-TIME custodial balance listeners for user: ${userId}`);
       socketListenersRef.current = true;
+      setIsConnected(socket.connected);
+      
+      // Connection status tracking
+      const handleConnect = () => {
+        console.log('🔌 Dashboard: Socket connected');
+        setIsConnected(true);
+      };
+
+      const handleDisconnect = () => {
+        console.log('🔌 Dashboard: Socket disconnected');
+        setIsConnected(false);
+      };
       
       const handleCustodialBalanceUpdate = (data: any) => {
         if (data.userId === userId) {
@@ -210,12 +221,16 @@ const useCustodialBalance = (userId: string) => {
         }
       };
 
+      socket.on('connect', handleConnect);
+      socket.on('disconnect', handleDisconnect);
       socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
       socket.on('userBalanceUpdate', handleUserBalanceUpdate);
       socket.on('depositConfirmed', handleDepositConfirmation);
       
       return () => {
         console.log(`🔌 Dashboard: Cleaning up REAL-TIME custodial balance listeners for user: ${userId}`);
+        socket.off('connect', handleConnect);
+        socket.off('disconnect', handleDisconnect);
         socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
         socket.off('userBalanceUpdate', handleUserBalanceUpdate);
         socket.off('depositConfirmed', handleDepositConfirmation);
@@ -228,7 +243,14 @@ const useCustodialBalance = (userId: string) => {
     }
   }, [userId, updateCustodialBalance]);
 
-  return { custodialBalance, loading, lastUpdated, updateCustodialBalance, forceRefresh };
+  return { 
+    custodialBalance, 
+    loading, 
+    lastUpdated, 
+    updateCustodialBalance, 
+    forceRefresh,
+    isConnected 
+  };
 };
 
 const Dashboard: FC = () => {
@@ -251,16 +273,17 @@ const Dashboard: FC = () => {
   // Validate wallet address
   const isValidWallet = isConnected && isValidSolanaAddress(walletAddress);
 
-  // 🚀 OPTIMIZED: Use custodial balance hook with real-time updates
+  // 🚀 ENHANCED: Use custodial balance hook with connection status
   const { 
     custodialBalance, 
     loading: custodialBalanceLoading, 
     updateCustodialBalance, 
     forceRefresh: refreshCustodialBalance,
-    lastUpdated: custodialLastUpdated
+    lastUpdated: custodialLastUpdated,
+    isConnected: isSocketConnected
   } = useCustodialBalance(userId || '');
   
-  // 🚀 FIX: Use singleton Supabase client
+  // Supabase client
   const supabase = getSupabaseClient();
   
   // State
@@ -294,6 +317,13 @@ const Dashboard: FC = () => {
   const [statsLastUpdated, setStatsLastUpdated] = useState<number>(0);
   const [isStatsUpdating, setIsStatsUpdating] = useState<boolean>(false);
   
+  // 🚀 NEW: Real-time connection status tracking
+  const [realTimeStatus, setRealTimeStatus] = useState({
+    connected: false,
+    lastHeartbeat: 0,
+    reconnectAttempts: 0
+  });
+  
   // Initialization ref for user setup
   const initializationRef = useRef<{ 
     attempted: boolean; 
@@ -307,7 +337,7 @@ const Dashboard: FC = () => {
     lastUserId: ''
   });
 
-  // 🚀 OPTIMIZED: User initialization effect
+  // 🚀 ENHANCED: User initialization with better error handling
   useEffect(() => {
     if (!authenticated || !walletAddress) {
       return;
@@ -365,6 +395,13 @@ const Dashboard: FC = () => {
                   initializationRef.current.completed = true;
                   initializationRef.current.lastUserId = result.userId;
                   
+                  setRealTimeStatus(prev => ({
+                    ...prev,
+                    connected: true,
+                    lastHeartbeat: Date.now(),
+                    reconnectAttempts: 0
+                  }));
+                  
                   setTimeout(() => {
                     try {
                       updateCustodialBalance();
@@ -383,6 +420,12 @@ const Dashboard: FC = () => {
               console.error('❌ Dashboard: Socket not available for user initialization');
               initializationRef.current.attempted = false;
               initializationRef.current.completed = false;
+              
+              setRealTimeStatus(prev => ({
+                ...prev,
+                connected: false,
+                reconnectAttempts: prev.reconnectAttempts + 1
+              }));
             }
           }, 1000);
         }
@@ -411,10 +454,67 @@ const Dashboard: FC = () => {
         lastWallet: walletAddress,
         lastUserId: ''
       };
+      
+      setRealTimeStatus({
+        connected: false,
+        lastHeartbeat: 0,
+        reconnectAttempts: 0
+      });
     }
   }, [walletAddress]);
 
-  // 🚀 OPTIMIZED: Wallet balance fetch with controlled timing
+  // 🚀 ENHANCED: Real-time status monitoring
+  useEffect(() => {
+    const socket = (window as any).gameSocket;
+    if (!socket) return;
+
+    const handleConnect = () => {
+      console.log('🔌 Dashboard: Real-time connection established');
+      setRealTimeStatus(prev => ({
+        ...prev,
+        connected: true,
+        lastHeartbeat: Date.now(),
+        reconnectAttempts: 0
+      }));
+    };
+
+    const handleDisconnect = () => {
+      console.log('🔌 Dashboard: Real-time connection lost');
+      setRealTimeStatus(prev => ({
+        ...prev,
+        connected: false
+      }));
+    };
+
+    const handleReconnect = () => {
+      console.log('🔌 Dashboard: Real-time connection restored');
+      setRealTimeStatus(prev => ({
+        ...prev,
+        connected: true,
+        lastHeartbeat: Date.now(),
+        reconnectAttempts: 0
+      }));
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+    socket.on('reconnect', handleReconnect);
+
+    // Initial status
+    setRealTimeStatus(prev => ({
+      ...prev,
+      connected: socket.connected,
+      lastHeartbeat: socket.connected ? Date.now() : prev.lastHeartbeat
+    }));
+
+    return () => {
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('reconnect', handleReconnect);
+    };
+  }, []);
+
+  // Wallet balance fetch (optimized)
   useEffect(() => {
     if (!isValidWallet) {
       setWalletBalance(0);
@@ -473,7 +573,6 @@ const Dashboard: FC = () => {
     };
 
     fetchWalletBalance();
-    
     walletBalanceInterval = setInterval(fetchWalletBalance, 120000);
 
     return () => {
@@ -483,6 +582,7 @@ const Dashboard: FC = () => {
     };
   }, [isValidWallet, walletAddress]);
 
+  // Level data fetch
   const fetchLevelData = useCallback(async () => {
     if (!userId) {
       setLevelData({
@@ -542,7 +642,7 @@ const Dashboard: FC = () => {
     }
   }, [userId, fetchLevelData]);
 
-  // Enhanced: Live dashboard stats
+  // User stats fetch
   useEffect(() => {
     const fetchUserStats = async () => {
       if (!userId) {
@@ -598,13 +698,10 @@ const Dashboard: FC = () => {
         console.error('❌ Dashboard: Failed to fetch user stats from users_unified:', error);
         
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        const errorDetails = error instanceof Error && 'details' in error ? (error as any).details : 'No details';
-        
         console.log('🔍 Debug info:', {
           userId,
           walletAddress,
-          errorMessage,
-          errorDetails
+          errorMessage
         });
         
         setUserStats({
@@ -631,14 +728,14 @@ const Dashboard: FC = () => {
     fetchUserStats();
   }, [userId, walletAddress]);
 
-  // NEW: Add this separate effect for LIVE stats updates via socket events
+  // 🚀 ENHANCED: Real-time stats updates with better error handling
   useEffect(() => {
     if (!userId) return;
     
     const socket = (window as any).gameSocket;
     if (!socket) return;
     
-    console.log(`📊 Dashboard: Setting up LIVE stats listeners for user: ${userId}`);
+    console.log(`📊 Dashboard: Setting up ENHANCED LIVE stats listeners for user: ${userId}`);
     
     let statsRefreshTimeout: NodeJS.Timeout | null = null;
     
@@ -766,7 +863,7 @@ const Dashboard: FC = () => {
     socket.on('betResult', handleBetResult);
     
     return () => {
-      console.log(`📊 Dashboard: Cleaning up LIVE stats listeners for user: ${userId}`);
+      console.log(`📊 Dashboard: Cleaning up ENHANCED LIVE stats listeners for user: ${userId}`);
       socket.off('custodialBetPlaced', handleCustodialBetPlaced);
       socket.off('custodialCashout', handleCustodialCashout);
       socket.off('gameEnd', handleGameEnd);
@@ -779,7 +876,73 @@ const Dashboard: FC = () => {
     };
   }, [userId]);
 
-  // ENHANCED: Updated refreshData function with better feedback
+  // Transaction confirmation listener
+  useEffect(() => {
+    if (!userId || !walletAddress) return;
+    
+    const socket = (window as any).gameSocket;
+    if (socket) {
+      console.log(`🔌 Dashboard: Setting up transaction listeners for user: ${userId}`);
+      
+      let walletRefreshTimeout: NodeJS.Timeout | null = null;
+      
+      const debouncedWalletRefresh = () => {
+        if (walletRefreshTimeout) {
+          clearTimeout(walletRefreshTimeout);
+        }
+        
+        walletRefreshTimeout = setTimeout(async () => {
+          console.log(`💼 Dashboard: Debounced wallet refresh for ${walletAddress}`);
+          
+          try {
+            const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+            const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+            
+            if (rpcUrl) {
+              const connectionConfig: any = { commitment: 'confirmed' };
+              if (apiKey) connectionConfig.httpHeaders = { 'x-api-key': apiKey };
+              
+              const connection = new Connection(rpcUrl, connectionConfig);
+              const publicKey = safeCreatePublicKey(walletAddress);
+              
+              if (publicKey) {
+                const lamports = await connection.getBalance(publicKey);
+                const newBalance = lamports / LAMPORTS_PER_SOL;
+                
+                setWalletBalance(prevBalance => {
+                  if (Math.abs(prevBalance - newBalance) > 0.0001) {
+                    console.log(`💼 Dashboard: Wallet balance updated: ${newBalance.toFixed(6)} SOL`);
+                    return newBalance;
+                  }
+                  return prevBalance;
+                });
+              }
+            }
+          } catch (error) {
+            console.error('❌ Dashboard: Failed to refresh wallet balance:', error);
+          }
+        }, 3000);
+      };
+
+      const handleTransactionConfirmed = (data: any) => {
+        if (data.userId === userId || data.walletAddress === walletAddress) {
+          console.log(`🔗 Dashboard REAL-TIME: Transaction confirmed - scheduling wallet refresh`);
+          debouncedWalletRefresh();
+        }
+      };
+
+      socket.on('transactionConfirmed', handleTransactionConfirmed);
+      
+      return () => {
+        console.log(`🔌 Dashboard: Cleaning up transaction listeners for user: ${userId}`);
+        socket.off('transactionConfirmed', handleTransactionConfirmed);
+        
+        if (walletRefreshTimeout) clearTimeout(walletRefreshTimeout);
+      };
+    }
+  }, [userId, walletAddress]);
+
+  // 🚀 ENHANCED: Refresh function with better feedback
   const refreshData = useCallback(async () => {
     if (!isValidWallet || !userId) {
       console.log('🔄 Dashboard: Cannot refresh - wallet or user not ready');
@@ -864,72 +1027,6 @@ const Dashboard: FC = () => {
     }
   }, [isValidWallet, userId, walletAddress, refreshCustodialBalance, fetchLevelData]);
 
-  // OPTIMIZED: Real-time socket listeners WITHOUT automatic stats refresh
-  useEffect(() => {
-    if (!userId || !walletAddress) return;
-    
-    const socket = (window as any).gameSocket;
-    if (socket) {
-      console.log(`🔌 Dashboard: Setting up optimized real-time listeners for user: ${userId}`);
-      
-      let walletRefreshTimeout: NodeJS.Timeout | null = null;
-      
-      const debouncedWalletRefresh = () => {
-        if (walletRefreshTimeout) {
-          clearTimeout(walletRefreshTimeout);
-        }
-        
-        walletRefreshTimeout = setTimeout(async () => {
-          console.log(`💼 Dashboard: Debounced wallet refresh for ${walletAddress}`);
-          
-          try {
-            const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-            const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
-            
-            if (rpcUrl) {
-              const connectionConfig: any = { commitment: 'confirmed' };
-              if (apiKey) connectionConfig.httpHeaders = { 'x-api-key': apiKey };
-              
-              const connection = new Connection(rpcUrl, connectionConfig);
-              const publicKey = safeCreatePublicKey(walletAddress);
-              
-              if (publicKey) {
-                const lamports = await connection.getBalance(publicKey);
-                const newBalance = lamports / LAMPORTS_PER_SOL;
-                
-                setWalletBalance(prevBalance => {
-                  if (Math.abs(prevBalance - newBalance) > 0.0001) {
-                    console.log(`💼 Dashboard: Wallet balance updated: ${newBalance.toFixed(6)} SOL`);
-                    return newBalance;
-                  }
-                  return prevBalance;
-                });
-              }
-            }
-          } catch (error) {
-            console.error('❌ Dashboard: Failed to refresh wallet balance:', error);
-          }
-        }, 3000);
-      };
-
-      const handleTransactionConfirmed = (data: any) => {
-        if (data.userId === userId || data.walletAddress === walletAddress) {
-          console.log(`🔗 Dashboard REAL-TIME: Transaction confirmed - scheduling wallet refresh`);
-          debouncedWalletRefresh();
-        }
-      };
-
-      socket.on('transactionConfirmed', handleTransactionConfirmed);
-      
-      return () => {
-        console.log(`🔌 Dashboard: Cleaning up optimized real-time listeners for user: ${userId}`);
-        socket.off('transactionConfirmed', handleTransactionConfirmed);
-        
-        if (walletRefreshTimeout) clearTimeout(walletRefreshTimeout);
-      };
-    }
-  }, [userId, walletAddress]);
-
   // Loading state while Privy initializes
   if (!ready) {
     return (
@@ -955,22 +1052,54 @@ const Dashboard: FC = () => {
         <div className="scrollable-content-area">
           <div className="scrollable-inner-content">
             <div className="max-w-7xl mx-auto px-4 py-8">
-              {/* Header */}
+              {/* 🚀 ENHANCED: Header with real-time status */}
               <div className="flex justify-between items-center mb-6">
-                <h1 className="text-3xl font-bold text-white">Dashboard</h1>
+                <div className="flex items-center gap-4">
+                  <h1 className="text-3xl font-bold text-white">Dashboard</h1>
+                  
+                  {/* 🚀 NEW: Real-time status indicator */}
+                  <div className="flex items-center gap-2">
+                    {realTimeStatus.connected ? (
+                      <div className="flex items-center text-sm text-green-400">
+                        <Wifi size={16} className="mr-1" />
+                        <span>Live</span>
+                        <div className="w-2 h-2 bg-green-400 rounded-full ml-1 animate-pulse"></div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center text-sm text-red-400">
+                        <WifiOff size={16} className="mr-1" />
+                        <span>Offline</span>
+                        {realTimeStatus.reconnectAttempts > 0 && (
+                          <span className="ml-1 text-xs">({realTimeStatus.reconnectAttempts})</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
                 {(isValidWallet && userId) && (
-                  <button
-                    onClick={refreshData}
-                    className="flex items-center bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-md transition-colors"
-                    disabled={isManualRefreshing}
-                  >
-                    <RefreshCw size={16} className={`mr-2 ${isManualRefreshing ? 'animate-spin' : ''}`} />
-                    Refresh
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {/* 🚀 NEW: Real-time toggle indicator */}
+                    {realTimeStatus.connected && (
+                      <div className="flex items-center text-xs text-green-400 bg-green-900/20 px-2 py-1 rounded border border-green-700/30">
+                        <Zap size={12} className="mr-1" />
+                        Auto-Update
+                      </div>
+                    )}
+                    
+                    <button
+                      onClick={refreshData}
+                      className="flex items-center bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-md transition-colors"
+                      disabled={isManualRefreshing}
+                    >
+                      <RefreshCw size={16} className={`mr-2 ${isManualRefreshing ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </button>
+                  </div>
                 )}
               </div>
 
-              {/* Enhanced Player Profile with Real Level System */}
+              {/* Player Profile (same as before but with enhanced indicators) */}
               {isValidWallet && userId && (
                 <div className="bg-gray-900 rounded-lg p-6 mb-8">
                   <h2 className="text-xl font-bold text-white mb-4">Player Profile</h2>
@@ -987,7 +1116,6 @@ const Dashboard: FC = () => {
                     </div>
                   ) : (
                     <div className="space-y-6">
-                      {/* Level and XP Section */}
                       <div>
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center space-x-4">
@@ -1009,7 +1137,6 @@ const Dashboard: FC = () => {
                           </div>
                         </div>
                         
-                        {/* Enhanced Progress Bar */}
                         <div className="relative">
                           <div className="w-full bg-gray-700 rounded-full h-3">
                             <div 
@@ -1026,7 +1153,6 @@ const Dashboard: FC = () => {
                         </div>
                       </div>
 
-                      {/* Stats Grid */}
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="bg-gray-800 rounded-lg p-4 text-center">
                           <div className="text-2xl font-bold text-purple-400">{levelData.level}</div>
@@ -1046,11 +1172,26 @@ const Dashboard: FC = () => {
                 </div>
               )}
 
-              {/* Wallet Status */}
+              {/* 🚀 ENHANCED: Wallet Status with connection indicators */}
               <div className="bg-gray-900 rounded-lg p-6 mb-8">
                 <h2 className="text-xl font-bold text-white mb-4 flex items-center">
                   <Wallet size={20} className="mr-2" />
                   Wallet Status
+                  {isValidWallet && (
+                    <div className="ml-3 flex items-center gap-2">
+                      {isSocketConnected ? (
+                        <div className="flex items-center text-xs text-green-400">
+                          <div className="w-2 h-2 bg-green-400 rounded-full mr-1 animate-pulse"></div>
+                          Real-time
+                        </div>
+                      ) : (
+                        <div className="flex items-center text-xs text-yellow-400">
+                          <AlertCircle size={12} className="mr-1" />
+                          Limited updates
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </h2>
                 
                 {!authenticated ? (
@@ -1065,7 +1206,6 @@ const Dashboard: FC = () => {
                   </div>
                 ) : isValidWallet ? (
                   <div className="space-y-4">
-                    {/* Wallet Address */}
                     <div>
                       <div className="text-gray-400 mb-1">Wallet Address</div>
                       <div className="text-white font-mono text-sm">
@@ -1074,12 +1214,18 @@ const Dashboard: FC = () => {
                       <div className="text-green-400 text-sm mt-1">✓ Connected</div>
                     </div>
                     
-                    {/* Primary balance is now custodial game balance */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="bg-gray-800 rounded-lg p-4">
-                        <div className="text-green-400 mb-2 flex items-center">
-                          <span className="mr-2">🎮</span>
-                          Game Balance
+                      <div className={`bg-gray-800 rounded-lg p-4 transition-all duration-500 ${
+                        custodialBalanceLoading ? 'ring-2 ring-green-400 ring-opacity-30' : ''
+                      }`}>
+                        <div className="text-green-400 mb-2 flex items-center justify-between">
+                          <div className="flex items-center">
+                            <span className="mr-2">🎮</span>
+                            Game Balance
+                          </div>
+                          {isSocketConnected && (
+                            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                          )}
                         </div>
                         <div className="text-2xl font-bold text-green-400">
                           {custodialBalanceLoading ? (
@@ -1092,11 +1238,13 @@ const Dashboard: FC = () => {
                           )}
                         </div>
                         <div className="text-xs text-gray-400 mt-1">
-                          For gaming • Last updated: {custodialLastUpdated ? new Date(custodialLastUpdated).toLocaleTimeString() : 'Never'}
+                          For gaming • {custodialLastUpdated ? `Updated: ${new Date(custodialLastUpdated).toLocaleTimeString()}` : 'Never updated'}
                         </div>
                       </div>
                       
-                      <div className="bg-gray-800 rounded-lg p-4">
+                      <div className={`bg-gray-800 rounded-lg p-4 transition-all duration-500 ${
+                        isLoadingBalance ? 'ring-2 ring-blue-400 ring-opacity-30' : ''
+                      }`}>
                         <div className="text-blue-400 mb-2 flex items-center">
                           <span className="mr-2">💼</span>
                           Wallet Balance
@@ -1117,7 +1265,6 @@ const Dashboard: FC = () => {
                       </div>
                     </div>
                     
-                    {/* Balance transfer hint */}
                     {walletBalance > 0.001 && (
                       <div className="bg-yellow-900 bg-opacity-30 border border-yellow-800 rounded-lg p-3">
                         <div className="text-yellow-400 text-sm flex items-center">
@@ -1135,7 +1282,7 @@ const Dashboard: FC = () => {
                 )}
               </div>
 
-              {/* Referral Section with real-time updates */}
+              {/* Referral Section */}
               {(isValidWallet && userId) && (
                 <ReferralSection 
                   userId={userId} 
@@ -1144,14 +1291,13 @@ const Dashboard: FC = () => {
                 />
               )}
 
-              {/* 🚀 ENHANCED: Game Statistics section with live updates */}
+              {/* 🚀 ENHANCED: Game Statistics with improved real-time indicators */}
               {isValidWallet && (
                 <div className="bg-gray-900 rounded-lg p-6 mb-8">
                   <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-bold text-white flex items-center">
                       <TrendingUp size={20} className="mr-2" />
                       Game Statistics
-                      {/* 🚀 LIVE: Live update indicator */}
                       {isStatsUpdating && (
                         <div className="ml-3 flex items-center text-green-400 text-sm">
                           <div className="animate-pulse w-2 h-2 bg-green-400 rounded-full mr-2"></div>
@@ -1160,11 +1306,19 @@ const Dashboard: FC = () => {
                       )}
                     </h2>
                     
-                    {/* 🚀 LIVE: Last updated timestamp */}
-                    <div className="text-xs text-gray-500">
-                      {statsLastUpdated > 0 && (
-                        <span>Last updated: {new Date(statsLastUpdated).toLocaleTimeString()}</span>
+                    <div className="flex items-center gap-3">
+                      {realTimeStatus.connected && (
+                        <div className="flex items-center text-xs text-green-400">
+                          <Zap size={12} className="mr-1" />
+                          Live Updates
+                        </div>
                       )}
+                      
+                      <div className="text-xs text-gray-500">
+                        {statsLastUpdated > 0 && (
+                          <span>Updated: {new Date(statsLastUpdated).toLocaleTimeString()}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   
@@ -1179,7 +1333,6 @@ const Dashboard: FC = () => {
                     </div>
                   ) : (
                     <>
-                      {/* Primary Stats Row with live update animations */}
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
                         <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-50' : ''}`}>
                           <div className="text-gray-400 mb-1">Total Wagered</div>
@@ -1222,7 +1375,6 @@ const Dashboard: FC = () => {
                         </div>
                       </div>
 
-                      {/* Enhanced Additional Stats */}
                       {(enhancedUserStats.winRate > 0 || enhancedUserStats.bestMultiplier > 0 || userStats.gamesPlayed > 0) && (
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 border-t border-gray-700">
                           <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-30' : ''}`}>
@@ -1267,11 +1419,24 @@ const Dashboard: FC = () => {
                         </div>
                       )}
 
-                      {/* 🚀 NEW: Live stats help text */}
                       <div className="mt-4 pt-4 border-t border-gray-700">
-                        <div className="flex items-center text-xs text-gray-500">
-                          <div className="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div>
-                          <span>Stats update automatically when you play • Last sync: {statsLastUpdated > 0 ? new Date(statsLastUpdated).toLocaleTimeString() : 'Not yet synced'}</span>
+                        <div className="flex items-center justify-between text-xs text-gray-500">
+                          <div className="flex items-center">
+                            {realTimeStatus.connected ? (
+                              <>
+                                <div className="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div>
+                                <span>Stats update automatically when you play</span>
+                              </>
+                            ) : (
+                              <>
+                                <div className="w-2 h-2 bg-yellow-400 rounded-full mr-2"></div>
+                                <span>Limited updates - connection issues</span>
+                              </>
+                            )}
+                          </div>
+                          <span>
+                            Last sync: {statsLastUpdated > 0 ? new Date(statsLastUpdated).toLocaleTimeString() : 'Not yet synced'}
+                          </span>
                         </div>
                       </div>
                     </>
@@ -1279,7 +1444,7 @@ const Dashboard: FC = () => {
                 </div>
               )}
 
-              {/* Quick Actions */}
+              {/* Quick Actions (unchanged) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 <div className="bg-gray-900 rounded-lg p-6">
                   <h3 className="text-lg font-bold text-white mb-4">Quick Actions</h3>
@@ -1312,7 +1477,6 @@ const Dashboard: FC = () => {
                 </div>
               </div>
 
-              {/* Bottom spacing for complete scroll */}
               <div className="h-16"></div>
             </div>
           </div>

@@ -1282,3 +1282,320 @@ body {
     width: 100% !important;
   }
 }
+/* Add these scrolling fixes to the END of your existing globals.css file */
+
+/* ===== ENHANCED SCROLLING FIXES FOR DASHBOARD & LEADERBOARD ===== */
+/* Fixed scrolling containers for Dashboard and Leaderboard pages */
+.scrollable-page-container {
+  display: flex;
+  height: 100vh;
+  height: 100dvh; /* Dynamic viewport height when supported */
+  overflow: hidden;
+}
+
+.scrollable-content-area {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  /* Ensure proper scrolling on mobile */
+  overscroll-behavior-y: contain;
+  /* GPU acceleration for smooth scrolling */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  /* Optimize repaints during scroll */
+  will-change: scroll-position;
+}
+
+.scrollable-inner-content {
+  min-height: 100%;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* Enhanced viewport height handling */
+@supports (-webkit-touch-callout: none) {
+  /* iOS Safari specific fixes */
+  .scrollable-page-container {
+    height: -webkit-fill-available;
+  }
+}
+
+/* Remove will-change after scroll ends for performance */
+.scrollable-content-area:not(:hover):not(:focus) {
+  will-change: auto;
+}
+
+/* ===== ENHANCED MOBILE SCROLLING FOR NEW PAGES ===== */
+@media screen and (max-width: 768px) {
+  .scrollable-content-area {
+    /* Better mobile scrolling performance */
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    scroll-snap-type: none; /* Prevent snap scrolling interference */
+  }
+  
+  /* Ensure content containers don't exceed viewport */
+  .scrollable-inner-content {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  
+  /* Mobile-specific scrollbar hiding for new containers */
+  .scrollable-content-area::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ===== DESKTOP SCROLLING ENHANCEMENTS FOR NEW PAGES ===== */
+@media screen and (min-width: 769px) {
+  /* Custom scrollbar for desktop only - matches your existing theme */
+  .scrollable-content-area::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  .scrollable-content-area::-webkit-scrollbar-track {
+    background: rgba(31, 41, 55, 0.5);
+    border-radius: 4px;
+  }
+  
+  .scrollable-content-area::-webkit-scrollbar-thumb {
+    background: rgba(75, 85, 99, 0.8);
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+  }
+  
+  .scrollable-content-area::-webkit-scrollbar-thumb:hover {
+    background: rgba(107, 114, 128, 0.9);
+  }
+  
+  /* Smooth scrolling for desktop */
+  .scrollable-content-area {
+    scroll-behavior: smooth;
+  }
+}
+
+/* ===== CONTENT LAYOUT FIXES FOR NEW PAGES ===== */
+/* Ensure consistent spacing and layout */
+.page-content-wrapper {
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+@media screen and (min-width: 640px) {
+  .page-content-wrapper {
+    padding: 2rem 1.5rem;
+  }
+}
+
+@media screen and (min-width: 1024px) {
+  .page-content-wrapper {
+    padding: 2rem 2rem;
+  }
+}
+
+/* ===== SMOOTH SCROLL ANCHORING ===== */
+/* Prevent layout shifts during dynamic content loading */
+.scroll-anchor {
+  scroll-margin-top: 2rem;
+  scroll-margin-bottom: 2rem;
+}
+
+/* ===== TABLET OPTIMIZATIONS FOR NEW SCROLLING ===== */
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+  .scrollable-content-area {
+    /* Optimize for tablet touch scrolling */
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: auto; /* Allow some overscroll on tablets */
+  }
+  
+  /* Slightly thicker scrollbar for tablets */
+  .scrollable-content-area::-webkit-scrollbar {
+    width: 10px;
+  }
+}
+
+/* ===== CONTENT OVERFLOW PROTECTION FOR NEW PAGES ===== */
+/* Prevent any child elements from breaking the scroll container */
+.scrollable-inner-content * {
+  max-width: 100%;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Specific fixes for wide tables or charts in new pages */
+.scrollable-inner-content table,
+.scrollable-inner-content .chart-container,
+.scrollable-inner-content .wide-content {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ===== LAYOUT COMPONENT COMPATIBILITY ===== */
+/* Ensure Layout component works properly with new scrolling structure */
+.layout-with-scrolling {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.layout-with-scrolling .layout-content {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ===== SAFE AREA HANDLING FOR NEW PAGES ===== */
+/* Handle notches and safe areas properly */
+@supports (padding: max(0px)) {
+  .scrollable-inner-content {
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+  
+  .scrollable-page-container {
+    padding-top: env(safe-area-inset-top, 0);
+  }
+}
+
+/* ===== ACCESSIBILITY IMPROVEMENTS FOR NEW SCROLLING ===== */
+/* Respect user preferences for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .scrollable-content-area {
+    scroll-behavior: auto;
+  }
+  
+  .scrollable-content-area,
+  .scrollable-page-container {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* High contrast mode support for new scrollbars */
+@media (prefers-contrast: high) {
+  .scrollable-content-area::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(0, 0, 0, 0.2);
+  }
+  
+  .scrollable-content-area::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+}
+
+/* ===== LOADING STATE SCROLLING ===== */
+/* Prevent scroll during loading states */
+.scroll-locked {
+  overflow: hidden !important;
+}
+
+.scroll-locked .scrollable-content-area {
+  overflow: hidden !important;
+}
+
+/* ===== BROWSER-SPECIFIC FIXES FOR NEW SCROLLING ===== */
+/* Chrome/Edge specific fixes */
+@supports (-webkit-appearance: none) {
+  .scrollable-content-area::-webkit-scrollbar {
+    -webkit-appearance: none;
+  }
+  
+  .scrollable-content-area::-webkit-scrollbar-thumb {
+    -webkit-appearance: none;
+  }
+}
+
+/* Firefox scrollbar styling */
+@-moz-document url-prefix() {
+  .scrollable-content-area {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(75, 85, 99, 0.8) rgba(31, 41, 55, 0.5);
+  }
+}
+
+/* ===== UTILITY CLASSES FOR NEW SCROLLING ===== */
+.scroll-smooth {
+  scroll-behavior: smooth;
+}
+
+.scroll-auto {
+  scroll-behavior: auto;
+}
+
+.overflow-scroll-y {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.overflow-hidden-mobile {
+  @media screen and (max-width: 768px) {
+    overflow: hidden;
+  }
+}
+
+/* ===== INTEGRATION WITH EXISTING CHAT STYLES ===== */
+/* Ensure new scrolling doesn't conflict with existing chat */
+.scrollable-content-area .chat-container {
+  background-color: #0d0d0f;
+  color: white;
+}
+
+.scrollable-content-area .mobile-chat {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+/* ===== INTEGRATION WITH EXISTING TRADING STYLES ===== */
+/* Ensure new scrolling works with existing trading components */
+.scrollable-content-area .trading-controls {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+.scrollable-content-area .chart-container {
+  width: 100%;
+  max-width: 100vw;
+  overflow: hidden;
+}
+
+/* ===== LEADERBOARD-SPECIFIC SCROLLING FIXES ===== */
+.scrollable-content-area .leaderboard-table {
+  width: 100%;
+  table-layout: fixed;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ===== DASHBOARD-SPECIFIC SCROLLING FIXES ===== */
+.scrollable-content-area .level-badge {
+  /* Ensure level badges work properly in scrollable container */
+  position: relative;
+  overflow: hidden;
+}
+
+/* ===== PERFORMANCE OPTIMIZATIONS FOR NEW SCROLLING ===== */
+.scrollable-content-area.optimized {
+  /* Additional performance optimizations if needed */
+  contain: layout style paint;
+}
+
+/* ===== DEBUG HELPERS FOR NEW SCROLLING (Remove in production) ===== */
+/*
+.debug-scrollable-container {
+  outline: 2px solid blue !important;
+}
+
+.debug-scrollable-content {
+  outline: 2px solid green !important;
+}
+*/

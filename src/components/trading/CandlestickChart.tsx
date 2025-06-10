@@ -361,6 +361,8 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const [candleData, setCandleData] = useState<Candle[]>([]);
   const [lastServerMultiplier, setLastServerMultiplier] = useState<number>(1.0);
+  const [lastGameStatus, setLastGameStatus] = useState<string>('waiting'); // Track status changes
+  const [crashHandled, setCrashHandled] = useState<boolean>(false); // Prevent double triggers
   const [cashoutMultiplier, setCashoutMultiplier] = useState<number | undefined>(undefined);
   
   // Visual effect states - ENHANCED with timeout tracking
@@ -561,27 +563,30 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
     }, 100); // Brief delay for cleanup
   }, [onGameCrash, peakMultiplier, isMobile, clearAllTimeouts, addTimeout]);
 
-  // ENHANCED: Real server data synchronization with FULL candle history kept
+  // 🔥 DEDICATED CRASH DETECTION - Separate effect for reliable crash handling
   useEffect(() => {
     if (!isServerConnected) return;
-
-    // Track peak multiplier
-    if (serverMultiplier > peakMultiplier && serverGameStatus === 'active') {
-      setPeakMultiplier(serverMultiplier);
-    }
-
-    // 🔥 ENHANCED: Handle game crash from server - FORCE RUG EFFECT EVERY TIME
-    if (serverGameStatus === 'crashed' && lastServerMultiplier !== serverMultiplier) {
-      console.log('💥 GAME CRASHED - FORCING ENHANCED RUG EFFECT');
+    
+    // Detect status change from active/waiting to crashed
+    const statusChanged = lastGameStatus !== serverGameStatus;
+    const nowCrashed = serverGameStatus === 'crashed';
+    const wasNotCrashed = lastGameStatus !== 'crashed';
+    
+    console.log(`🎮 Status check: ${lastGameStatus} → ${serverGameStatus}, crashHandled: ${crashHandled}`);
+    
+    if (nowCrashed && wasNotCrashed && !crashHandled) {
+      console.log('💥💥💥 GAME CRASHED DETECTED - TRIGGERING RUG EFFECT 💥💥💥');
       
-      // Finalize current candle and create dramatic crash candle
+      // Mark crash as handled to prevent double triggers
+      setCrashHandled(true);
+      
+      // Finalize candle data
       setCandleData(prev => {
         if (prev.length === 0) return prev;
         
         const updatedCandles = [...prev];
         const lastCandle = updatedCandles[updatedCandles.length - 1];
         
-        // Finalize the last candle with crash data
         const crashCandle: Candle = {
           timestamp: new Date().toISOString(),
           open: lastCandle.close,
@@ -592,15 +597,33 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
         };
 
         updatedCandles[updatedCandles.length - 1] = crashCandle;
-        
-        // KEEP ALL CANDLES - sliding window will handle display
         return updatedCandles;
       });
 
-      // 🚀 FORCE rug effect trigger - GUARANTEED to happen every crash
+      // 🚀 FORCE rug effect trigger - GUARANTEED
+      console.log('🔥 CALLING triggerRugEffect with multiplier:', serverMultiplier);
       triggerRugEffect(serverMultiplier);
       setPeakMultiplier(1.0);
       lastMilestoneRef.current = 0;
+    }
+    
+    // Reset crash handled flag when new game starts
+    if (serverGameStatus === 'waiting' && lastGameStatus === 'crashed') {
+      console.log('🔄 New game starting - resetting crash handler');
+      setCrashHandled(false);
+    }
+    
+    // Update last status
+    setLastGameStatus(serverGameStatus);
+  }, [serverGameStatus, lastGameStatus, crashHandled, isServerConnected, serverMultiplier, peakMultiplier, triggerRugEffect]);
+
+  // ENHANCED: Real server data synchronization with FULL candle history kept
+  useEffect(() => {
+    if (!isServerConnected) return;
+
+    // Track peak multiplier
+    if (serverMultiplier > peakMultiplier && serverGameStatus === 'active') {
+      setPeakMultiplier(serverMultiplier);
     }
 
     // PROPER CONTINUOUS CANDLESTICK BUILDING during active game
@@ -671,6 +694,7 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
       setCashoutMultiplier(undefined);
       lastMilestoneRef.current = 0;
       setPeakMultiplier(1.0);
+      setCrashHandled(false); // Reset crash handler
       
       // FINALLY: Complete effect cleanup
       setIsShaking(false);
@@ -688,7 +712,7 @@ const CandlestickChart: FC<CandlestickChartProps> = ({
     }
 
     setLastServerMultiplier(serverMultiplier);
-  }, [serverMultiplier, serverGameStatus, isServerConnected, lastServerMultiplier, checkForEffects, onMultiplierUpdate, triggerRugEffect, isMobile, candleData.length]);
+  }, [serverMultiplier, serverGameStatus, isServerConnected, lastServerMultiplier, checkForEffects, onMultiplierUpdate, isMobile, candleData.length, clearAllTimeouts]);
 
   // Track cashout events from parent component
   useEffect(() => {

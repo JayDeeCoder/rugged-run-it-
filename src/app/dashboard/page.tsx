@@ -1,4 +1,4 @@
-// src/app/dashboard/page.tsx - FIXED Socket Connection Version
+// src/app/dashboard/page.tsx - FIXED with Shared Socket Service
 'use client';
 
 import { FC, useState, useEffect, useContext, useCallback, useRef } from 'react';
@@ -13,6 +13,7 @@ import { Wallet, TrendingUp, GamepadIcon, RefreshCw, Zap, Wifi, WifiOff, AlertCi
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import ReferralSection from '../../components/ReferralSection';
+import { sharedSocket } from '../../services/sharedSocket'; // 🚀 Use shared socket service
 
 // Supabase config with fallback
 const FALLBACK_SUPABASE_URL = 'https://ineaxxqjkryoobobxrsw.supabase.co';
@@ -42,144 +43,94 @@ const getSupabaseClient = () => {
   return supabaseClient;
 };
 
-// 🚀 FIXED: Enhanced socket connection hook
+// 🚀 SIMPLIFIED: Socket connection hook using shared service
 const useSocketConnection = () => {
   const [socket, setSocket] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
-  const socketInitRef = useRef(false);
-  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const initAttempted = useRef(false);
 
   useEffect(() => {
-    if (socketInitRef.current) return;
+    if (initAttempted.current) return;
+    initAttempted.current = true;
+
+    console.log('🔌 Dashboard: Initializing socket connection via shared service...');
     
-    console.log('🔌 Dashboard: Initializing socket connection...');
-    
-    const initializeSocket = () => {
+    const initSocket = async () => {
       try {
-        // Check if socket already exists on window
-        let gameSocket = (window as any).gameSocket;
-        
-        if (!gameSocket) {
-          console.log('🔌 Dashboard: No existing socket found, checking for io...');
-          
-          // Check if socket.io is available
-          const io = (window as any).io;
-          if (!io) {
-            console.warn('⚠️ Dashboard: Socket.io not found on window. Checking if it needs to be loaded...');
-            
-            // Try to load socket.io if not present
-            if (typeof window !== 'undefined' && !document.querySelector('script[src*="socket.io"]')) {
-              console.log('🔌 Dashboard: Loading socket.io from CDN...');
-              const script = document.createElement('script');
-              script.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js';
-              script.onload = () => {
-                console.log('✅ Dashboard: Socket.io loaded from CDN');
-                // Retry initialization after loading
-                retryTimeoutRef.current = setTimeout(initializeSocket, 1000);
-              };
-              document.head.appendChild(script);
-            }
-            return;
-          }
-          
-          // Create new socket connection
-          const GAME_SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'ws://localhost:3001';
-          console.log(`🔌 Dashboard: Creating new socket connection to: ${GAME_SERVER_URL}`);
-          
-          gameSocket = io(GAME_SERVER_URL, {
-            autoConnect: true,
-            reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
-            timeout: 20000,
-            transports: ['websocket', 'polling']
-          });
-          
-          // Store socket on window for other components
-          (window as any).gameSocket = gameSocket;
-        }
+        const gameSocket = await sharedSocket.getSocket();
         
         if (gameSocket) {
-          console.log('✅ Dashboard: Socket object found:', {
-            connected: gameSocket.connected,
-            id: gameSocket.id || 'not-connected',
-            transport: gameSocket.io?.engine?.transport?.name || 'none'
-          });
-          
+          console.log('✅ Dashboard: Got socket from shared service');
           setSocket(gameSocket);
           setIsConnected(gameSocket.connected);
-          socketInitRef.current = true;
+          setError(null);
           
-          // Connection event handlers
-          gameSocket.on('connect', () => {
-            console.log('🔌 Dashboard: Socket connected successfully:', gameSocket.id);
+          // Set up event listeners for connection status
+          const handleConnect = () => {
+            console.log('✅ Dashboard: Socket connected');
             setIsConnected(true);
+            setError(null);
             setConnectionAttempts(0);
-          });
-          
-          gameSocket.on('disconnect', (reason: string) => {
-            console.log('🔌 Dashboard: Socket disconnected:', reason);
+          };
+
+          const handleDisconnect = () => {
+            console.log('🔌 Dashboard: Socket disconnected');
             setIsConnected(false);
-          });
-          
-          gameSocket.on('connect_error', (error: any) => {
-            console.error('❌ Dashboard: Socket connection error:', error);
+          };
+
+          const handleError = (err: any) => {
+            console.error('❌ Dashboard: Socket error:', err);
+            setError(err.message || 'Connection error');
             setConnectionAttempts(prev => prev + 1);
-            setIsConnected(false);
-          });
-          
-          gameSocket.on('reconnect', (attemptNumber: number) => {
-            console.log('🔌 Dashboard: Socket reconnected after', attemptNumber, 'attempts');
-            setIsConnected(true);
-            setConnectionAttempts(0);
-          });
-          
-          gameSocket.on('reconnect_error', (error: any) => {
-            console.error('❌ Dashboard: Socket reconnection error:', error);
-            setConnectionAttempts(prev => prev + 1);
-          });
-          
-          // If socket exists but isn't connected, try to connect
-          if (!gameSocket.connected) {
-            console.log('🔌 Dashboard: Socket exists but not connected, attempting connection...');
-            gameSocket.connect();
+          };
+
+          // Register listeners
+          sharedSocket.on('connect', handleConnect);
+          sharedSocket.on('disconnect', handleDisconnect);
+          sharedSocket.on('connect_error', handleError);
+
+          // If already connected, update state
+          if (gameSocket.connected) {
+            handleConnect();
           }
+
+          // Cleanup function
+          return () => {
+            sharedSocket.off('connect', handleConnect);
+            sharedSocket.off('disconnect', handleDisconnect);
+            sharedSocket.off('connect_error', handleError);
+          };
+        } else {
+          console.warn('⚠️ Dashboard: Failed to get socket from shared service');
+          setError('Failed to connect to game server');
+          setConnectionAttempts(prev => prev + 1);
         }
-        
-      } catch (error) {
-        console.error('❌ Dashboard: Error initializing socket:', error);
+      } catch (err) {
+        console.error('❌ Dashboard: Error initializing socket:', err);
+        setError(err instanceof Error ? err.message : 'Socket initialization failed');
         setConnectionAttempts(prev => prev + 1);
       }
     };
-    
-    // Try to initialize immediately
-    initializeSocket();
-    
-    // If no socket found, retry after a delay
-    retryTimeoutRef.current = setTimeout(() => {
-      if (!socket && !socketInitRef.current) {
-        console.log('🔌 Dashboard: Retrying socket initialization...');
-        initializeSocket();
-      }
-    }, 2000);
-    
-    return () => {
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
-      }
-      if (socket) {
-        socket.off('connect');
-        socket.off('disconnect');
-        socket.off('connect_error');
-        socket.off('reconnect');
-        socket.off('reconnect_error');
-      }
-    };
+
+    initSocket();
   }, []);
 
-  return { socket, isConnected, connectionAttempts };
+  // Monitor shared socket connection status
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const connected = sharedSocket.isConnected();
+      if (connected !== isConnected) {
+        setIsConnected(connected);
+        console.log(`🔌 Dashboard: Connection status changed: ${connected}`);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [isConnected]);
+
+  return { socket, isConnected, connectionAttempts, error };
 };
 
 interface PlayerBet {
@@ -190,7 +141,7 @@ interface PlayerBet {
   status: string;
 }
 
-// 🚀 ENHANCED: Real-time custodial balance hook with better state management
+// 🚀 SIMPLIFIED: Custodial balance hook with shared socket
 const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -291,9 +242,9 @@ const useCustodialBalance = (userId: string) => {
     }
   }, [userId, updateCustodialBalance, loading]);
    
-  // 🚀 FIXED: Real-time socket listeners with proper connection handling
+  // 🚀 SIMPLIFIED: Real-time socket listeners with shared socket
   useEffect(() => {
-    if (!userId || !socket || socketListenersRef.current) return;
+    if (!userId || !isConnected || socketListenersRef.current) return;
     
     console.log(`🔌 Dashboard: Setting up REAL-TIME custodial balance listeners for user: ${userId}`);
     socketListenersRef.current = true;
@@ -349,22 +300,23 @@ const useCustodialBalance = (userId: string) => {
       }
     };
 
-    socket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-    socket.on('userBalanceUpdate', handleUserBalanceUpdate);
-    socket.on('depositConfirmed', handleDepositConfirmation);
+    // Use shared socket to listen for events
+    sharedSocket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+    sharedSocket.on('userBalanceUpdate', handleUserBalanceUpdate);
+    sharedSocket.on('depositConfirmed', handleDepositConfirmation);
     
     return () => {
       console.log(`🔌 Dashboard: Cleaning up REAL-TIME custodial balance listeners for user: ${userId}`);
-      socket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
-      socket.off('userBalanceUpdate', handleUserBalanceUpdate);
-      socket.off('depositConfirmed', handleDepositConfirmation);
+      sharedSocket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
+      sharedSocket.off('userBalanceUpdate', handleUserBalanceUpdate);
+      sharedSocket.off('depositConfirmed', handleDepositConfirmation);
       socketListenersRef.current = false;
       
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
       }
     };
-  }, [userId, socket, updateCustodialBalance]);
+  }, [userId, isConnected, updateCustodialBalance]);
 
   return { 
     custodialBalance, 
@@ -396,8 +348,8 @@ const Dashboard: FC = () => {
   // Validate wallet address
   const isValidWallet = isConnected && isValidSolanaAddress(walletAddress);
 
-  // 🚀 FIXED: Use socket connection hook and custodial balance hook
-  const { socket: gameSocket, isConnected: socketConnected, connectionAttempts } = useSocketConnection();
+  // 🚀 SIMPLIFIED: Use socket connection hook and custodial balance hook
+  const { socket: gameSocket, isConnected: socketConnected, connectionAttempts, error: socketError } = useSocketConnection();
   const { 
     custodialBalance, 
     loading: custodialBalanceLoading, 
@@ -441,11 +393,12 @@ const Dashboard: FC = () => {
   const [statsLastUpdated, setStatsLastUpdated] = useState<number>(0);
   const [isStatsUpdating, setIsStatsUpdating] = useState<boolean>(false);
   
-  // 🚀 FIXED: Real-time connection status tracking
+  // 🚀 SIMPLIFIED: Real-time connection status tracking
   const [realTimeStatus, setRealTimeStatus] = useState({
     connected: false,
     lastHeartbeat: 0,
-    reconnectAttempts: 0
+    reconnectAttempts: 0,
+    error: null as string | null
   });
   
   // Initialization ref for user setup
@@ -461,17 +414,18 @@ const Dashboard: FC = () => {
     lastUserId: ''
   });
 
-  // 🚀 FIXED: Update real-time status based on socket connection
+  // 🚀 SIMPLIFIED: Update real-time status based on socket connection
   useEffect(() => {
     setRealTimeStatus(prev => ({
       ...prev,
       connected: socketConnected,
       lastHeartbeat: socketConnected ? Date.now() : prev.lastHeartbeat,
-      reconnectAttempts: connectionAttempts
+      reconnectAttempts: connectionAttempts,
+      error: socketError
     }));
-  }, [socketConnected, connectionAttempts]);
+  }, [socketConnected, connectionAttempts, socketError]);
 
-  // User initialization (simplified)
+  // 🚀 SIMPLIFIED: User initialization
   useEffect(() => {
     if (!authenticated || !walletAddress) {
       return;
@@ -503,10 +457,10 @@ const Dashboard: FC = () => {
           console.log(`👤 Dashboard: User ID set: ${userData.id}`);
           initializationRef.current.completed = true;
           
-          // Initialize user via socket if available
-          if (gameSocket && gameSocket.connected) {
-            console.log(`📡 Dashboard: Initializing user via socket...`);
-            gameSocket.emit('initializeUser', {
+          // Initialize user via shared socket if available
+          if (socketConnected) {
+            console.log(`📡 Dashboard: Initializing user via shared socket...`);
+            sharedSocket.emit('initializeUser', {
               userId: userData.id,
               walletAddress: walletAddress
             });
@@ -521,7 +475,7 @@ const Dashboard: FC = () => {
     };
     
     initUser();
-  }, [authenticated, walletAddress, gameSocket]);
+  }, [authenticated, walletAddress, socketConnected]);
 
   // Reset initialization tracking when wallet changes
   useEffect(() => {
@@ -750,9 +704,9 @@ const Dashboard: FC = () => {
     fetchUserStats();
   }, [userId, walletAddress]);
 
-  // 🚀 FIXED: Real-time stats updates with proper socket handling
+  // 🚀 SIMPLIFIED: Real-time stats updates with shared socket
   useEffect(() => {
-    if (!userId || !gameSocket) return;
+    if (!userId || !socketConnected) return;
     
     console.log(`📊 Dashboard: Setting up ENHANCED LIVE stats listeners for user: ${userId}`);
     
@@ -875,29 +829,30 @@ const Dashboard: FC = () => {
       }
     };
 
-    gameSocket.on('custodialBetPlaced', handleCustodialBetPlaced);
-    gameSocket.on('custodialCashout', handleCustodialCashout);
-    gameSocket.on('gameEnd', handleGameEnd);
-    gameSocket.on('userStatsUpdate', handleUserStatsUpdate);
-    gameSocket.on('betResult', handleBetResult);
+    // Use shared socket for event listeners
+    sharedSocket.on('custodialBetPlaced', handleCustodialBetPlaced);
+    sharedSocket.on('custodialCashout', handleCustodialCashout);
+    sharedSocket.on('gameEnd', handleGameEnd);
+    sharedSocket.on('userStatsUpdate', handleUserStatsUpdate);
+    sharedSocket.on('betResult', handleBetResult);
     
     return () => {
       console.log(`📊 Dashboard: Cleaning up ENHANCED LIVE stats listeners for user: ${userId}`);
-      gameSocket.off('custodialBetPlaced', handleCustodialBetPlaced);
-      gameSocket.off('custodialCashout', handleCustodialCashout);
-      gameSocket.off('gameEnd', handleGameEnd);
-      gameSocket.off('userStatsUpdate', handleUserStatsUpdate);
-      gameSocket.off('betResult', handleBetResult);
+      sharedSocket.off('custodialBetPlaced', handleCustodialBetPlaced);
+      sharedSocket.off('custodialCashout', handleCustodialCashout);
+      sharedSocket.off('gameEnd', handleGameEnd);
+      sharedSocket.off('userStatsUpdate', handleUserStatsUpdate);
+      sharedSocket.off('betResult', handleBetResult);
       
       if (statsRefreshTimeout) {
         clearTimeout(statsRefreshTimeout);
       }
     };
-  }, [userId, gameSocket]);
+  }, [userId, socketConnected]);
 
   // Transaction confirmation listener
   useEffect(() => {
-    if (!userId || !walletAddress || !gameSocket) return;
+    if (!userId || !walletAddress || !socketConnected) return;
     
     console.log(`🔌 Dashboard: Setting up transaction listeners for user: ${userId}`);
     
@@ -948,15 +903,15 @@ const Dashboard: FC = () => {
       }
     };
 
-    gameSocket.on('transactionConfirmed', handleTransactionConfirmed);
+    sharedSocket.on('transactionConfirmed', handleTransactionConfirmed);
     
     return () => {
       console.log(`🔌 Dashboard: Cleaning up transaction listeners for user: ${userId}`);
-      gameSocket.off('transactionConfirmed', handleTransactionConfirmed);
+      sharedSocket.off('transactionConfirmed', handleTransactionConfirmed);
       
       if (walletRefreshTimeout) clearTimeout(walletRefreshTimeout);
     };
-  }, [userId, walletAddress, gameSocket]);
+  }, [userId, walletAddress, socketConnected]);
 
   // Enhanced refresh function
   const refreshData = useCallback(async () => {
@@ -1068,12 +1023,12 @@ const Dashboard: FC = () => {
         <div className="scrollable-content-area">
           <div className="scrollable-inner-content">
             <div className="max-w-7xl mx-auto px-4 py-8">
-              {/* 🚀 ENHANCED: Header with real-time status */}
+              {/* 🚀 SIMPLIFIED: Header with real-time status */}
               <div className="flex justify-between items-center mb-6">
                 <div className="flex items-center gap-4">
                   <h1 className="text-3xl font-bold text-white">Dashboard</h1>
                   
-                  {/* 🚀 FIXED: Real-time status indicator */}
+                  {/* 🚀 SIMPLIFIED: Real-time status indicator */}
                   <div className="flex items-center gap-2">
                     {realTimeStatus.connected ? (
                       <div className="flex items-center text-sm text-green-400">
@@ -1090,12 +1045,18 @@ const Dashboard: FC = () => {
                         )}
                       </div>
                     )}
+                    
+                    {realTimeStatus.error && (
+                      <div className="text-xs text-yellow-400 ml-2" title={realTimeStatus.error}>
+                        <AlertCircle size={12} />
+                      </div>
+                    )}
                   </div>
                 </div>
                 
                 {(isValidWallet && userId) && (
                   <div className="flex items-center gap-3">
-                    {/* 🚀 NEW: Real-time toggle indicator */}
+                    {/* 🚀 SIMPLIFIED: Real-time toggle indicator */}
                     {realTimeStatus.connected && (
                       <div className="flex items-center text-xs text-green-400 bg-green-900/20 px-2 py-1 rounded border border-green-700/30">
                         <Zap size={12} className="mr-1" />
@@ -1188,7 +1149,7 @@ const Dashboard: FC = () => {
                 </div>
               )}
 
-              {/* 🚀 ENHANCED: Wallet Status with connection indicators */}
+              {/* 🚀 SIMPLIFIED: Wallet Status with connection indicators */}
               <div className="bg-gray-900 rounded-lg p-6 mb-8">
                 <h2 className="text-xl font-bold text-white mb-4 flex items-center">
                   <Wallet size={20} className="mr-2" />
@@ -1307,7 +1268,7 @@ const Dashboard: FC = () => {
                 />
               )}
 
-              {/* 🚀 ENHANCED: Game Statistics with improved real-time indicators */}
+              {/* 🚀 SIMPLIFIED: Game Statistics with improved real-time indicators */}
               {isValidWallet && (
                 <div className="bg-gray-900 rounded-lg p-6 mb-8">
                   <div className="flex justify-between items-center mb-4">

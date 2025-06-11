@@ -1,8 +1,9 @@
-// src/app/dashboard/page.tsx - FIXED with Shared Socket Service
+// src/app/dashboard/page.tsx - FIXED with Game State Coordination
 'use client';
 
 import { FC, useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { useSolanaWallets, usePrivy } from '@privy-io/react-auth';
+import { useRouter } from 'next/navigation';
 import { Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { createClient } from '@supabase/supabase-js';
 import Layout from '../../components/layout/Layout';
@@ -13,7 +14,7 @@ import { Wallet, TrendingUp, GamepadIcon, RefreshCw, Zap, Wifi, WifiOff, AlertCi
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import ReferralSection from '../../components/ReferralSection';
-import { sharedSocket } from '../../services/sharedSocket'; // 🚀 Use shared socket service
+import { sharedSocket } from '../../services/sharedSocket';
 
 // Supabase config with fallback
 const FALLBACK_SUPABASE_URL = 'https://ineaxxqjkryoobobxrsw.supabase.co';
@@ -43,13 +44,53 @@ const getSupabaseClient = () => {
   return supabaseClient;
 };
 
-// 🚀 SIMPLIFIED: Socket connection hook using shared service
+// 🚀 ENHANCED: Socket connection with game state coordination
 const useSocketConnection = () => {
   const [socket, setSocket] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const initAttempted = useRef(false);
+  const router = useRouter();
+
+  // 🚀 NEW: Game state cleanup function
+  const cleanupGameState = useCallback(() => {
+    console.log('🧹 Dashboard: Cleaning up game state before navigation...');
+    
+    // Clear any game-specific state in shared socket
+    if (sharedSocket.isConnected()) {
+      // Emit cleanup signal to server
+      sharedSocket.emit('cleanupGameState', { 
+        source: 'dashboard',
+        timestamp: Date.now()
+      });
+      
+      // Clear local game state tracking
+      if ((window as any).gameStateRef) {
+        (window as any).gameStateRef.current = null;
+      }
+      
+      // Stop listening to game-specific events temporarily
+      sharedSocket.off('multiplierUpdate');
+      sharedSocket.off('gameState');
+      sharedSocket.off('gameStarted');
+      sharedSocket.off('gameCrashed');
+    }
+  }, []);
+
+  // 🚀 NEW: Cleanup on page navigation
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      cleanupGameState();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      cleanupGameState();
+    };
+  }, [cleanupGameState]);
 
   useEffect(() => {
     if (initAttempted.current) return;
@@ -67,12 +108,18 @@ const useSocketConnection = () => {
           setIsConnected(gameSocket.connected);
           setError(null);
           
-          // Set up event listeners for connection status
+          // 🚀 ENHANCED: Connection handlers with game state management
           const handleConnect = () => {
             console.log('✅ Dashboard: Socket connected');
             setIsConnected(true);
             setError(null);
             setConnectionAttempts(0);
+            
+            // 🚀 NEW: Signal that dashboard is active
+            sharedSocket.emit('pageActive', { 
+              page: 'dashboard',
+              timestamp: Date.now()
+            });
           };
 
           const handleDisconnect = () => {
@@ -115,7 +162,12 @@ const useSocketConnection = () => {
     };
 
     initSocket();
-  }, []);
+
+    // 🚀 NEW: Cleanup on unmount
+    return () => {
+      cleanupGameState();
+    };
+  }, [cleanupGameState]);
 
   // Monitor shared socket connection status
   useEffect(() => {
@@ -130,7 +182,13 @@ const useSocketConnection = () => {
     return () => clearInterval(interval);
   }, [isConnected]);
 
-  return { socket, isConnected, connectionAttempts, error };
+  return { 
+    socket, 
+    isConnected, 
+    connectionAttempts, 
+    error, 
+    cleanupGameState 
+  };
 };
 
 interface PlayerBet {
@@ -141,7 +199,7 @@ interface PlayerBet {
   status: string;
 }
 
-// 🚀 SIMPLIFIED: Custodial balance hook with shared socket
+// 🚀 ENHANCED: Custodial balance hook with game state coordination
 const useCustodialBalance = (userId: string) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -242,11 +300,11 @@ const useCustodialBalance = (userId: string) => {
     }
   }, [userId, updateCustodialBalance, loading]);
    
-  // 🚀 SIMPLIFIED: Real-time socket listeners with shared socket
+  // 🚀 ENHANCED: Real-time socket listeners with game state coordination
   useEffect(() => {
     if (!userId || !isConnected || socketListenersRef.current) return;
     
-    console.log(`🔌 Dashboard: Setting up REAL-TIME custodial balance listeners for user: ${userId}`);
+    console.log(`🔌 Dashboard: Setting up COORDINATED custodial balance listeners for user: ${userId}`);
     socketListenersRef.current = true;
     
     const handleCustodialBalanceUpdate = (data: any) => {
@@ -300,16 +358,24 @@ const useCustodialBalance = (userId: string) => {
       }
     };
 
+    // 🚀 NEW: Ignore multiplier updates to prevent conflicts
+    const handleMultiplierUpdate = (data: any) => {
+      // Don't process multiplier updates on dashboard page
+      console.log('🎮 Dashboard: Ignoring multiplier update to prevent conflicts');
+    };
+
     // Use shared socket to listen for events
     sharedSocket.on('custodialBalanceUpdate', handleCustodialBalanceUpdate);
     sharedSocket.on('userBalanceUpdate', handleUserBalanceUpdate);
     sharedSocket.on('depositConfirmed', handleDepositConfirmation);
+    sharedSocket.on('multiplierUpdate', handleMultiplierUpdate); // Ignore to prevent conflicts
     
     return () => {
-      console.log(`🔌 Dashboard: Cleaning up REAL-TIME custodial balance listeners for user: ${userId}`);
+      console.log(`🔌 Dashboard: Cleaning up COORDINATED custodial balance listeners for user: ${userId}`);
       sharedSocket.off('custodialBalanceUpdate', handleCustodialBalanceUpdate);
       sharedSocket.off('userBalanceUpdate', handleUserBalanceUpdate);
       sharedSocket.off('depositConfirmed', handleDepositConfirmation);
+      sharedSocket.off('multiplierUpdate', handleMultiplierUpdate);
       socketListenersRef.current = false;
       
       if (debounceTimeoutRef.current) {
@@ -332,6 +398,7 @@ const Dashboard: FC = () => {
   // Privy hooks
   const { wallets } = useSolanaWallets();
   const { authenticated, ready, user } = usePrivy();
+  const router = useRouter();
   
   // User context
   const { currentUser, experience, userLevel, crates } = useContext(UserContext);
@@ -348,8 +415,15 @@ const Dashboard: FC = () => {
   // Validate wallet address
   const isValidWallet = isConnected && isValidSolanaAddress(walletAddress);
 
-  // 🚀 SIMPLIFIED: Use socket connection hook and custodial balance hook
-  const { socket: gameSocket, isConnected: socketConnected, connectionAttempts, error: socketError } = useSocketConnection();
+  // 🚀 ENHANCED: Use socket connection hook and custodial balance hook with coordination
+  const { 
+    socket: gameSocket, 
+    isConnected: socketConnected, 
+    connectionAttempts, 
+    error: socketError,
+    cleanupGameState
+  } = useSocketConnection();
+  
   const { 
     custodialBalance, 
     loading: custodialBalanceLoading, 
@@ -393,7 +467,7 @@ const Dashboard: FC = () => {
   const [statsLastUpdated, setStatsLastUpdated] = useState<number>(0);
   const [isStatsUpdating, setIsStatsUpdating] = useState<boolean>(false);
   
-  // 🚀 SIMPLIFIED: Real-time connection status tracking
+  // Real-time connection status tracking
   const [realTimeStatus, setRealTimeStatus] = useState({
     connected: false,
     lastHeartbeat: 0,
@@ -414,7 +488,53 @@ const Dashboard: FC = () => {
     lastUserId: ''
   });
 
-  // 🚀 SIMPLIFIED: Update real-time status based on socket connection
+  const cleanupExecutedRef = useRef(false);
+
+  // 🚀 NEW: Page visibility and navigation cleanup
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        console.log('🔍 Dashboard: Page hidden - preparing for potential navigation');
+        cleanupExecutedRef.current = false;
+      } else {
+        console.log('🔍 Dashboard: Page visible - resuming operations');
+        if (cleanupExecutedRef.current) {
+          // Re-establish game state sync if needed
+          setTimeout(() => {
+            if (sharedSocket.isConnected()) {
+              sharedSocket.emit('requestGameSync', { 
+                source: 'dashboard_resume',
+                timestamp: Date.now()
+              });
+            }
+          }, 1000);
+        }
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      if (!cleanupExecutedRef.current) {
+        console.log('🧹 Dashboard: Page unloading - final cleanup');
+        cleanupGameState();
+        cleanupExecutedRef.current = true;
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      
+      if (!cleanupExecutedRef.current) {
+        cleanupGameState();
+        cleanupExecutedRef.current = true;
+      }
+    };
+  }, [cleanupGameState]);
+
+  // Update real-time status based on socket connection
   useEffect(() => {
     setRealTimeStatus(prev => ({
       ...prev,
@@ -425,7 +545,7 @@ const Dashboard: FC = () => {
     }));
   }, [socketConnected, connectionAttempts, socketError]);
 
-  // 🚀 SIMPLIFIED: User initialization
+  // User initialization
   useEffect(() => {
     if (!authenticated || !walletAddress) {
       return;
@@ -704,11 +824,11 @@ const Dashboard: FC = () => {
     fetchUserStats();
   }, [userId, walletAddress]);
 
-  // 🚀 SIMPLIFIED: Real-time stats updates with shared socket
+  // 🚀 ENHANCED: Real-time stats updates with game state coordination
   useEffect(() => {
     if (!userId || !socketConnected) return;
     
-    console.log(`📊 Dashboard: Setting up ENHANCED LIVE stats listeners for user: ${userId}`);
+    console.log(`📊 Dashboard: Setting up COORDINATED LIVE stats listeners for user: ${userId}`);
     
     let statsRefreshTimeout: NodeJS.Timeout | null = null;
     
@@ -829,20 +949,28 @@ const Dashboard: FC = () => {
       }
     };
 
+    // 🚀 NEW: Ignore multiplier updates to prevent conflicts
+    const handleMultiplierUpdate = (data: any) => {
+      // Don't process multiplier updates on dashboard page
+      console.log('🎮 Dashboard: Ignoring multiplier update to prevent conflicts');
+    };
+
     // Use shared socket for event listeners
     sharedSocket.on('custodialBetPlaced', handleCustodialBetPlaced);
     sharedSocket.on('custodialCashout', handleCustodialCashout);
     sharedSocket.on('gameEnd', handleGameEnd);
     sharedSocket.on('userStatsUpdate', handleUserStatsUpdate);
     sharedSocket.on('betResult', handleBetResult);
+    sharedSocket.on('multiplierUpdate', handleMultiplierUpdate); // Ignore to prevent conflicts
     
     return () => {
-      console.log(`📊 Dashboard: Cleaning up ENHANCED LIVE stats listeners for user: ${userId}`);
+      console.log(`📊 Dashboard: Cleaning up COORDINATED LIVE stats listeners for user: ${userId}`);
       sharedSocket.off('custodialBetPlaced', handleCustodialBetPlaced);
       sharedSocket.off('custodialCashout', handleCustodialCashout);
       sharedSocket.off('gameEnd', handleGameEnd);
       sharedSocket.off('userStatsUpdate', handleUserStatsUpdate);
       sharedSocket.off('betResult', handleBetResult);
+      sharedSocket.off('multiplierUpdate', handleMultiplierUpdate);
       
       if (statsRefreshTimeout) {
         clearTimeout(statsRefreshTimeout);
@@ -1023,12 +1151,12 @@ const Dashboard: FC = () => {
         <div className="scrollable-content-area">
           <div className="scrollable-inner-content">
             <div className="max-w-7xl mx-auto px-4 py-8">
-              {/* 🚀 SIMPLIFIED: Header with real-time status */}
+              {/* 🚀 ENHANCED: Header with real-time status and cleanup indicators */}
               <div className="flex justify-between items-center mb-6">
                 <div className="flex items-center gap-4">
                   <h1 className="text-3xl font-bold text-white">Dashboard</h1>
                   
-                  {/* 🚀 SIMPLIFIED: Real-time status indicator */}
+                  {/* Real-time status indicator */}
                   <div className="flex items-center gap-2">
                     {realTimeStatus.connected ? (
                       <div className="flex items-center text-sm text-green-400">
@@ -1056,7 +1184,7 @@ const Dashboard: FC = () => {
                 
                 {(isValidWallet && userId) && (
                   <div className="flex items-center gap-3">
-                    {/* 🚀 SIMPLIFIED: Real-time toggle indicator */}
+                    {/* Real-time toggle indicator */}
                     {realTimeStatus.connected && (
                       <div className="flex items-center text-xs text-green-400 bg-green-900/20 px-2 py-1 rounded border border-green-700/30">
                         <Zap size={12} className="mr-1" />
@@ -1149,7 +1277,7 @@ const Dashboard: FC = () => {
                 </div>
               )}
 
-              {/* 🚀 SIMPLIFIED: Wallet Status with connection indicators */}
+              {/* 🚀 ENHANCED: Wallet Status with connection indicators */}
               <div className="bg-gray-900 rounded-lg p-6 mb-8">
                 <h2 className="text-xl font-bold text-white mb-4 flex items-center">
                   <Wallet size={20} className="mr-2" />
@@ -1268,7 +1396,7 @@ const Dashboard: FC = () => {
                 />
               )}
 
-              {/* 🚀 SIMPLIFIED: Game Statistics with improved real-time indicators */}
+              {/* 🚀 ENHANCED: Game Statistics with improved real-time indicators */}
               {isValidWallet && (
                 <div className="bg-gray-900 rounded-lg p-6 mb-8">
                   <div className="flex justify-between items-center mb-4">

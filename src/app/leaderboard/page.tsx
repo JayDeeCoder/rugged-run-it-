@@ -1,15 +1,16 @@
-// src/app/leaderboard/page.tsx - FIXED with Shared Socket Service
+// src/app/leaderboard/page.tsx - FIXED with Game State Coordination
 'use client';
 
 import { FC, useState, useEffect, useRef, useCallback } from 'react';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
+import { useRouter } from 'next/navigation';
 import Layout from '../../components/layout/Layout';
 import Leaderboard from '../../components/leaderboard/Leaderboard';
 import { useUser } from '../../context/UserContext';
 import { Trophy, RefreshCw, TrendingUp, Users, Award, Crown, Medal, Target, Star, Zap, Wifi, WifiOff, AlertCircle } from 'lucide-react';
 import { LeaderboardAPI, LeaderboardEntry, UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
-import { sharedSocket } from '../../services/sharedSocket'; // 🚀 Use shared socket service
+import { sharedSocket } from '../../services/sharedSocket';
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'all_time';
 
@@ -21,13 +22,58 @@ interface LeaderboardStats {
   topPlayerProfit: number;
 }
 
-// 🚀 SIMPLIFIED: Socket connection hook using shared service
+// 🚀 ENHANCED: Socket connection with game state coordination
 const useSocketConnection = () => {
   const [socket, setSocket] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const initAttempted = useRef(false);
+  const router = useRouter();
+
+  // 🚀 NEW: Game state cleanup function
+  const cleanupGameState = useCallback(() => {
+    console.log('🧹 Leaderboard: Cleaning up game state before navigation...');
+    
+    // Clear any game-specific state in shared socket
+    if (sharedSocket.isConnected()) {
+      // Emit cleanup signal to server
+      sharedSocket.emit('cleanupGameState', { 
+        source: 'leaderboard',
+        timestamp: Date.now()
+      });
+      
+      // Clear local game state tracking
+      if ((window as any).gameStateRef) {
+        (window as any).gameStateRef.current = null;
+      }
+      
+      // Stop listening to game-specific events temporarily
+      sharedSocket.off('multiplierUpdate');
+      sharedSocket.off('gameState');
+      sharedSocket.off('gameStarted');
+      sharedSocket.off('gameCrashed');
+    }
+  }, []);
+
+  // 🚀 NEW: Cleanup on page navigation
+  useEffect(() => {
+    const handleRouteChange = () => {
+      cleanupGameState();
+    };
+
+    // Listen for route changes
+    const handleBeforeUnload = () => {
+      cleanupGameState();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      cleanupGameState();
+    };
+  }, [cleanupGameState]);
 
   useEffect(() => {
     if (initAttempted.current) return;
@@ -45,12 +91,18 @@ const useSocketConnection = () => {
           setIsConnected(gameSocket.connected);
           setError(null);
           
-          // Set up event listeners for connection status
+          // 🚀 ENHANCED: Connection handlers with game state management
           const handleConnect = () => {
             console.log('✅ Leaderboard: Socket connected');
             setIsConnected(true);
             setError(null);
             setConnectionAttempts(0);
+            
+            // 🚀 NEW: Signal that leaderboard is active
+            sharedSocket.emit('pageActive', { 
+              page: 'leaderboard',
+              timestamp: Date.now()
+            });
           };
 
           const handleDisconnect = () => {
@@ -93,7 +145,12 @@ const useSocketConnection = () => {
     };
 
     initSocket();
-  }, []);
+
+    // 🚀 NEW: Cleanup on unmount
+    return () => {
+      cleanupGameState();
+    };
+  }, [cleanupGameState]);
 
   // Monitor shared socket connection status
   useEffect(() => {
@@ -108,7 +165,13 @@ const useSocketConnection = () => {
     return () => clearInterval(interval);
   }, [isConnected]);
 
-  return { socket, isConnected, connectionAttempts, error };
+  return { 
+    socket, 
+    isConnected, 
+    connectionAttempts, 
+    error, 
+    cleanupGameState 
+  };
 };
 
 const LeaderboardPage: FC = () => {
@@ -116,9 +179,16 @@ const LeaderboardPage: FC = () => {
   const { authenticated } = usePrivy();
   const { wallets } = useSolanaWallets();
   const { isAuthenticated } = useUser();
+  const router = useRouter();
   
-  // 🚀 SIMPLIFIED: Use socket connection hook
-  const { socket: gameSocket, isConnected: socketConnected, connectionAttempts, error: socketError } = useSocketConnection();
+  // 🚀 ENHANCED: Use socket connection hook with cleanup
+  const { 
+    socket: gameSocket, 
+    isConnected: socketConnected, 
+    connectionAttempts, 
+    error: socketError,
+    cleanupGameState
+  } = useSocketConnection();
   
   // State
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
@@ -137,7 +207,7 @@ const LeaderboardPage: FC = () => {
   const [currentUserData, setCurrentUserData] = useState<LeaderboardEntry | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
-  // 🚀 SIMPLIFIED: Real-time state with proper socket connection
+  // Real-time state
   const [isRealTimeConnected, setIsRealTimeConnected] = useState(false);
   const [lastRealTimeUpdate, setLastRealTimeUpdate] = useState<number>(0);
   const [pendingUpdates, setPendingUpdates] = useState<number>(0);
@@ -147,15 +217,60 @@ const LeaderboardPage: FC = () => {
   const realTimeUpdateRef = useRef<NodeJS.Timeout | null>(null);
   const socketListenersSetup = useRef(false);
   const lastPeriodRef = useRef<Period>(period);
+  const cleanupExecutedRef = useRef(false);
 
   // Get current user's wallet
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   const currentUserWallet = embeddedWallet?.address || '';
 
-  // 🚀 SIMPLIFIED: Update real-time connection status based on socket
+  // Update real-time connection status
   useEffect(() => {
     setIsRealTimeConnected(socketConnected);
   }, [socketConnected]);
+
+  // 🚀 NEW: Page visibility and navigation cleanup
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        console.log('🔍 Leaderboard: Page hidden - preparing for potential navigation');
+        cleanupExecutedRef.current = false;
+      } else {
+        console.log('🔍 Leaderboard: Page visible - resuming operations');
+        if (cleanupExecutedRef.current) {
+          // Re-establish game state sync if needed
+          setTimeout(() => {
+            if (sharedSocket.isConnected()) {
+              sharedSocket.emit('requestGameSync', { 
+                source: 'leaderboard_resume',
+                timestamp: Date.now()
+              });
+            }
+          }, 1000);
+        }
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      if (!cleanupExecutedRef.current) {
+        console.log('🧹 Leaderboard: Page unloading - final cleanup');
+        cleanupGameState();
+        cleanupExecutedRef.current = true;
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      
+      if (!cleanupExecutedRef.current) {
+        cleanupGameState();
+        cleanupExecutedRef.current = true;
+      }
+    };
+  }, [cleanupGameState]);
 
   // User initialization
   useEffect(() => {
@@ -224,11 +339,9 @@ const LeaderboardPage: FC = () => {
       console.log('🔄 Leaderboard REAL-TIME: Refreshing leaderboard data...');
       
       try {
-        // Don't show loading state for real-time updates
         const data = await LeaderboardAPI.getLeaderboard(period);
         
         setLeaderboardData(prevData => {
-          // Only update if data actually changed
           if (JSON.stringify(prevData) !== JSON.stringify(data)) {
             console.log(`✅ Leaderboard REAL-TIME: Updated with ${data.length} entries`);
             setLastRealTimeUpdate(Date.now());
@@ -278,40 +391,54 @@ const LeaderboardPage: FC = () => {
       } finally {
         setPendingUpdates(prev => Math.max(0, prev - 1));
       }
-    }, 3000); // 3 second debounce for real-time updates
+    }, 3000);
   }, [period, isAuthenticated, currentUserWallet, userId, autoRefreshEnabled]);
 
-  // 🚀 SIMPLIFIED: Real-time socket listeners setup with shared socket
+  // 🚀 ENHANCED: Socket listeners with better game state coordination
   useEffect(() => {
     if (!socketConnected || socketListenersSetup.current) return;
 
-    console.log('🔌 Leaderboard: Setting up REAL-TIME socket listeners...');
+    console.log('🔌 Leaderboard: Setting up COORDINATED socket listeners...');
     socketListenersSetup.current = true;
 
-    // Game event listeners that should trigger leaderboard updates
+    // 🚀 NEW: Ignore game-specific events that might cause conflicts
+    const handleGameSpecificEvent = (eventName: string, data: any) => {
+      console.log(`🎮 Leaderboard: Received ${eventName} - triggering leaderboard refresh only`);
+      debouncedLeaderboardRefresh();
+      
+      // Don't process game state directly to avoid conflicts with main component
+    };
+
     const handleGameEnd = (data: any) => {
-      console.log('🎮 Leaderboard REAL-TIME: Game ended - triggering leaderboard refresh');
+      console.log('🎮 Leaderboard: Game ended - triggering leaderboard refresh');
       debouncedLeaderboardRefresh();
     };
 
     const handleCustodialCashout = (data: any) => {
-      console.log('💸 Leaderboard REAL-TIME: Cashout processed - triggering leaderboard refresh');
+      console.log('💸 Leaderboard: Cashout processed - triggering leaderboard refresh');
       debouncedLeaderboardRefresh();
     };
 
     const handleUserStatsUpdate = (data: any) => {
-      console.log('📊 Leaderboard REAL-TIME: User stats updated - triggering leaderboard refresh');
+      console.log('📊 Leaderboard: User stats updated - triggering leaderboard refresh');
       debouncedLeaderboardRefresh();
     };
 
     const handleBetResult = (data: any) => {
-      console.log('🎲 Leaderboard REAL-TIME: Bet resolved - triggering leaderboard refresh');
+      console.log('🎲 Leaderboard: Bet resolved - triggering leaderboard refresh');
       debouncedLeaderboardRefresh();
     };
 
     const handleLeaderboardUpdate = (data: any) => {
-      console.log('🏆 Leaderboard REAL-TIME: Direct leaderboard update received');
+      console.log('🏆 Leaderboard: Direct leaderboard update received');
       debouncedLeaderboardRefresh();
+    };
+
+    // 🚀 NEW: Ignore multiplier updates to prevent conflicts
+    const handleMultiplierUpdate = (data: any) => {
+      // Don't process multiplier updates on leaderboard page
+      // This prevents the "different game" warning when returning to main component
+      console.log('🎮 Leaderboard: Ignoring multiplier update to prevent conflicts');
     };
 
     // Set up listeners using shared socket
@@ -320,14 +447,16 @@ const LeaderboardPage: FC = () => {
     sharedSocket.on('userStatsUpdate', handleUserStatsUpdate);
     sharedSocket.on('betResult', handleBetResult);
     sharedSocket.on('leaderboardUpdate', handleLeaderboardUpdate);
+    sharedSocket.on('multiplierUpdate', handleMultiplierUpdate); // Ignore to prevent conflicts
 
     return () => {
-      console.log('🔌 Leaderboard: Cleaning up REAL-TIME socket listeners');
+      console.log('🔌 Leaderboard: Cleaning up COORDINATED socket listeners');
       sharedSocket.off('gameEnd', handleGameEnd);
       sharedSocket.off('custodialCashout', handleCustodialCashout);
       sharedSocket.off('userStatsUpdate', handleUserStatsUpdate);
       sharedSocket.off('betResult', handleBetResult);
       sharedSocket.off('leaderboardUpdate', handleLeaderboardUpdate);
+      sharedSocket.off('multiplierUpdate', handleMultiplierUpdate);
       
       if (realTimeUpdateRef.current) {
         clearTimeout(realTimeUpdateRef.current);
@@ -490,7 +619,7 @@ const LeaderboardPage: FC = () => {
                     <div className="flex items-center gap-3 mt-1">
                       <p className="text-xs text-gray-500">{getPeriodDescription(period)}</p>
                       
-                      {/* 🚀 SIMPLIFIED: Real-time status indicator */}
+                      {/* Real-time status indicator */}
                       <div className="flex items-center gap-2">
                         {isRealTimeConnected ? (
                           <div className="flex items-center text-xs text-green-400">

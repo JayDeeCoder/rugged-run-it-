@@ -1,4 +1,4 @@
-// src/app/leaderboard/page.tsx - FIXED Socket Connection Version
+// src/app/leaderboard/page.tsx - FIXED with Shared Socket Service
 'use client';
 
 import { FC, useState, useEffect, useRef, useCallback } from 'react';
@@ -6,9 +6,10 @@ import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import Layout from '../../components/layout/Layout';
 import Leaderboard from '../../components/leaderboard/Leaderboard';
 import { useUser } from '../../context/UserContext';
-import { Trophy, RefreshCw, TrendingUp, Users, Award, Crown, Medal, Target, Star, Zap, Wifi, WifiOff } from 'lucide-react';
+import { Trophy, RefreshCw, TrendingUp, Users, Award, Crown, Medal, Target, Star, Zap, Wifi, WifiOff, AlertCircle } from 'lucide-react';
 import { LeaderboardAPI, LeaderboardEntry, UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
+import { sharedSocket } from '../../services/sharedSocket'; // 🚀 Use shared socket service
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'all_time';
 
@@ -20,144 +21,94 @@ interface LeaderboardStats {
   topPlayerProfit: number;
 }
 
-// 🚀 FIXED: Enhanced socket connection hook
+// 🚀 SIMPLIFIED: Socket connection hook using shared service
 const useSocketConnection = () => {
   const [socket, setSocket] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
-  const socketInitRef = useRef(false);
-  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const initAttempted = useRef(false);
 
   useEffect(() => {
-    if (socketInitRef.current) return;
+    if (initAttempted.current) return;
+    initAttempted.current = true;
+
+    console.log('🔌 Leaderboard: Initializing socket connection via shared service...');
     
-    console.log('🔌 Leaderboard: Initializing socket connection...');
-    
-    const initializeSocket = () => {
+    const initSocket = async () => {
       try {
-        // Check if socket already exists on window
-        let gameSocket = (window as any).gameSocket;
-        
-        if (!gameSocket) {
-          console.log('🔌 Leaderboard: No existing socket found, checking for io...');
-          
-          // Check if socket.io is available
-          const io = (window as any).io;
-          if (!io) {
-            console.warn('⚠️ Leaderboard: Socket.io not found on window. Checking if it needs to be loaded...');
-            
-            // Try to load socket.io if not present
-            if (typeof window !== 'undefined' && !document.querySelector('script[src*="socket.io"]')) {
-              console.log('🔌 Leaderboard: Loading socket.io from CDN...');
-              const script = document.createElement('script');
-              script.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js';
-              script.onload = () => {
-                console.log('✅ Leaderboard: Socket.io loaded from CDN');
-                // Retry initialization after loading
-                retryTimeoutRef.current = setTimeout(initializeSocket, 1000);
-              };
-              document.head.appendChild(script);
-            }
-            return;
-          }
-          
-          // Create new socket connection
-          const GAME_SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'ws://localhost:3001';
-          console.log(`🔌 Leaderboard: Creating new socket connection to: ${GAME_SERVER_URL}`);
-          
-          gameSocket = io(GAME_SERVER_URL, {
-            autoConnect: true,
-            reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000,
-            reconnectionDelayMax: 5000,
-            timeout: 20000,
-            transports: ['websocket', 'polling']
-          });
-          
-          // Store socket on window for other components
-          (window as any).gameSocket = gameSocket;
-        }
+        const gameSocket = await sharedSocket.getSocket();
         
         if (gameSocket) {
-          console.log('✅ Leaderboard: Socket object found:', {
-            connected: gameSocket.connected,
-            id: gameSocket.id || 'not-connected',
-            transport: gameSocket.io?.engine?.transport?.name || 'none'
-          });
-          
+          console.log('✅ Leaderboard: Got socket from shared service');
           setSocket(gameSocket);
           setIsConnected(gameSocket.connected);
-          socketInitRef.current = true;
+          setError(null);
           
-          // Connection event handlers
-          gameSocket.on('connect', () => {
-            console.log('🔌 Leaderboard: Socket connected successfully:', gameSocket.id);
+          // Set up event listeners for connection status
+          const handleConnect = () => {
+            console.log('✅ Leaderboard: Socket connected');
             setIsConnected(true);
+            setError(null);
             setConnectionAttempts(0);
-          });
-          
-          gameSocket.on('disconnect', (reason: string) => {
-            console.log('🔌 Leaderboard: Socket disconnected:', reason);
+          };
+
+          const handleDisconnect = () => {
+            console.log('🔌 Leaderboard: Socket disconnected');
             setIsConnected(false);
-          });
-          
-          gameSocket.on('connect_error', (error: any) => {
-            console.error('❌ Leaderboard: Socket connection error:', error);
+          };
+
+          const handleError = (err: any) => {
+            console.error('❌ Leaderboard: Socket error:', err);
+            setError(err.message || 'Connection error');
             setConnectionAttempts(prev => prev + 1);
-            setIsConnected(false);
-          });
-          
-          gameSocket.on('reconnect', (attemptNumber: number) => {
-            console.log('🔌 Leaderboard: Socket reconnected after', attemptNumber, 'attempts');
-            setIsConnected(true);
-            setConnectionAttempts(0);
-          });
-          
-          gameSocket.on('reconnect_error', (error: any) => {
-            console.error('❌ Leaderboard: Socket reconnection error:', error);
-            setConnectionAttempts(prev => prev + 1);
-          });
-          
-          // If socket exists but isn't connected, try to connect
-          if (!gameSocket.connected) {
-            console.log('🔌 Leaderboard: Socket exists but not connected, attempting connection...');
-            gameSocket.connect();
+          };
+
+          // Register listeners
+          sharedSocket.on('connect', handleConnect);
+          sharedSocket.on('disconnect', handleDisconnect);
+          sharedSocket.on('connect_error', handleError);
+
+          // If already connected, update state
+          if (gameSocket.connected) {
+            handleConnect();
           }
+
+          // Cleanup function
+          return () => {
+            sharedSocket.off('connect', handleConnect);
+            sharedSocket.off('disconnect', handleDisconnect);
+            sharedSocket.off('connect_error', handleError);
+          };
+        } else {
+          console.warn('⚠️ Leaderboard: Failed to get socket from shared service');
+          setError('Failed to connect to game server');
+          setConnectionAttempts(prev => prev + 1);
         }
-        
-      } catch (error) {
-        console.error('❌ Leaderboard: Error initializing socket:', error);
+      } catch (err) {
+        console.error('❌ Leaderboard: Error initializing socket:', err);
+        setError(err instanceof Error ? err.message : 'Socket initialization failed');
         setConnectionAttempts(prev => prev + 1);
       }
     };
-    
-    // Try to initialize immediately
-    initializeSocket();
-    
-    // If no socket found, retry after a delay
-    retryTimeoutRef.current = setTimeout(() => {
-      if (!socket && !socketInitRef.current) {
-        console.log('🔌 Leaderboard: Retrying socket initialization...');
-        initializeSocket();
-      }
-    }, 2000);
-    
-    return () => {
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
-      }
-      if (socket) {
-        socket.off('connect');
-        socket.off('disconnect');
-        socket.off('connect_error');
-        socket.off('reconnect');
-        socket.off('reconnect_error');
-      }
-    };
+
+    initSocket();
   }, []);
 
-  return { socket, isConnected, connectionAttempts };
+  // Monitor shared socket connection status
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const connected = sharedSocket.isConnected();
+      if (connected !== isConnected) {
+        setIsConnected(connected);
+        console.log(`🔌 Leaderboard: Connection status changed: ${connected}`);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [isConnected]);
+
+  return { socket, isConnected, connectionAttempts, error };
 };
 
 const LeaderboardPage: FC = () => {
@@ -166,8 +117,8 @@ const LeaderboardPage: FC = () => {
   const { wallets } = useSolanaWallets();
   const { isAuthenticated } = useUser();
   
-  // 🚀 FIXED: Use socket connection hook
-  const { socket: gameSocket, isConnected: socketConnected, connectionAttempts } = useSocketConnection();
+  // 🚀 SIMPLIFIED: Use socket connection hook
+  const { socket: gameSocket, isConnected: socketConnected, connectionAttempts, error: socketError } = useSocketConnection();
   
   // State
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
@@ -186,7 +137,7 @@ const LeaderboardPage: FC = () => {
   const [currentUserData, setCurrentUserData] = useState<LeaderboardEntry | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
-  // 🚀 FIXED: Real-time state with proper socket connection
+  // 🚀 SIMPLIFIED: Real-time state with proper socket connection
   const [isRealTimeConnected, setIsRealTimeConnected] = useState(false);
   const [lastRealTimeUpdate, setLastRealTimeUpdate] = useState<number>(0);
   const [pendingUpdates, setPendingUpdates] = useState<number>(0);
@@ -201,7 +152,7 @@ const LeaderboardPage: FC = () => {
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   const currentUserWallet = embeddedWallet?.address || '';
 
-  // 🚀 FIXED: Update real-time connection status based on socket
+  // 🚀 SIMPLIFIED: Update real-time connection status based on socket
   useEffect(() => {
     setIsRealTimeConnected(socketConnected);
   }, [socketConnected]);
@@ -330,9 +281,9 @@ const LeaderboardPage: FC = () => {
     }, 3000); // 3 second debounce for real-time updates
   }, [period, isAuthenticated, currentUserWallet, userId, autoRefreshEnabled]);
 
-  // 🚀 FIXED: Real-time socket listeners setup with proper socket handling
+  // 🚀 SIMPLIFIED: Real-time socket listeners setup with shared socket
   useEffect(() => {
-    if (!gameSocket || socketListenersSetup.current) return;
+    if (!socketConnected || socketListenersSetup.current) return;
 
     console.log('🔌 Leaderboard: Setting up REAL-TIME socket listeners...');
     socketListenersSetup.current = true;
@@ -363,20 +314,20 @@ const LeaderboardPage: FC = () => {
       debouncedLeaderboardRefresh();
     };
 
-    // Set up listeners
-    gameSocket.on('gameEnd', handleGameEnd);
-    gameSocket.on('custodialCashout', handleCustodialCashout);
-    gameSocket.on('userStatsUpdate', handleUserStatsUpdate);
-    gameSocket.on('betResult', handleBetResult);
-    gameSocket.on('leaderboardUpdate', handleLeaderboardUpdate);
+    // Set up listeners using shared socket
+    sharedSocket.on('gameEnd', handleGameEnd);
+    sharedSocket.on('custodialCashout', handleCustodialCashout);
+    sharedSocket.on('userStatsUpdate', handleUserStatsUpdate);
+    sharedSocket.on('betResult', handleBetResult);
+    sharedSocket.on('leaderboardUpdate', handleLeaderboardUpdate);
 
     return () => {
       console.log('🔌 Leaderboard: Cleaning up REAL-TIME socket listeners');
-      gameSocket.off('gameEnd', handleGameEnd);
-      gameSocket.off('custodialCashout', handleCustodialCashout);
-      gameSocket.off('userStatsUpdate', handleUserStatsUpdate);
-      gameSocket.off('betResult', handleBetResult);
-      gameSocket.off('leaderboardUpdate', handleLeaderboardUpdate);
+      sharedSocket.off('gameEnd', handleGameEnd);
+      sharedSocket.off('custodialCashout', handleCustodialCashout);
+      sharedSocket.off('userStatsUpdate', handleUserStatsUpdate);
+      sharedSocket.off('betResult', handleBetResult);
+      sharedSocket.off('leaderboardUpdate', handleLeaderboardUpdate);
       
       if (realTimeUpdateRef.current) {
         clearTimeout(realTimeUpdateRef.current);
@@ -384,7 +335,7 @@ const LeaderboardPage: FC = () => {
       
       socketListenersSetup.current = false;
     };
-  }, [gameSocket, debouncedLeaderboardRefresh]);
+  }, [socketConnected, debouncedLeaderboardRefresh]);
 
   // Fetch leaderboard data
   const fetchLeaderboardData = async (showRefreshing = false) => {
@@ -539,7 +490,7 @@ const LeaderboardPage: FC = () => {
                     <div className="flex items-center gap-3 mt-1">
                       <p className="text-xs text-gray-500">{getPeriodDescription(period)}</p>
                       
-                      {/* 🚀 FIXED: Real-time status indicator */}
+                      {/* 🚀 SIMPLIFIED: Real-time status indicator */}
                       <div className="flex items-center gap-2">
                         {isRealTimeConnected ? (
                           <div className="flex items-center text-xs text-green-400">
@@ -558,6 +509,12 @@ const LeaderboardPage: FC = () => {
                             {connectionAttempts > 0 && (
                               <span className="ml-1">({connectionAttempts})</span>
                             )}
+                          </div>
+                        )}
+                        
+                        {socketError && (
+                          <div className="text-xs text-yellow-400 ml-2" title={socketError}>
+                            <AlertCircle size={12} />
                           </div>
                         )}
                         

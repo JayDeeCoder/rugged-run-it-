@@ -1,4 +1,4 @@
-// src/app/page.tsx - Updated with real ChatBox integration and proper scrolling
+// src/app/page.tsx - Fixed with proper LeaderboardContainer props
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -17,7 +17,7 @@ export default function Home() {
   const [isLeaderboardVisible, setIsLeaderboardVisible] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   
-  const { authenticated, login } = usePrivy();
+  const { authenticated, login, user } = usePrivy();
   const { width, height } = useWindowSize();
   
   // Enhanced screen size detection with iPad support
@@ -58,6 +58,9 @@ export default function Home() {
   const handleLoginClick = () => {
     login();
   };
+
+  // Get current user ID for leaderboard positioning
+  const currentUserId = user?.id || user?.wallet?.address || undefined;
 
   // Show loading state while hydrating
   if (!isMounted) {
@@ -177,11 +180,10 @@ export default function Home() {
               }
             `}>
               <div className="w-full max-w-6xl mx-auto">
+                {/* 🚀 FIXED: Use only supported props */}
                 <LeaderboardContainer 
                   period="daily"
-                  limit={isTablet ? 15 : isMobile ? 10 : 20}
-                  showHeader={true}
-                  showRefresh={!isMobile}
+                  currentUserId={currentUserId}
                 />
               </div>
             </div>

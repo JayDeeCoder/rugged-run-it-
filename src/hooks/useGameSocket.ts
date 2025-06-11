@@ -1,9 +1,8 @@
-// src/hooks/useGameSocket.ts
-// 🚀 Improved useGameSocket hook with proper event management and cleanup + TIMING FIXES
+// Enhanced useGameSocket hook with FIXED CONNECTION LOGIC + REAL-TIME liquidity updates
+// 🚀 FIXED: Incorporates the connection improvements from dashboard/leaderboard
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Socket } from 'socket.io-client';
-import { sharedSocket } from '../services/sharedSocket';
+import { io, Socket } from 'socket.io-client';
 
 // Enhanced GameState interface with liquidity tracking
 interface GameState {
@@ -22,6 +21,7 @@ interface GameState {
   canBet?: boolean;
   preGameBets?: number;
   preGamePlayers?: number;
+  // 🚀 NEW: Detailed liquidity tracking
   liquidityBreakdown?: {
     realBets: number;
     artificialLiquidity: number;
@@ -63,6 +63,113 @@ interface UserInitResult {
   embeddedBalance?: number;
 }
 
+// 🚀 FIXED: Enhanced socket initialization with better connection handling
+const initializeGameSocket = async (): Promise<Socket | null> => {
+  return new Promise((resolve) => {
+    try {
+      // Check if socket already exists on window
+      let gameSocket = (window as any).gameSocket;
+      
+      if (gameSocket && gameSocket.connected) {
+        console.log('✅ Game Socket: Using existing connected socket');
+        resolve(gameSocket);
+        return;
+      }
+      
+      if (gameSocket && !gameSocket.connected) {
+        console.log('🔌 Game Socket: Existing socket found but disconnected, reconnecting...');
+        gameSocket.connect();
+        
+        gameSocket.once('connect', () => {
+          console.log('✅ Game Socket: Reconnected successfully');
+          resolve(gameSocket);
+        });
+        
+        setTimeout(() => {
+          console.warn('⚠️ Game Socket: Reconnect timeout, creating new socket');
+          gameSocket = null;
+          initializeNewSocket();
+        }, 5000);
+        
+        return;
+      }
+      
+      // No existing socket, create new one
+      initializeNewSocket();
+      
+      function initializeNewSocket() {
+        // Check if socket.io is available
+        const io = (window as any).io;
+        if (!io) {
+          console.warn('⚠️ Game Socket: Socket.io not found, loading from CDN...');
+          
+          // Load socket.io if not present
+          if (typeof window !== 'undefined' && !document.querySelector('script[src*="socket.io"]')) {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js';
+            script.onload = () => {
+              console.log('✅ Game Socket: Socket.io loaded from CDN');
+              // Retry after loading
+              setTimeout(() => initializeNewSocket(), 1000);
+            };
+            script.onerror = () => {
+              console.error('❌ Game Socket: Failed to load socket.io from CDN');
+              resolve(null);
+            };
+            document.head.appendChild(script);
+          }
+          return;
+        }
+        
+        // Create new socket connection
+        const serverUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'wss://irugged-run.ngrok.app';
+        
+        console.log('🔌 Game Socket: Creating new connection to:', serverUrl);
+        
+        gameSocket = io(serverUrl, {
+          transports: ['websocket', 'polling'],
+          timeout: 20000,
+          reconnection: true,
+          reconnectionAttempts: 5,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 5000,
+          forceNew: true,
+          upgrade: true,
+          rememberUpgrade: false,
+        });
+
+        // Store socket globally for other components
+        (window as any).gameSocket = gameSocket;
+        (window as any).socket = gameSocket;
+
+        // Connection handlers
+        gameSocket.on('connect', () => {
+          console.log('✅ Game Socket: Connected successfully');
+          console.log('  - Transport:', gameSocket.io.engine.transport.name);
+          console.log('  - Socket ID:', gameSocket.id);
+          resolve(gameSocket);
+        });
+
+        gameSocket.on('connect_error', (error: any) => {
+          console.error('❌ Game Socket: Connection error:', error);
+          resolve(null);
+        });
+
+        // Timeout fallback
+        setTimeout(() => {
+          if (!gameSocket.connected) {
+            console.error('❌ Game Socket: Connection timeout');
+            resolve(null);
+          }
+        }, 10000);
+      }
+    } catch (error) {
+      console.error('❌ Game Socket: Initialization error:', error);
+      resolve(null);
+    }
+  });
+};
+
 export function useGameSocket(walletAddress: string, userId?: string) {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -78,21 +185,12 @@ export function useGameSocket(walletAddress: string, userId?: string) {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
   
-  // 🚀 NEW: State to track initialization and pending updates
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [pendingUpdates, setPendingUpdates] = useState<any[]>([]);
-  const initializationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
   // Sync state
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
   const gameStateRef = useRef<GameState | null>(null);
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<number>(0);
   const socketInitRef = useRef(false);
-
-  // 🚀 Track subscriptions for cleanup
-  const subscriptionsRef = useRef<string[]>([]);
-  const componentName = `GameSocket-${walletAddress || 'anonymous'}`;
 
   // Calculate server time offset for synchronization
   const syncServerTime = useCallback((serverTime: number) => {
@@ -116,7 +214,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     setCanBet(canBetNow);
   }, []);
 
-  // Helper function to safely update game state with liquidity data
+  // 🚀 NEW: Helper function to safely update game state with liquidity data
   const updateGameWithLiquidityData = useCallback((
     baseGame: GameState, 
     updateData: any, 
@@ -132,6 +230,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
       serverTime: updateData.serverTime || baseGame.serverTime,
       countdown: updateData.countdown !== undefined ? updateData.countdown : baseGame.countdown,
       canBet: updateData.canBet !== undefined ? updateData.canBet : baseGame.canBet,
+      
+      // 🚀 NEW: Update detailed liquidity breakdown if available
       liquidityBreakdown: updateData.liquidityBreakdown || baseGame.liquidityBreakdown,
       artificialPlayerCount: updateData.artificialPlayerCount !== undefined ? updateData.artificialPlayerCount : baseGame.artificialPlayerCount
     };
@@ -139,27 +239,25 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     return updatedGame;
   }, []);
 
-  // 🚀 IMPROVED: Helper function to add subscription with tracking
-  const addSubscription = useCallback((event: string, handler: (...args: any[]) => void): void => {
-    const subscriptionId = sharedSocket.subscribe(event, handler, componentName);
-    subscriptionsRef.current.push(subscriptionId);
-    console.log(`🎮 GameSocket: Added subscription ${subscriptionId} for ${event}`);
-  }, [componentName]);
-
-  // 🚀 IMPROVED: Socket initialization with proper subscription management
+  // 🚀 FIXED: Enhanced connection with improved initialization
   useEffect(() => {
     if (socketInitRef.current) return;
     
-    console.log(`🔍 GameSocket: Initializing for ${componentName}...`);
+    console.log('🔍 Game Socket: Environment check:');
+    console.log('  - NODE_ENV:', process.env.NODE_ENV);
+    console.log('  - NEXT_PUBLIC_GAME_SERVER_URL:', process.env.NEXT_PUBLIC_GAME_SERVER_URL);
+    console.log('  - Wallet Address:', walletAddress);
+    
     socketInitRef.current = true;
+    setConnectionAttempts(prev => prev + 1);
+    setConnectionError(null);
     
     const initConnection = async () => {
       try {
-        // Get shared socket instance
-        const gameSocket = await sharedSocket.getSocket();
+        const gameSocket = await initializeGameSocket();
         
         if (!gameSocket) {
-          setConnectionError('Failed to get shared socket connection');
+          setConnectionError('Failed to initialize socket connection');
           setIsConnected(false);
           socketInitRef.current = false;
           return;
@@ -170,40 +268,50 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         setConnectionError(null);
         setConnectionAttempts(0);
 
-        // 🚀 IMPROVED: Enhanced connection handler with immediate sync request
-        const handleConnect = () => {
-          console.log(`✅ GameSocket: Connected via shared service (${componentName})`);
+        // Enhanced connection handlers
+        gameSocket.on('connect', () => {
+          console.log('✅ Game Socket: Connected to enhanced game server');
+          console.log('  - Transport:', gameSocket.io.engine.transport.name);
+          console.log('  - Socket ID:', gameSocket.id);
           setIsConnected(true);
           setConnectionError(null);
           setConnectionAttempts(0);
+          gameSocket.emit('requestGameSync');
           
-          // 🚀 IMMEDIATE: Request game sync as soon as we connect
-          console.log(`🔄 GameSocket: Requesting immediate game sync on connect (${componentName})`);
-          sharedSocket.emit('requestGameSync');
-          
-          // Auto-initialize user if available
+          // 🚀 NEW: Auto-initialize user if available
           if (userId && walletAddress) {
-            console.log(`🔧 GameSocket: Auto-initializing user on connect... (${componentName})`);
-            sharedSocket.emit('initializeUser', { 
+            console.log('🔧 Game Socket: Auto-initializing user on connect...');
+            gameSocket.emit('initializeUser', { 
               userId, 
               walletAddress,
               autoInit: true,
               timestamp: Date.now()
             });
           }
-          
-          // 🚀 BACKUP: Request sync again after a short delay if not initialized
-          setTimeout(() => {
-            if (!isInitialized && sharedSocket.isConnected()) {
-              console.log(`🔄 GameSocket: Backup game sync request (${componentName})`);
-              sharedSocket.emit('requestGameSync');
-            }
-          }, 3000);
-        };
+        });
 
-        const handleDisconnect = (reason: string, details?: any) => {
-          console.log(`🔌 GameSocket: Disconnected via shared service (${componentName})`);
+        // Enhanced error handling
+        gameSocket.on('connect_error', (error: any) => {
+          console.error('❌ Game Socket: Connection error:', error);
+          setIsConnected(false);
+          setCanBet(false);
+          setConnectionError(`Connection failed: ${error.message}`);
+          
+          setConnectionAttempts(prev => {
+            const newAttempts = prev + 1;
+            if (newAttempts >= 2) {
+              console.log('🔄 Game Socket: Switching to polling transport only...');
+              gameSocket.io.opts.transports = ['polling'];
+            }
+            return newAttempts;
+          });
+        });
+
+        // Better disconnect handling
+        gameSocket.on('disconnect', (reason: string, details?: any) => {
+          console.log('🔌 Game Socket: Disconnected from game server');
           console.log('  - Reason:', reason);
+          console.log('  - Details:', details);
           setIsConnected(false);
           setCanBet(false);
           
@@ -212,35 +320,20 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           } else {
             setConnectionError(`Disconnected: ${reason}`);
           }
-        };
+        });
 
-        const handleError = (error: any) => {
-          console.error(`❌ GameSocket: Connection error via shared service (${componentName}):`, error);
-          setIsConnected(false);
-          setCanBet(false);
-          setConnectionError(`Connection failed: ${error.message}`);
-          setConnectionAttempts(prev => prev + 1);
-        };
+        // Add transport change detection
+        gameSocket.on('upgrade', () => {
+          console.log('📶 Game Socket: Upgraded to websocket transport');
+        });
 
-        // Register connection event handlers with subscription tracking
-        addSubscription('connect', handleConnect);
-        addSubscription('disconnect', handleDisconnect);
-        addSubscription('connect_error', handleError);
+        gameSocket.on('upgradeError', (error: any) => {
+          console.warn('⚠️ Game Socket: Websocket upgrade failed, using polling:', error);
+        });
 
-        // If already connected, trigger connect handler
-        if (gameSocket.connected) {
-          handleConnect();
-        }
-
-        // 🚀 IMPROVED: Enhanced game state handler with pending updates processing
-        const handleGameState = (gameState: any) => {
-          console.log(`📊 GameSocket: Received game state (${componentName}):`, {
-            gameId: gameState.gameId,
-            gameNumber: gameState.gameNumber,
-            status: gameState.status,
-            multiplier: gameState.multiplier,
-            hasPendingUpdates: pendingUpdates.length > 0
-          });
+        // 🚀 ENHANCED: Game state handler with full liquidity support
+        gameSocket.on('gameState', (gameState: any) => {
+          console.log('📊 Game Socket: Received enhanced game state with liquidity:', gameState);
           
           if (gameState.serverTime) {
             syncServerTime(gameState.serverTime);
@@ -262,6 +355,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
             canBet: gameState.canBet,
             preGameBets: gameState.preGameBets,
             preGamePlayers: gameState.preGamePlayers,
+            // 🚀 NEW: Include liquidity breakdown
             liquidityBreakdown: gameState.liquidityBreakdown,
             artificialPlayerCount: gameState.artificialPlayerCount
           };
@@ -272,53 +366,11 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           
           setCurrentGame(newGameState);
           gameStateRef.current = newGameState;
-          setIsInitialized(true);
-          
-          // 🚀 PROCESS: Handle any pending multiplier updates
-          if (pendingUpdates.length > 0) {
-            console.log(`🔄 GameSocket: Processing ${pendingUpdates.length} pending updates (${componentName})`);
-            
-            const relevantUpdates = pendingUpdates.filter(update => 
-              update.gameNumber === newGameState.gameNumber
-            );
-            
-            if (relevantUpdates.length > 0) {
-              // Apply the most recent relevant update
-              const latestUpdate = relevantUpdates[relevantUpdates.length - 1];
-              console.log(`🔄 GameSocket: Applying latest pending update (${componentName}):`, latestUpdate);
-              
-              const updatedGame = updateGameWithLiquidityData(
-                newGameState,
-                {
-                  multiplier: latestUpdate.multiplier,
-                  serverTime: latestUpdate.serverTime,
-                  boostedPlayerCount: latestUpdate.boostedPlayerCount || newGameState.boostedPlayerCount,
-                  boostedTotalBets: latestUpdate.boostedTotalBets || newGameState.boostedTotalBets
-                },
-                'pendingUpdate'
-              );
-              
-              setCurrentGame(updatedGame);
-              gameStateRef.current = updatedGame;
-            }
-            
-            // Clear pending updates
-            setPendingUpdates([]);
-          }
-          
-          // Clear initialization timeout
-          if (initializationTimeoutRef.current) {
-            clearTimeout(initializationTimeoutRef.current);
-            initializationTimeoutRef.current = null;
-          }
-        };
+        });
 
-        // Register all game event handlers with subscription tracking
-        addSubscription('gameState', handleGameState);
-        
-        addSubscription('artificialBoostUpdate', (data: any) => {
+        // 🚀 NEW: Dedicated artificial boost/liquidity update handler
+        gameSocket.on('artificialBoostUpdate', (data: any) => {
           if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
-            console.log(`🎯 GameSocket: Artificial boost update for current game (${componentName})`);
             const updatedGame = updateGameWithLiquidityData(
               gameStateRef.current, 
               {
@@ -335,12 +387,12 @@ export function useGameSocket(walletAddress: string, userId?: string) {
             setCurrentGame(updatedGame);
             gameStateRef.current = updatedGame;
           } else {
-            console.log(`⚠️ GameSocket: Received artificial boost for different game (${componentName})`);
+            console.warn('⚠️ Game Socket: Received artificial boost update for different/no game');
           }
         });
 
-        addSubscription('gameWaiting', (data: any) => {
-          console.log(`⏳ GameSocket: Game waiting event (${componentName})`);
+        // Handle waiting period start
+        gameSocket.on('gameWaiting', (data: any) => {
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
@@ -358,6 +410,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
                 countdown: data.countdown,
                 canBet: data.canBet,
                 serverTime: data.serverTime,
+                // 🚀 NEW: Reset liquidity for waiting period
                 boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
                 boostedTotalBets: data.boostedTotalBets || 0
               },
@@ -369,7 +422,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        addSubscription('countdown', (data: any) => {
+        // 🚀 ENHANCED: Countdown handler with liquidity preservation
+        gameSocket.on('countdown', (data: any) => {
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
@@ -395,8 +449,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        addSubscription('serverSync', (data: any) => {
-          console.log(`🔄 GameSocket: Server sync (${componentName})`);
+        // 🚀 ENHANCED: Server sync with liquidity data
+        gameSocket.on('serverSync', (data: any) => {
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
@@ -429,90 +483,39 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        // 🚀 IMPROVED: Enhanced multiplier update handler with proper timing
-        addSubscription('multiplierUpdate', (data: any) => {
-          console.log(`📊 GameSocket: Received multiplier update (${componentName}):`, {
-            gameNumber: data.gameNumber,
-            multiplier: data.multiplier,
-            hasCurrentGame: !!gameStateRef.current,
-            currentGameNumber: gameStateRef.current?.gameNumber,
-            isInitialized
-          });
-
-          // 🚀 FIX: Handle case where no current game exists yet
-          if (!gameStateRef.current) {
-            console.log(`⚠️ GameSocket: No current game for multiplier update, requesting sync (${componentName})`);
-            
-            // Store the update for later processing
-            setPendingUpdates(prev => [...prev.slice(-4), data]); // Keep last 5 updates
-            
-            // Request game sync to get current state
-            sharedSocket.emit('requestGameSync');
-            
-            // Set a timeout to initialize if sync doesn't come through
-            if (initializationTimeoutRef.current) {
-              clearTimeout(initializationTimeoutRef.current);
+        // 🚀 ENHANCED: Multiplier updates with liquidity tracking
+        gameSocket.on('multiplierUpdate', (data: any) => {
+          if (gameStateRef.current && gameStateRef.current.gameNumber === data.gameNumber) {
+            if (data.serverTime) {
+              syncServerTime(data.serverTime);
             }
             
-            initializationTimeoutRef.current = setTimeout(() => {
-              console.log(`🔄 GameSocket: Sync timeout, requesting again (${componentName})`);
-              sharedSocket.emit('requestGameSync');
-            }, 2000);
+            const updatedGame = updateGameWithLiquidityData(
+              gameStateRef.current,
+              {
+                multiplier: data.multiplier,
+                serverTime: data.serverTime,
+                // 🚀 NEW: Include liquidity updates from multiplier events
+                boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
+                boostedTotalBets: data.boostedTotalBets || gameStateRef.current.boostedTotalBets,
+                liquidityBreakdown: data.liquidityGrowth !== undefined ? {
+                  ...gameStateRef.current.liquidityBreakdown,
+                  liquidityGrowth: parseFloat(data.liquidityGrowth)
+                } : gameStateRef.current.liquidityBreakdown
+              },
+              'multiplierUpdate'
+            );
             
-            return;
-          }
-
-          // 🚀 FIX: Better game number validation
-          if (gameStateRef.current.gameNumber !== data.gameNumber) {
-            const gameDifference = data.gameNumber - gameStateRef.current.gameNumber;
-            
-            if (gameDifference > 0) {
-              // We're behind - request sync
-              console.log(`⚠️ GameSocket: Behind on game number (${componentName}): current=${gameStateRef.current.gameNumber}, received=${data.gameNumber}, requesting sync`);
-              sharedSocket.emit('requestGameSync');
-            } else if (gameDifference < -1) {
-              // We're way ahead - something's wrong, request sync
-              console.log(`⚠️ GameSocket: Game number mismatch (${componentName}): current=${gameStateRef.current.gameNumber}, received=${data.gameNumber}, requesting sync`);
-              sharedSocket.emit('requestGameSync');
-            } else {
-              // We're slightly ahead or this is an old update - ignore it
-              console.log(`🔇 GameSocket: Ignoring old multiplier update (${componentName}): current=${gameStateRef.current.gameNumber}, received=${data.gameNumber}`);
-            }
-            return;
-          }
-          
-          // 🚀 PROCESS: Valid multiplier update
-          if (data.serverTime) {
-            syncServerTime(data.serverTime);
-          }
-          
-          const updatedGame = updateGameWithLiquidityData(
-            gameStateRef.current,
-            {
-              multiplier: data.multiplier,
-              serverTime: data.serverTime,
-              boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
-              boostedTotalBets: data.boostedTotalBets || gameStateRef.current.boostedTotalBets,
-              liquidityBreakdown: data.liquidityGrowth !== undefined ? {
-                ...gameStateRef.current.liquidityBreakdown,
-                liquidityGrowth: parseFloat(data.liquidityGrowth)
-              } : gameStateRef.current.liquidityBreakdown
-            },
-            'multiplierUpdate'
-          );
-          
-          setCurrentGame(updatedGame);
-          gameStateRef.current = updatedGame;
-          
-          // Mark as initialized if this is our first successful update
-          if (!isInitialized) {
-            setIsInitialized(true);
-            console.log(`✅ GameSocket: Initialized via multiplier update (${componentName})`);
+            setCurrentGame(updatedGame);
+            gameStateRef.current = updatedGame;
+          } else {
+            console.warn('⚠️ Game Socket: Received multiplier update for different game, requesting sync...');
+            gameSocket.emit('requestGameSync');
           }
         });
 
-        addSubscription('gameStarted', (data: any) => {
-          console.log(`🎮 GameSocket: Game started (${componentName})`);
+        // 🚀 ENHANCED: Game started with full liquidity initialization
+        gameSocket.on('gameStarted', (data: any) => {
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
@@ -536,6 +539,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
             preGameBets: data.preGameBets,
             preGamePlayers: data.preGamePlayers,
             canBet: true,
+            // 🚀 NEW: Initialize liquidity breakdown
             liquidityBreakdown: data.liquidityBreakdown,
             artificialPlayerCount: data.artificialPlayerCount
           };
@@ -544,8 +548,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           gameStateRef.current = newGameState;
         });
 
-        addSubscription('gameCrashed', (data: any) => {
-          console.log(`💥 GameSocket: Game crashed (${componentName})`);
+        // 🚀 ENHANCED: Game crashed with liquidity cleanup
+        gameSocket.on('gameCrashed', (data: any) => {
           setCountdown(0);
           setIsWaitingPeriod(false);
           setCanBet(false);
@@ -558,6 +562,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
               boostedPlayerCount: gameStateRef.current.boostedPlayerCount,
               boostedTotalBets: gameStateRef.current.boostedTotalBets,
               canBet: false,
+              // 🚀 NEW: Preserve final liquidity state for history
               liquidityBreakdown: gameStateRef.current.liquidityBreakdown
             };
             
@@ -568,8 +573,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        addSubscription('gameSync', (data: any) => {
-          console.log(`🔄 GameSocket: Game sync response (${componentName})`);
+        // Handle game sync responses
+        gameSocket.on('gameSync', (data: any) => {
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
@@ -601,7 +606,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        addSubscription('gameHistory', (history: any[]) => {
+        // 🚀 ENHANCED: Game history with liquidity data
+        gameSocket.on('gameHistory', (history: any[]) => {
           const mappedHistory: GameState[] = history.map(game => ({
             id: game.id || '',
             gameNumber: game.gameNumber || 0,
@@ -620,7 +626,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           setGameHistory(mappedHistory);
         });
 
-        addSubscription('betPlaced', (data: any) => {
+        // 🚀 ENHANCED: Bet placed with instant liquidity updates
+        gameSocket.on('betPlaced', (data: any) => {
           if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
             const updatedGame = updateGameWithLiquidityData(
               gameStateRef.current,
@@ -639,7 +646,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        addSubscription('custodialBetPlaced', (data: any) => {
+        // 🚀 NEW: Handle custodial bet placed with liquidity updates
+        gameSocket.on('custodialBetPlaced', (data: any) => {
           if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
             const updatedGame = updateGameWithLiquidityData(
               gameStateRef.current,
@@ -657,39 +665,37 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        addSubscription('playerCashedOut', (data: any) => {
+        // 🚀 NEW: Handle liquidity updates on player cashouts
+        gameSocket.on('playerCashedOut', (data: any) => {
           if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
-            sharedSocket.emit('requestGameSync');
+            // Liquidity should decrease when players cash out (server handles this)
+            // Just trigger a refresh to get latest boosted values
+            if (gameSocket.connected) {
+              gameSocket.emit('requestGameSync');
+            }
           }
         });
 
-        // Enhanced sync with more frequent liquidity updates
+        // 🚀 ENHANCED: More frequent sync for liquidity updates
         const syncInterval = setInterval(() => {
-          if (sharedSocket.isConnected() && gameStateRef.current) {
-            sharedSocket.emit('requestGameSync');
-          } else if (!sharedSocket.isConnected()) {
-            console.warn(`⚠️ GameSocket: Shared socket disconnected during sync check (${componentName})`);
+          if (gameSocket.connected && gameStateRef.current) {
+            gameSocket.emit('requestGameSync');
+          } else if (!gameSocket.connected) {
+            console.warn('⚠️ Game Socket: Socket disconnected during sync check');
           }
-        }, 15000);
+        }, 15000); // Reduced from 30s to 15s for more frequent liquidity updates
 
-        // 🚀 IMPROVED: Cleanup function with proper subscription management
+        // Cleanup function
         return () => {
-          console.log(`🧹 GameSocket: Cleaning up all subscriptions for ${componentName}`);
-          
           clearInterval(syncInterval);
           if (syncTimeoutRef.current) {
             clearTimeout(syncTimeoutRef.current);
           }
-          
-          // Remove all subscriptions for this component
-          sharedSocket.unsubscribeComponent(componentName);
-          subscriptionsRef.current = [];
-          
-          console.log(`✅ GameSocket: Cleanup completed for ${componentName}`);
+          gameSocket.close();
         };
 
       } catch (error) {
-        console.error(`❌ GameSocket: Setup error with shared service (${componentName}):`, error);
+        console.error('❌ Game Socket: Setup error:', error);
         setConnectionError(`Setup failed: ${error}`);
         setIsConnected(false);
         socketInitRef.current = false;
@@ -697,81 +703,17 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     };
 
     initConnection();
-  }, [walletAddress, userId, componentName, addSubscription, syncServerTime, updateCountdownState, updateGameWithLiquidityData, isInitialized, pendingUpdates]);
+  }, [walletAddress, userId, syncServerTime, updateCountdownState, updateGameWithLiquidityData]);
 
-  // 🚀 IMPROVED: Enhanced initialization effect with retry logic
-  useEffect(() => {
-    // Request initial sync when component mounts (if connected)
-    if (sharedSocket.isConnected() && !isInitialized) {
-      console.log(`🔄 GameSocket: Initial game sync request on mount (${componentName})`);
-      sharedSocket.emit('requestGameSync');
-      
-      // Set up retry mechanism
-      const retryInterval = setInterval(() => {
-        if (!isInitialized && sharedSocket.isConnected()) {
-          console.log(`🔄 GameSocket: Retry game sync request (${componentName})`);
-          sharedSocket.emit('requestGameSync');
-        } else if (isInitialized) {
-          clearInterval(retryInterval);
-        }
-      }, 5000);
-      
-      // Clean up after 30 seconds
-      setTimeout(() => {
-        clearInterval(retryInterval);
-      }, 30000);
-      
-      return () => {
-        clearInterval(retryInterval);
-      };
-    }
-  }, [isInitialized, componentName]);
-
-  // 🚀 DEBUG: Add this to help monitor the issue
-  useEffect(() => {
-    const debugInterval = setInterval(() => {
-      if (!isInitialized && sharedSocket.isConnected()) {
-        console.log(`🔍 GameSocket DEBUG (${componentName}):`, {
-          isConnected: sharedSocket.isConnected(),
-          isInitialized,
-          hasCurrentGame: !!gameStateRef.current,
-          pendingUpdates: pendingUpdates.length,
-          currentGameNumber: gameStateRef.current?.gameNumber
-        });
-      }
-    }, 10000);
-    
-    return () => clearInterval(debugInterval);
-  }, [isInitialized, componentName, pendingUpdates.length]);
-
-  // 🚀 CLEANUP: Enhanced cleanup with pending updates
-  useEffect(() => {
-    return () => {
-      console.log(`🗑️ GameSocket: Component unmounting, cleaning up ${componentName}`);
-      
-      // Clear timeouts
-      if (initializationTimeoutRef.current) {
-        clearTimeout(initializationTimeoutRef.current);
-      }
-      
-      // Clear pending updates
-      setPendingUpdates([]);
-      
-      // Clean up subscriptions
-      sharedSocket.unsubscribeComponent(componentName);
-      subscriptionsRef.current = [];
-    };
-  }, [componentName]);
-
-  // Place bet using shared socket service
+  // Enhanced place bet with pre-game betting support
   const placeBet = useCallback(async (
     walletAddress: string, 
     amount: number, 
     userId?: string
   ): Promise<boolean> => {
     return new Promise((resolve) => {
-      if (!sharedSocket.isConnected() || !currentGame) {
-        console.log('❌ Game Socket: Cannot place bet: no connection or game');
+      if (!socket || !isConnected || !currentGame) {
+        console.log('❌ Game Socket: Cannot place bet: no socket, connection, or game');
         resolve(false);
         return;
       }
@@ -783,31 +725,31 @@ export function useGameSocket(walletAddress: string, userId?: string) {
       }
 
       if (!canBet) {
-        console.log('❌ Game Socket: Cannot place bet: betting not allowed');
+        console.log('❌ Game Socket: Cannot place bet: betting not allowed (too close to game start)');
         resolve(false);
         return;
       }
 
-      console.log('🎯 Game Socket: Placing bet via shared socket:', { walletAddress, amount, userId });
+      console.log('🎯 Game Socket: Placing bet via socket:', { walletAddress, amount, userId });
 
       const timeout = setTimeout(() => {
         console.error('❌ Game Socket: Bet timeout');
         resolve(false);
       }, 30000);
 
-      sharedSocket.emit('placeBet', { 
+      socket.emit('placeBet', { 
         walletAddress, 
         betAmount: amount, 
         userId 
       });
       
-      const handleBetResult = (data: BetResult) => {
+      socket.once('betResult', (data: BetResult) => {
         clearTimeout(timeout);
-        sharedSocket.unsubscribe(betResultSub);
         
         if (data.success) {
           resolve(true);
           
+          // Update local state with enhanced liquidity data
           if (data.gameState && gameStateRef.current) {
             const updatedGame = updateGameWithLiquidityData(
               gameStateRef.current,
@@ -826,65 +768,59 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           console.error('❌ Game Socket: Bet failed:', data.reason);
           resolve(false);
         }
-      };
-      
-      const betResultSub = sharedSocket.subscribe('betResult', handleBetResult, `${componentName}-bet`);
+      });
     });
-  }, [currentGame, canBet, updateGameWithLiquidityData, componentName]);
+  }, [socket, isConnected, currentGame, canBet, updateGameWithLiquidityData]);
 
-  // Cash out using shared socket
+  // Enhanced cash out with detailed result
   const cashOut = useCallback(async (walletAddress: string): Promise<{ success: boolean; payout?: number; reason?: string }> => {
     return new Promise((resolve) => {
-      if (!sharedSocket.isConnected() || !currentGame || currentGame.status !== 'active') {
+      if (!socket || !isConnected || !currentGame || currentGame.status !== 'active') {
         resolve({ success: false, reason: 'Game not active or not connected' });
         return;
       }
 
-      console.log('💸 Game Socket: Cashing out via shared socket:', { walletAddress });
+      console.log('💸 Game Socket: Cashing out via socket:', { walletAddress });
 
       const timeout = setTimeout(() => {
         console.error('❌ Game Socket: Cashout timeout');
         resolve({ success: false, reason: 'Timeout' });
       }, 30000);
 
-      sharedSocket.emit('cashOut', { walletAddress });
+      socket.emit('cashOut', { walletAddress });
       
-      const handleCashoutResult = (data: CashOutResult) => {
+      socket.once('cashOutResult', (data: CashOutResult) => {
         clearTimeout(timeout);
-        sharedSocket.unsubscribe(cashoutSub);
         resolve({
           success: data.success,
           payout: data.payout,
           reason: data.reason
         });
-      };
-      
-      const cashoutSub = sharedSocket.subscribe('cashOutResult', handleCashoutResult, `${componentName}-cashout`);
+      });
     });
-  }, [currentGame, componentName]);
+  }, [socket, isConnected, currentGame]);
 
-  // Custodial betting methods using shared socket
+  // Enhanced custodial betting methods
   const placeCustodialBet = useCallback(async (
     userId: string, 
     betAmount: number
   ): Promise<boolean> => {
     return new Promise((resolve) => {
-      if (!sharedSocket.isConnected()) {
+      if (!socket || !isConnected) {
         console.log('❌ Game Socket: Cannot place custodial bet: not connected');
         resolve(false);
         return;
       }
   
-      console.log('🎯 Game Socket: Placing custodial bet via shared socket:', { userId, betAmount });
+      console.log('🎯 Game Socket: Placing custodial bet:', { userId, betAmount });
   
       const timeout = setTimeout(() => {
         console.error('❌ Game Socket: Custodial bet timeout');
         resolve(false);
       }, 30000);
   
-      const handleCustodialBetResult = (data: any) => {
+      socket.once('custodialBetResult', (data: any) => {
         clearTimeout(timeout);
-        sharedSocket.unsubscribe(custodialBetSub);
         
         if (data.success && data.gameState && gameStateRef.current) {
           const updatedGame = updateGameWithLiquidityData(
@@ -903,33 +839,31 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         }
         
         resolve(data.success);
-      };
-      
-      const custodialBetSub = sharedSocket.subscribe('custodialBetResult', handleCustodialBetResult, `${componentName}-custodialBet`);
-      sharedSocket.emit('custodialBet', { userId, betAmount });
+      });
+  
+      socket.emit('custodialBet', { userId, betAmount });
     });
-  }, [updateGameWithLiquidityData, componentName]);
+  }, [socket, isConnected, updateGameWithLiquidityData]);
 
   const custodialCashOut = useCallback(async (
     userId: string, 
     walletAddress: string
   ): Promise<{ success: boolean; payout?: number; custodialBalance?: number; reason?: string }> => {
     return new Promise((resolve) => {
-      if (!sharedSocket.isConnected()) {
+      if (!socket || !isConnected) {
         resolve({ success: false, reason: 'Not connected' });
         return;
       }
 
-      console.log('💸 Game Socket: Custodial cashout via shared socket:', { userId, walletAddress });
+      console.log('💸 Game Socket: Custodial cashout:', { userId, walletAddress });
 
       const timeout = setTimeout(() => {
         console.error('❌ Game Socket: Custodial cashout timeout');
         resolve({ success: false, reason: 'Timeout' });
       }, 30000);
 
-      const handleCustodialCashoutResult = (data: any) => {
+      socket.once('custodialCashOutResult', (data: any) => {
         clearTimeout(timeout);
-        sharedSocket.unsubscribe(custodialCashoutSub);
         
         resolve({
           success: data.success,
@@ -937,16 +871,15 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           custodialBalance: data.custodialBalance,
           reason: data.reason || data.error
         });
-      };
-      
-      const custodialCashoutSub = sharedSocket.subscribe('custodialCashOutResult', handleCustodialCashoutResult, `${componentName}-custodialCashout`);
-      sharedSocket.emit('custodialCashOut', { userId, walletAddress });
+      });
+
+      socket.emit('custodialCashOut', { userId, walletAddress });
     });
-  }, [componentName]);
+  }, [socket, isConnected]);
 
   const getCustodialBalance = useCallback(async (userId: string): Promise<number | null> => {
     return new Promise((resolve) => {
-      if (!sharedSocket.isConnected()) {
+      if (!socket || !isConnected) {
         resolve(null);
         return;
       }
@@ -956,9 +889,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         resolve(null);
       }, 10000);
 
-      const handleBalanceResponse = (data: any) => {
+      socket.once('custodialBalanceResponse', (data: any) => {
         clearTimeout(timeout);
-        sharedSocket.unsubscribe(balanceSub);
         
         if (data.success) {
           resolve(data.custodialBalance);
@@ -966,12 +898,11 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           console.error('❌ Game Socket: Failed to get custodial balance:', data.error);
           resolve(null);
         }
-      };
-      
-      const balanceSub = sharedSocket.subscribe('custodialBalanceResponse', handleBalanceResponse, `${componentName}-balance`);
-      sharedSocket.emit('getCustodialBalance', { userId });
+      });
+
+      socket.emit('getCustodialBalance', { userId });
     });
-  }, [componentName]);
+  }, [socket, isConnected]);
 
   return {
     currentGame,
@@ -989,14 +920,11 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     canBet,
     connectionError,
     connectionAttempts,
-    socket,
-    // 🚀 NEW: Additional state for debugging and monitoring
-    isInitialized,
-    pendingUpdates: pendingUpdates.length
+    socket
   };
 }
 
-// User initialization function using shared socket service
+// Enhanced user initialization function
 export const initializeUser = async (
   walletAddress: string,
   userId: string,
@@ -1012,15 +940,16 @@ export const initializeUser = async (
     if (userData) {
       console.log(`👤 Game Socket: User ID: ${userData.id}`);
       
-      if (sharedSocket.isConnected()) {
-        console.log('📡 Game Socket: Initializing user via shared socket...');
+      const socket = (window as any).gameSocket;
+      if (socket && socket.connected) {
+        console.log('📡 Game Socket: Initializing user via socket...');
         
-        sharedSocket.emit('initializeUser', { 
+        socket.emit('initializeUser', { 
           userId: userData.id, 
           walletAddress
         });
         
-        const handleUserInitResult = (result: UserInitResult) => {
+        socket.once('userInitializeResult', (result: UserInitResult) => {
           console.log('📡 Game Socket: User initialization result:', result);
           
           if (result.success) {
@@ -1038,24 +967,18 @@ export const initializeUser = async (
             console.warn('⚠️ Game Socket: User initialization failed:', result.error);
             toast.error(`Initialization failed: ${result.error}`);
           }
-          
-          sharedSocket.unsubscribe(initSub);
-        };
-        
-        const initSub = sharedSocket.subscribe('userInitializeResult', handleUserInitResult, 'userInit');
+        });
         
         setTimeout(() => {
           console.warn('⚠️ Game Socket: User initialization timeout');
-          sharedSocket.unsubscribe(initSub);
         }, 10000);
         
       } else {
-        console.warn('⚠️ Game Socket: Shared socket not connected, retrying initialization...');
-        setTimeout(async () => {
-          const socket = await sharedSocket.getSocket();
-          if (socket && socket.connected) {
+        console.warn('⚠️ Game Socket: Socket not connected, retrying initialization...');
+        setTimeout(() => {
+          if ((window as any).gameSocket?.connected) {
             console.log('🔄 Game Socket: Retrying user initialization...');
-            sharedSocket.emit('initializeUser', { 
+            (window as any).gameSocket.emit('initializeUser', { 
               userId: userData.id, 
               walletAddress 
             });

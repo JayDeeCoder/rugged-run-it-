@@ -1389,193 +1389,237 @@ const updateRecentTransfers = () => {};
   
 
   // 🚀 UPDATED: Enhanced bet placement with shared state
-  const handleBuy = useCallback(async () => {
-    const amountNum = parseFloat(amount);
-    
-    if (isPlacingBet || operationTimeouts.has('bet')) {
-      console.log('⚠️ Bet placement already in progress');
-      return;
-    }
-    
-    setServerError('');
-    
-    // Enhanced validation
-    if (isNaN(amountNum) || amountNum <= 0) {
-      setServerError('Invalid amount');
-      toast.error('Invalid amount');
-      return;
-    }
-    
-    const minBetAmount = currentToken === TokenType.SOL ? 0.005 : 1;
-    const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
-    
-    if (amountNum < minBetAmount) {
-      setServerError(`Minimum bet: ${minBetAmount} ${currentToken}`);
-      toast.error(`Minimum bet: ${minBetAmount} ${currentToken}`);
-      return;
-    }
-    
-    if (amountNum > maxBetAmount) {
-      setServerError(`Maximum bet: ${maxBetAmount} ${currentToken}`);
-      toast.error(`Maximum bet: ${maxBetAmount} ${currentToken}`);
-      return;
-    }
-    
-    if (!isWalletReady || !isConnected) {
-      setServerError('Please login to play');
-      toast.error('Please login to play');
-      return;
-    }
-    
-    if (!gameState.activeIsGameActive) {
-      setServerError('Game is not available');
-      toast.error('Game is not available');
-      return;
-    }
-    
-    if (isWaitingPeriod && !effectiveCanBet) {
-      setServerError('Game starting now!');
-      toast.error('Game starting now!');
-      return;
-    }
+// 🚀 UPDATED: Enhanced bet placement with stats updates
+const handleBuy = useCallback(async () => {
+  const amountNum = parseFloat(amount);
+  
+  if (isPlacingBet || operationTimeouts.has('bet')) {
+    console.log('⚠️ Bet placement already in progress');
+    return;
+  }
+  
+  setServerError('');
+  
+  // Enhanced validation
+  if (isNaN(amountNum) || amountNum <= 0) {
+    setServerError('Invalid amount');
+    toast.error('Invalid amount');
+    return;
+  }
+  
+  const minBetAmount = currentToken === TokenType.SOL ? 0.005 : 1;
+  const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
+  
+  if (amountNum < minBetAmount) {
+    setServerError(`Minimum bet: ${minBetAmount} ${currentToken}`);
+    toast.error(`Minimum bet: ${minBetAmount} ${currentToken}`);
+    return;
+  }
+  
+  if (amountNum > maxBetAmount) {
+    setServerError(`Maximum bet: ${maxBetAmount} ${currentToken}`);
+    toast.error(`Maximum bet: ${maxBetAmount} ${currentToken}`);
+    return;
+  }
+  
+  if (!isWalletReady || !isConnected) {
+    setServerError('Please login to play');
+    toast.error('Please login to play');
+    return;
+  }
+  
+  if (!gameState.activeIsGameActive) {
+    setServerError('Game is not available');
+    toast.error('Game is not available');
+    return;
+  }
+  
+  if (isWaitingPeriod && !effectiveCanBet) {
+    setServerError('Game starting now!');
+    toast.error('Game starting now!');
+    return;
+  }
 
-    if (amountNum > activeBalance) {
-      setServerError('Insufficient balance');
-      toast.error('Insufficient balance');
-      return;
-    }
+  if (amountNum > activeBalance) {
+    setServerError('Insufficient balance');
+    toast.error('Insufficient balance');
+    return;
+  }
 
-    console.log('✅ All validations passed, placing bet...');
-    
-    setIsPlacingBet(true); // Use shared state setter
-    setOperationTimeouts(prev => new Set(prev).add('bet'));
-    
-    const operationTimeout = setTimeout(() => {
-      console.log('⏰ Bet placement timeout reached');
-      setIsPlacingBet(false); // Use shared state setter
-      setOperationTimeouts(prev => {
-        const newSet = new Set(prev);
-        newSet.delete('bet');
-        return newSet;
-      });
-      setServerError('Bet placement timed out');
-      toast.error('Bet placement timed out - please try again');
-    }, 15000);
+  console.log('✅ All validations passed, placing bet...');
+  
+  setIsPlacingBet(true); // Use shared state setter
+  setOperationTimeouts(prev => new Set(prev).add('bet'));
+  
+  const operationTimeout = setTimeout(() => {
+    console.log('⏰ Bet placement timeout reached');
+    setIsPlacingBet(false); // Use shared state setter
+    setOperationTimeouts(prev => {
+      const newSet = new Set(prev);
+      newSet.delete('bet');
+      return newSet;
+    });
+    setServerError('Bet placement timed out');
+    toast.error('Bet placement timed out - please try again');
+  }, 15000);
 
-    try {
-      let success = false;
-      let entryMultiplier = gameState.gameStatus === 'waiting' ? 1.0 : gameState.activeCurrentMultiplier;
+  try {
+    let success = false;
+    let entryMultiplier = gameState.gameStatus === 'waiting' ? 1.0 : gameState.activeCurrentMultiplier;
 
-      if (currentToken === TokenType.SOL) {
-        console.log('📡 Using placeCustodialBet hook method...');
-        
-        if (!userId) {
-          throw new Error('User ID not available');
-        }
-        
-        success = await placeCustodialBet(userId, amountNum);
-        
-        if (success) {
-          console.log('✅ Custodial bet placed successfully via hook');
-          
-          // 🚀 FIXED: Use shared ActiveBet interface and correct property names
-          const newBet: ActiveBet = {
-            id: `custodial_bet_${Date.now()}`,
-            amount: amountNum,
-            entryMultiplier,
-            timestamp: Date.now(),
-            gameId: gameState.activeCurrentGame?.id || 'unknown',
-            tokenType: 'SOL', // 🔧 FIXED: Changed from 'TokenType' to 'tokenType'
-            userId: userId
-          };
-          
-          setActiveBet(newBet); // Use shared state setter
-          console.log('✅ Active bet set:', newBet);
-          
-          try {
-            updateCustodialBalance();
-          } catch (error) {
-            console.warn('⚠️ Balance update failed:', error);
-          }
-        } else {
-          console.error('❌ Custodial bet failed');
-          setServerError('Failed to place custodial bet');
-          toast.error('Failed to place bet');
-        }
-      } else {
-        console.log('📡 Using RUGGED token betting system...');
-        success = await placeBet(walletAddress, amountNum, userId || undefined);
-        
-        if (success) {
-          const newBet: ActiveBet = {
-            id: `rugged_bet_${Date.now()}`,
-            amount: amountNum,
-            entryMultiplier,
-            timestamp: Date.now(),
-            gameId: gameState.activeCurrentGame?.id || 'unknown',
-            tokenType: 'RUGGED' // Use shared interface
-          };
-          
-          setActiveBet(newBet); // Use shared state setter
-          try {
-            updateRuggedBalance();
-          } catch (error) {
-            console.warn('⚠️ Balance update failed:', error);
-          }
-        }
+    if (currentToken === TokenType.SOL) {
+      console.log('📡 Using placeCustodialBet hook method...');
+      
+      if (!userId) {
+        throw new Error('User ID not available');
       }
+      
+      success = await placeCustodialBet(userId, amountNum);
       
       if (success) {
-        console.log('✅ Bet placed successfully - Entry:', entryMultiplier.toFixed(2) + 'x');
+        console.log('✅ Custodial bet placed successfully via hook');
         
-        const betType = gameState.gameStatus === 'waiting' ? 'Pre-game bet' : 'Bet';
-        const tokenDisplay = currentToken === TokenType.SOL ? 'SOL (game balance)' : 'RUGGED tokens';
-        toast.success(`${betType} placed: ${amountNum} ${tokenDisplay} (Entry: ${entryMultiplier.toFixed(2)}x)`);
+        const newBet: ActiveBet = {
+          id: `custodial_bet_${Date.now()}`,
+          amount: amountNum,
+          entryMultiplier,
+          timestamp: Date.now(),
+          gameId: gameState.activeCurrentGame?.id || 'unknown',
+          tokenType: 'SOL',
+          userId: userId
+        };
         
-        if (onBuy) onBuy(amountNum);
-      } else if (!serverError) {
-        const errorMsg = 'Failed to place buy - server returned false';
-        setServerError(errorMsg);
-        toast.error(errorMsg);
+        setActiveBet(newBet);
+        console.log('✅ Active bet set:', newBet);
+        
+        // 🚀 NEW: Update user stats after successful bet
+        try {
+          console.log('📊 Updating user stats after bet...');
+          const statsResult = await UserAPI.updateUserStatsOnly(
+            userId, 
+            amountNum, 
+            0, // No profit/loss yet (bet just placed)
+            undefined
+          );
+          
+          if (statsResult.success) {
+            console.log('✅ User stats updated after bet placement');
+            console.log('📊 Total games played:', statsResult.userStats?.total_games_played);
+          } else {
+            console.warn('⚠️ Stats update failed:', statsResult.error);
+          }
+        } catch (statsError) {
+          console.warn('⚠️ Stats update error:', statsError);
+        }
+        
+        try {
+          updateCustodialBalance();
+        } catch (error) {
+          console.warn('⚠️ Balance update failed:', error);
+        }
+      } else {
+        console.error('❌ Custodial bet failed');
+        setServerError('Failed to place custodial bet');
+        toast.error('Failed to place bet');
       }
-    } catch (error) {
-      console.error('❌ Error placing bet:', error);
-      const errorMsg = `Failed to place buy: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    } else {
+      // RUGGED token betting - also add stats update
+      console.log('📡 Using RUGGED token betting system...');
+      success = await placeBet(walletAddress, amountNum, userId || undefined);
+      
+      if (success) {
+        const newBet: ActiveBet = {
+          id: `rugged_bet_${Date.now()}`,
+          amount: amountNum,
+          entryMultiplier,
+          timestamp: Date.now(),
+          gameId: gameState.activeCurrentGame?.id || 'unknown',
+          tokenType: 'RUGGED'
+        };
+        
+        setActiveBet(newBet);
+        
+        // 🚀 NEW: Update stats for RUGGED bets too
+        if (userId) {
+          try {
+            console.log('📊 Updating user stats after RUGGED bet...');
+            const statsResult = await UserAPI.updateUserStatsOnly(
+              userId, 
+              amountNum, 
+              0, // No profit/loss yet (bet just placed)
+              undefined
+            );
+            
+            if (statsResult.success) {
+              console.log('✅ RUGGED bet stats updated');
+              console.log('📊 Total games played:', statsResult.userStats?.total_games_played);
+            } else {
+              console.warn('⚠️ RUGGED stats update failed:', statsResult.error);
+            }
+          } catch (statsError) {
+            console.warn('⚠️ RUGGED stats update error:', statsError);
+          }
+        }
+        
+        try {
+          updateRuggedBalance();
+        } catch (error) {
+          console.warn('⚠️ Balance update failed:', error);
+        }
+      }
+    }
+    
+    if (success) {
+      console.log('✅ Bet placed successfully - Entry:', entryMultiplier.toFixed(2) + 'x');
+      
+      const betType = gameState.gameStatus === 'waiting' ? 'Pre-game bet' : 'Bet';
+      const tokenDisplay = currentToken === TokenType.SOL ? 'SOL (game balance)' : 'RUGGED tokens';
+      toast.success(`${betType} placed: ${amountNum} ${tokenDisplay} (Entry: ${entryMultiplier.toFixed(2)}x)`);
+      
+      if (onBuy) onBuy(amountNum);
+    } else if (!serverError) {
+      const errorMsg = 'Failed to place buy - server returned false';
       setServerError(errorMsg);
       toast.error(errorMsg);
-    } finally {
-      clearTimeout(operationTimeout);
-      setIsPlacingBet(false); // Use shared state setter
-      setOperationTimeouts(prev => {
-        const newSet = new Set(prev);
-        newSet.delete('bet');
-        return newSet;
-      });
-      
-      console.log('🏁 Bet placement process completed');
     }
-  }, [
-    amount, 
-    currentToken, 
-    activeBalance, 
-    isWalletReady, 
-    isConnected, 
-    gameState,
-    isWaitingPeriod, 
-    effectiveCanBet, 
-    userId, 
-    walletAddress, 
-    placeBet,
-    placeCustodialBet,
-    onBuy,
-    isPlacingBet,
-    operationTimeouts,
-    serverError,
-    setIsPlacingBet, // Add shared state setter
-    setActiveBet,    // Add shared state setter
-    updateCustodialBalance,
-    updateRuggedBalance
-  ]);
+  } catch (error) {
+    console.error('❌ Error placing bet:', error);
+    const errorMsg = `Failed to place buy: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    setServerError(errorMsg);
+    toast.error(errorMsg);
+  } finally {
+    clearTimeout(operationTimeout);
+    setIsPlacingBet(false); // Use shared state setter
+    setOperationTimeouts(prev => {
+      const newSet = new Set(prev);
+      newSet.delete('bet');
+      return newSet;
+    });
+    
+    console.log('🏁 Bet placement process completed');
+  }
+}, [
+  amount, 
+  currentToken, 
+  activeBalance, 
+  isWalletReady, 
+  isConnected, 
+  gameState,
+  isWaitingPeriod, 
+  effectiveCanBet, 
+  userId, 
+  walletAddress, 
+  placeBet,
+  placeCustodialBet,
+  onBuy,
+  isPlacingBet,
+  operationTimeouts,
+  serverError,
+  setIsPlacingBet, // Add shared state setter
+  setActiveBet,    // Add shared state setter
+  updateCustodialBalance,
+  updateRuggedBalance
+]);
 
   // 🚀 UPDATED: Enhanced cashout with shared state
   const handleCashout = useCallback(async () => {
@@ -1666,6 +1710,7 @@ setTimeout(() => {
               updateRuggedBalance();
             }, 100);
           }
+          
         } catch (error) {
           console.error('❌ RUGGED cashout error:', error);
           success = false;

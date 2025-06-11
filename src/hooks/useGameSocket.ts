@@ -1,5 +1,5 @@
 // src/hooks/useGameSocket.ts
-// 🚀 Improved useGameSocket hook with proper event management and cleanup
+// 🚀 Improved useGameSocket hook with proper event management and cleanup + TIMING FIXES
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
@@ -78,6 +78,11 @@ export function useGameSocket(walletAddress: string, userId?: string) {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
   
+  // 🚀 NEW: State to track initialization and pending updates
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [pendingUpdates, setPendingUpdates] = useState<any[]>([]);
+  const initializationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
   // Sync state
   const [serverTimeOffset, setServerTimeOffset] = useState(0);
   const gameStateRef = useRef<GameState | null>(null);
@@ -85,7 +90,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
   const countdownRef = useRef<number>(0);
   const socketInitRef = useRef(false);
 
-  // 🚀 NEW: Track subscriptions for cleanup
+  // 🚀 Track subscriptions for cleanup
   const subscriptionsRef = useRef<string[]>([]);
   const componentName = `GameSocket-${walletAddress || 'anonymous'}`;
 
@@ -165,14 +170,15 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         setConnectionError(null);
         setConnectionAttempts(0);
 
-        // 🚀 IMPROVED: Connection event handlers with subscription tracking
+        // 🚀 IMPROVED: Enhanced connection handler with immediate sync request
         const handleConnect = () => {
           console.log(`✅ GameSocket: Connected via shared service (${componentName})`);
           setIsConnected(true);
           setConnectionError(null);
           setConnectionAttempts(0);
           
-          // Request initial game sync
+          // 🚀 IMMEDIATE: Request game sync as soon as we connect
+          console.log(`🔄 GameSocket: Requesting immediate game sync on connect (${componentName})`);
           sharedSocket.emit('requestGameSync');
           
           // Auto-initialize user if available
@@ -185,6 +191,14 @@ export function useGameSocket(walletAddress: string, userId?: string) {
               timestamp: Date.now()
             });
           }
+          
+          // 🚀 BACKUP: Request sync again after a short delay if not initialized
+          setTimeout(() => {
+            if (!isInitialized && sharedSocket.isConnected()) {
+              console.log(`🔄 GameSocket: Backup game sync request (${componentName})`);
+              sharedSocket.emit('requestGameSync');
+            }
+          }, 3000);
         };
 
         const handleDisconnect = (reason: string, details?: any) => {
@@ -205,6 +219,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           setIsConnected(false);
           setCanBet(false);
           setConnectionError(`Connection failed: ${error.message}`);
+          setConnectionAttempts(prev => prev + 1);
         };
 
         // Register connection event handlers with subscription tracking
@@ -217,13 +232,14 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           handleConnect();
         }
 
-        // 🚀 ENHANCED: Game state handler with collision detection
+        // 🚀 IMPROVED: Enhanced game state handler with pending updates processing
         const handleGameState = (gameState: any) => {
           console.log(`📊 GameSocket: Received game state (${componentName}):`, {
             gameId: gameState.gameId,
             gameNumber: gameState.gameNumber,
             status: gameState.status,
-            multiplier: gameState.multiplier
+            multiplier: gameState.multiplier,
+            hasPendingUpdates: pendingUpdates.length > 0
           });
           
           if (gameState.serverTime) {
@@ -256,6 +272,45 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           
           setCurrentGame(newGameState);
           gameStateRef.current = newGameState;
+          setIsInitialized(true);
+          
+          // 🚀 PROCESS: Handle any pending multiplier updates
+          if (pendingUpdates.length > 0) {
+            console.log(`🔄 GameSocket: Processing ${pendingUpdates.length} pending updates (${componentName})`);
+            
+            const relevantUpdates = pendingUpdates.filter(update => 
+              update.gameNumber === newGameState.gameNumber
+            );
+            
+            if (relevantUpdates.length > 0) {
+              // Apply the most recent relevant update
+              const latestUpdate = relevantUpdates[relevantUpdates.length - 1];
+              console.log(`🔄 GameSocket: Applying latest pending update (${componentName}):`, latestUpdate);
+              
+              const updatedGame = updateGameWithLiquidityData(
+                newGameState,
+                {
+                  multiplier: latestUpdate.multiplier,
+                  serverTime: latestUpdate.serverTime,
+                  boostedPlayerCount: latestUpdate.boostedPlayerCount || newGameState.boostedPlayerCount,
+                  boostedTotalBets: latestUpdate.boostedTotalBets || newGameState.boostedTotalBets
+                },
+                'pendingUpdate'
+              );
+              
+              setCurrentGame(updatedGame);
+              gameStateRef.current = updatedGame;
+            }
+            
+            // Clear pending updates
+            setPendingUpdates([]);
+          }
+          
+          // Clear initialization timeout
+          if (initializationTimeoutRef.current) {
+            clearTimeout(initializationTimeoutRef.current);
+            initializationTimeoutRef.current = null;
+          }
         };
 
         // Register all game event handlers with subscription tracking
@@ -374,24 +429,59 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
+        // 🚀 IMPROVED: Enhanced multiplier update handler with proper timing
         addSubscription('multiplierUpdate', (data: any) => {
-          // 🚀 FIXED: Better collision detection
+          console.log(`📊 GameSocket: Received multiplier update (${componentName}):`, {
+            gameNumber: data.gameNumber,
+            multiplier: data.multiplier,
+            hasCurrentGame: !!gameStateRef.current,
+            currentGameNumber: gameStateRef.current?.gameNumber,
+            isInitialized
+          });
+
+          // 🚀 FIX: Handle case where no current game exists yet
           if (!gameStateRef.current) {
-            console.log(`⚠️ GameSocket: Received multiplier update but no current game (${componentName})`);
+            console.log(`⚠️ GameSocket: No current game for multiplier update, requesting sync (${componentName})`);
+            
+            // Store the update for later processing
+            setPendingUpdates(prev => [...prev.slice(-4), data]); // Keep last 5 updates
+            
+            // Request game sync to get current state
             sharedSocket.emit('requestGameSync');
+            
+            // Set a timeout to initialize if sync doesn't come through
+            if (initializationTimeoutRef.current) {
+              clearTimeout(initializationTimeoutRef.current);
+            }
+            
+            initializationTimeoutRef.current = setTimeout(() => {
+              console.log(`🔄 GameSocket: Sync timeout, requesting again (${componentName})`);
+              sharedSocket.emit('requestGameSync');
+            }, 2000);
+            
             return;
           }
 
+          // 🚀 FIX: Better game number validation
           if (gameStateRef.current.gameNumber !== data.gameNumber) {
-            console.log(`⚠️ GameSocket: Received multiplier update for different game (${componentName}): current=${gameStateRef.current.gameNumber}, received=${data.gameNumber}`);
-            // Only request sync if we're significantly behind
-            if (data.gameNumber > gameStateRef.current.gameNumber) {
-              console.log(`🔄 GameSocket: Requesting game sync due to game number mismatch (${componentName})`);
+            const gameDifference = data.gameNumber - gameStateRef.current.gameNumber;
+            
+            if (gameDifference > 0) {
+              // We're behind - request sync
+              console.log(`⚠️ GameSocket: Behind on game number (${componentName}): current=${gameStateRef.current.gameNumber}, received=${data.gameNumber}, requesting sync`);
               sharedSocket.emit('requestGameSync');
+            } else if (gameDifference < -1) {
+              // We're way ahead - something's wrong, request sync
+              console.log(`⚠️ GameSocket: Game number mismatch (${componentName}): current=${gameStateRef.current.gameNumber}, received=${data.gameNumber}, requesting sync`);
+              sharedSocket.emit('requestGameSync');
+            } else {
+              // We're slightly ahead or this is an old update - ignore it
+              console.log(`🔇 GameSocket: Ignoring old multiplier update (${componentName}): current=${gameStateRef.current.gameNumber}, received=${data.gameNumber}`);
             }
             return;
           }
           
+          // 🚀 PROCESS: Valid multiplier update
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
@@ -413,6 +503,12 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           
           setCurrentGame(updatedGame);
           gameStateRef.current = updatedGame;
+          
+          // Mark as initialized if this is our first successful update
+          if (!isInitialized) {
+            setIsInitialized(true);
+            console.log(`✅ GameSocket: Initialized via multiplier update (${componentName})`);
+          }
         });
 
         addSubscription('gameStarted', (data: any) => {
@@ -601,12 +697,67 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     };
 
     initConnection();
-  }, [walletAddress, userId, componentName, addSubscription, syncServerTime, updateCountdownState, updateGameWithLiquidityData]);
+  }, [walletAddress, userId, componentName, addSubscription, syncServerTime, updateCountdownState, updateGameWithLiquidityData, isInitialized, pendingUpdates]);
 
-  // 🚀 IMPROVED: Cleanup on component unmount
+  // 🚀 IMPROVED: Enhanced initialization effect with retry logic
+  useEffect(() => {
+    // Request initial sync when component mounts (if connected)
+    if (sharedSocket.isConnected() && !isInitialized) {
+      console.log(`🔄 GameSocket: Initial game sync request on mount (${componentName})`);
+      sharedSocket.emit('requestGameSync');
+      
+      // Set up retry mechanism
+      const retryInterval = setInterval(() => {
+        if (!isInitialized && sharedSocket.isConnected()) {
+          console.log(`🔄 GameSocket: Retry game sync request (${componentName})`);
+          sharedSocket.emit('requestGameSync');
+        } else if (isInitialized) {
+          clearInterval(retryInterval);
+        }
+      }, 5000);
+      
+      // Clean up after 30 seconds
+      setTimeout(() => {
+        clearInterval(retryInterval);
+      }, 30000);
+      
+      return () => {
+        clearInterval(retryInterval);
+      };
+    }
+  }, [isInitialized, componentName]);
+
+  // 🚀 DEBUG: Add this to help monitor the issue
+  useEffect(() => {
+    const debugInterval = setInterval(() => {
+      if (!isInitialized && sharedSocket.isConnected()) {
+        console.log(`🔍 GameSocket DEBUG (${componentName}):`, {
+          isConnected: sharedSocket.isConnected(),
+          isInitialized,
+          hasCurrentGame: !!gameStateRef.current,
+          pendingUpdates: pendingUpdates.length,
+          currentGameNumber: gameStateRef.current?.gameNumber
+        });
+      }
+    }, 10000);
+    
+    return () => clearInterval(debugInterval);
+  }, [isInitialized, componentName, pendingUpdates.length]);
+
+  // 🚀 CLEANUP: Enhanced cleanup with pending updates
   useEffect(() => {
     return () => {
       console.log(`🗑️ GameSocket: Component unmounting, cleaning up ${componentName}`);
+      
+      // Clear timeouts
+      if (initializationTimeoutRef.current) {
+        clearTimeout(initializationTimeoutRef.current);
+      }
+      
+      // Clear pending updates
+      setPendingUpdates([]);
+      
+      // Clean up subscriptions
       sharedSocket.unsubscribeComponent(componentName);
       subscriptionsRef.current = [];
     };
@@ -838,7 +989,10 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     canBet,
     connectionError,
     connectionAttempts,
-    socket
+    socket,
+    // 🚀 NEW: Additional state for debugging and monitoring
+    isInitialized,
+    pendingUpdates: pendingUpdates.length
   };
 }
 

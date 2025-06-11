@@ -1,15 +1,22 @@
 // src/services/sharedSocket.ts
-// 🚀 Shared Socket Service for iRUGGED.FUN
-// Provides a singleton socket connection that can be shared across components
+// 🚀 Improved Shared Socket Service with Event Management
 
 import { io, Socket } from 'socket.io-client';
 
+interface EventSubscription {
+  id: string;
+  event: string;
+  handler: (...args: any[]) => void;
+  component: string;
+}
+
 class SharedSocketService {
   private socket: Socket | null = null;
-  private isInitialized = false;
   private connectionPromise: Promise<Socket | null> | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
+  private eventSubscriptions: Map<string, EventSubscription> = new Map();
+  private subscriptionCounter = 0;
 
   private readonly serverUrl = process.env.NEXT_PUBLIC_GAME_SERVER_URL || 'wss://irugged-run.ngrok.app';
 
@@ -45,8 +52,7 @@ class SharedSocketService {
 
         // Close existing socket if it exists
         if (this.socket) {
-          this.socket.removeAllListeners();
-          this.socket.close();
+          this.cleanupSocket();
         }
 
         // Create new socket
@@ -68,8 +74,8 @@ class SharedSocketService {
           console.log('  - Transport:', this.socket?.io.engine.transport.name);
           console.log('  - Socket ID:', this.socket?.id);
           
-          this.isInitialized = true;
           this.reconnectAttempts = 0;
+          this.reattachEventListeners();
           resolve(this.socket);
         });
 
@@ -87,7 +93,6 @@ class SharedSocketService {
         // Disconnect handler
         this.socket.on('disconnect', (reason: string, details?: any) => {
           console.log('🔌 SharedSocket: Disconnected:', reason);
-          this.isInitialized = false;
           
           if (reason === 'io server disconnect') {
             console.log('🔄 SharedSocket: Server disconnected, will attempt reconnect');
@@ -98,6 +103,7 @@ class SharedSocketService {
         this.socket.on('reconnect', (attemptNumber: number) => {
           console.log('🔄 SharedSocket: Reconnected after', attemptNumber, 'attempts');
           this.reconnectAttempts = 0;
+          this.reattachEventListeners();
         });
 
         // Transport upgrade handlers
@@ -125,6 +131,30 @@ class SharedSocketService {
   }
 
   /**
+   * Reattach all event listeners after reconnection
+   */
+  private reattachEventListeners(): void {
+    if (!this.socket) return;
+
+    console.log(`🔌 SharedSocket: Reattaching ${this.eventSubscriptions.size} event listeners`);
+    
+    for (const [subscriptionId, subscription] of this.eventSubscriptions) {
+      this.socket.on(subscription.event, subscription.handler);
+      console.log(`  ✅ Reattached: ${subscription.component} -> ${subscription.event}`);
+    }
+  }
+
+  /**
+   * Clean up socket and all listeners
+   */
+  private cleanupSocket(): void {
+    if (this.socket) {
+      this.socket.removeAllListeners();
+      this.socket.close();
+    }
+  }
+
+  /**
    * Check if socket is connected
    */
   isConnected(): boolean {
@@ -145,29 +175,102 @@ class SharedSocketService {
   }
 
   /**
-   * Listen for events on the shared socket
+   * 🚀 IMPROVED: Subscribe to events with component tracking
    */
-  on(event: string, handler: (...args: any[]) => void): void {
-    if (!this.socket) {
-      console.warn('⚠️ SharedSocket: Cannot listen - socket not initialized');
-      return;
+  subscribe(event: string, handler: (...args: any[]) => void, componentName: string = 'unknown'): string {
+    const subscriptionId = `${componentName}-${event}-${++this.subscriptionCounter}`;
+    
+    const subscription: EventSubscription = {
+      id: subscriptionId,
+      event,
+      handler,
+      component: componentName
+    };
+
+    this.eventSubscriptions.set(subscriptionId, subscription);
+
+    // If socket is connected, attach the listener immediately
+    if (this.socket) {
+      this.socket.on(event, handler);
+      console.log(`🔌 SharedSocket: Subscribed ${componentName} to ${event} (ID: ${subscriptionId})`);
     }
 
-    this.socket.on(event, handler);
+    return subscriptionId;
   }
 
   /**
-   * Remove event listener from the shared socket
+   * 🚀 IMPROVED: Unsubscribe from events by subscription ID
+   */
+  unsubscribe(subscriptionId: string): void {
+    const subscription = this.eventSubscriptions.get(subscriptionId);
+    
+    if (subscription) {
+      // Remove from socket if connected
+      if (this.socket) {
+        this.socket.off(subscription.event, subscription.handler);
+        console.log(`🔌 SharedSocket: Unsubscribed ${subscription.component} from ${subscription.event}`);
+      }
+      
+      // Remove from our tracking
+      this.eventSubscriptions.delete(subscriptionId);
+    }
+  }
+
+  /**
+   * 🚀 NEW: Unsubscribe all events for a specific component
+   */
+  unsubscribeComponent(componentName: string): void {
+    const subscriptionsToRemove: string[] = [];
+    
+    for (const [subscriptionId, subscription] of this.eventSubscriptions) {
+      if (subscription.component === componentName) {
+        subscriptionsToRemove.push(subscriptionId);
+      }
+    }
+    
+    subscriptionsToRemove.forEach(id => this.unsubscribe(id));
+    
+    if (subscriptionsToRemove.length > 0) {
+      console.log(`🧹 SharedSocket: Cleaned up ${subscriptionsToRemove.length} subscriptions for ${componentName}`);
+    }
+  }
+
+  /**
+   * Legacy compatibility: Listen for events (deprecated, use subscribe instead)
+   */
+  on(event: string, handler: (...args: any[]) => void): void {
+    console.warn('⚠️ SharedSocket: on() is deprecated, use subscribe() instead');
+    this.subscribe(event, handler, 'legacy');
+  }
+
+  /**
+   * Legacy compatibility: Remove event listener (deprecated, use unsubscribe instead)
    */
   off(event: string, handler?: (...args: any[]) => void): void {
-    if (!this.socket) {
-      return;
-    }
+    if (!this.socket) return;
 
     if (handler) {
       this.socket.off(event, handler);
+      
+      // Also remove from our tracking if found
+      for (const [subscriptionId, subscription] of this.eventSubscriptions) {
+        if (subscription.event === event && subscription.handler === handler) {
+          this.eventSubscriptions.delete(subscriptionId);
+          console.log(`🔌 SharedSocket: Removed legacy subscription for ${event}`);
+          break;
+        }
+      }
     } else {
       this.socket.off(event);
+      
+      // Remove all subscriptions for this event
+      const subscriptionsToRemove: string[] = [];
+      for (const [subscriptionId, subscription] of this.eventSubscriptions) {
+        if (subscription.event === event) {
+          subscriptionsToRemove.push(subscriptionId);
+        }
+      }
+      subscriptionsToRemove.forEach(id => this.eventSubscriptions.delete(id));
     }
   }
 
@@ -177,13 +280,8 @@ class SharedSocketService {
   async reconnect(): Promise<Socket | null> {
     console.log('🔄 SharedSocket: Forcing reconnection...');
     
-    if (this.socket) {
-      this.socket.removeAllListeners();
-      this.socket.close();
-    }
-    
+    this.cleanupSocket();
     this.socket = null;
-    this.isInitialized = false;
     this.connectionPromise = null;
     
     return this.getSocket();
@@ -195,33 +293,58 @@ class SharedSocketService {
   disconnect(): void {
     console.log('🔌 SharedSocket: Disconnecting...');
     
-    if (this.socket) {
-      this.socket.removeAllListeners();
-      this.socket.close();
-    }
-    
+    this.cleanupSocket();
     this.socket = null;
-    this.isInitialized = false;
     this.connectionPromise = null;
+    this.eventSubscriptions.clear();
   }
 
   /**
    * Get current socket status for debugging
    */
   getStatus(): {
-    isInitialized: boolean;
     isConnected: boolean;
     socketId: string | undefined;
     transport: string | undefined;
     reconnectAttempts: number;
+    activeSubscriptions: number;
+    subscriptionsByComponent: Record<string, number>;
   } {
+    const subscriptionsByComponent: Record<string, number> = {};
+    
+    for (const subscription of this.eventSubscriptions.values()) {
+      subscriptionsByComponent[subscription.component] = 
+        (subscriptionsByComponent[subscription.component] || 0) + 1;
+    }
+
     return {
-      isInitialized: this.isInitialized,
       isConnected: this.isConnected(),
       socketId: this.socket?.id,
       transport: this.socket?.io.engine.transport.name,
-      reconnectAttempts: this.reconnectAttempts
+      reconnectAttempts: this.reconnectAttempts,
+      activeSubscriptions: this.eventSubscriptions.size,
+      subscriptionsByComponent
     };
+  }
+
+  /**
+   * 🚀 NEW: Debug method to log all active subscriptions
+   */
+  debugSubscriptions(): void {
+    console.log('🔍 SharedSocket: Active subscriptions:', this.eventSubscriptions.size);
+    
+    const byComponent: Record<string, string[]> = {};
+    
+    for (const subscription of this.eventSubscriptions.values()) {
+      if (!byComponent[subscription.component]) {
+        byComponent[subscription.component] = [];
+      }
+      byComponent[subscription.component].push(subscription.event);
+    }
+    
+    for (const [component, events] of Object.entries(byComponent)) {
+      console.log(`  ${component}: ${events.join(', ')}`);
+    }
   }
 }
 

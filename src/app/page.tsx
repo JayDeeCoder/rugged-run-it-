@@ -122,7 +122,7 @@ export default function Home() {
                     isTablet ? 'text-xl' :
                     'text-xl'}
                 `}>
-                  Create an account to access all trading features and participate in the game.
+                  Create an account to access all trading & Wallet features and participate in the game.
                 </p>
                 <button
                   onClick={handleLoginClick}

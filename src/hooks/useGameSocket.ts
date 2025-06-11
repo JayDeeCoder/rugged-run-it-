@@ -1,5 +1,5 @@
 // src/hooks/useGameSocket.ts
-// 🚀 Updated useGameSocket hook using shared socket service
+// 🚀 Improved useGameSocket hook with proper event management and cleanup
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
@@ -85,6 +85,10 @@ export function useGameSocket(walletAddress: string, userId?: string) {
   const countdownRef = useRef<number>(0);
   const socketInitRef = useRef(false);
 
+  // 🚀 NEW: Track subscriptions for cleanup
+  const subscriptionsRef = useRef<string[]>([]);
+  const componentName = `GameSocket-${walletAddress || 'anonymous'}`;
+
   // Calculate server time offset for synchronization
   const syncServerTime = useCallback((serverTime: number) => {
     const clientTime = Date.now();
@@ -130,11 +134,18 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     return updatedGame;
   }, []);
 
-  // 🚀 UPDATED: Use shared socket service
+  // 🚀 IMPROVED: Helper function to add subscription with tracking
+  const addSubscription = useCallback((event: string, handler: (...args: any[]) => void): void => {
+    const subscriptionId = sharedSocket.subscribe(event, handler, componentName);
+    subscriptionsRef.current.push(subscriptionId);
+    console.log(`🎮 GameSocket: Added subscription ${subscriptionId} for ${event}`);
+  }, [componentName]);
+
+  // 🚀 IMPROVED: Socket initialization with proper subscription management
   useEffect(() => {
     if (socketInitRef.current) return;
     
-    console.log('🔍 Game Socket: Using shared socket service...');
+    console.log(`🔍 GameSocket: Initializing for ${componentName}...`);
     socketInitRef.current = true;
     
     const initConnection = async () => {
@@ -154,9 +165,9 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         setConnectionError(null);
         setConnectionAttempts(0);
 
-        // Enhanced connection event handlers
+        // 🚀 IMPROVED: Connection event handlers with subscription tracking
         const handleConnect = () => {
-          console.log('✅ Game Socket: Connected via shared service');
+          console.log(`✅ GameSocket: Connected via shared service (${componentName})`);
           setIsConnected(true);
           setConnectionError(null);
           setConnectionAttempts(0);
@@ -166,7 +177,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           
           // Auto-initialize user if available
           if (userId && walletAddress) {
-            console.log('🔧 Game Socket: Auto-initializing user on connect...');
+            console.log(`🔧 GameSocket: Auto-initializing user on connect... (${componentName})`);
             sharedSocket.emit('initializeUser', { 
               userId, 
               walletAddress,
@@ -177,7 +188,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         };
 
         const handleDisconnect = (reason: string, details?: any) => {
-          console.log('🔌 Game Socket: Disconnected via shared service');
+          console.log(`🔌 GameSocket: Disconnected via shared service (${componentName})`);
           console.log('  - Reason:', reason);
           setIsConnected(false);
           setCanBet(false);
@@ -190,25 +201,30 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         };
 
         const handleError = (error: any) => {
-          console.error('❌ Game Socket: Connection error via shared service:', error);
+          console.error(`❌ GameSocket: Connection error via shared service (${componentName}):`, error);
           setIsConnected(false);
           setCanBet(false);
           setConnectionError(`Connection failed: ${error.message}`);
         };
 
-        // Register event handlers with shared socket
-        sharedSocket.on('connect', handleConnect);
-        sharedSocket.on('disconnect', handleDisconnect);
-        sharedSocket.on('connect_error', handleError);
+        // Register connection event handlers with subscription tracking
+        addSubscription('connect', handleConnect);
+        addSubscription('disconnect', handleDisconnect);
+        addSubscription('connect_error', handleError);
 
         // If already connected, trigger connect handler
         if (gameSocket.connected) {
           handleConnect();
         }
 
-        // 🚀 ENHANCED: Game state handler with full liquidity support
+        // 🚀 ENHANCED: Game state handler with collision detection
         const handleGameState = (gameState: any) => {
-          console.log('📊 Game Socket: Received enhanced game state with liquidity:', gameState);
+          console.log(`📊 GameSocket: Received game state (${componentName}):`, {
+            gameId: gameState.gameId,
+            gameNumber: gameState.gameNumber,
+            status: gameState.status,
+            multiplier: gameState.multiplier
+          });
           
           if (gameState.serverTime) {
             syncServerTime(gameState.serverTime);
@@ -242,11 +258,12 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           gameStateRef.current = newGameState;
         };
 
-        // Register all game event handlers
-        sharedSocket.on('gameState', handleGameState);
+        // Register all game event handlers with subscription tracking
+        addSubscription('gameState', handleGameState);
         
-        sharedSocket.on('artificialBoostUpdate', (data: any) => {
+        addSubscription('artificialBoostUpdate', (data: any) => {
           if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
+            console.log(`🎯 GameSocket: Artificial boost update for current game (${componentName})`);
             const updatedGame = updateGameWithLiquidityData(
               gameStateRef.current, 
               {
@@ -262,10 +279,13 @@ export function useGameSocket(walletAddress: string, userId?: string) {
             
             setCurrentGame(updatedGame);
             gameStateRef.current = updatedGame;
+          } else {
+            console.log(`⚠️ GameSocket: Received artificial boost for different game (${componentName})`);
           }
         });
 
-        sharedSocket.on('gameWaiting', (data: any) => {
+        addSubscription('gameWaiting', (data: any) => {
+          console.log(`⏳ GameSocket: Game waiting event (${componentName})`);
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
@@ -294,7 +314,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        sharedSocket.on('countdown', (data: any) => {
+        addSubscription('countdown', (data: any) => {
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
@@ -320,7 +340,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        sharedSocket.on('serverSync', (data: any) => {
+        addSubscription('serverSync', (data: any) => {
+          console.log(`🔄 GameSocket: Server sync (${componentName})`);
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
@@ -353,36 +374,49 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        sharedSocket.on('multiplierUpdate', (data: any) => {
-          if (gameStateRef.current && gameStateRef.current.gameNumber === data.gameNumber) {
-            if (data.serverTime) {
-              syncServerTime(data.serverTime);
-            }
-            
-            const updatedGame = updateGameWithLiquidityData(
-              gameStateRef.current,
-              {
-                multiplier: data.multiplier,
-                serverTime: data.serverTime,
-                boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
-                boostedTotalBets: data.boostedTotalBets || gameStateRef.current.boostedTotalBets,
-                liquidityBreakdown: data.liquidityGrowth !== undefined ? {
-                  ...gameStateRef.current.liquidityBreakdown,
-                  liquidityGrowth: parseFloat(data.liquidityGrowth)
-                } : gameStateRef.current.liquidityBreakdown
-              },
-              'multiplierUpdate'
-            );
-            
-            setCurrentGame(updatedGame);
-            gameStateRef.current = updatedGame;
-          } else {
-            console.warn('⚠️ Game Socket: Received multiplier update for different game, requesting sync...');
+        addSubscription('multiplierUpdate', (data: any) => {
+          // 🚀 FIXED: Better collision detection
+          if (!gameStateRef.current) {
+            console.log(`⚠️ GameSocket: Received multiplier update but no current game (${componentName})`);
             sharedSocket.emit('requestGameSync');
+            return;
           }
+
+          if (gameStateRef.current.gameNumber !== data.gameNumber) {
+            console.log(`⚠️ GameSocket: Received multiplier update for different game (${componentName}): current=${gameStateRef.current.gameNumber}, received=${data.gameNumber}`);
+            // Only request sync if we're significantly behind
+            if (data.gameNumber > gameStateRef.current.gameNumber) {
+              console.log(`🔄 GameSocket: Requesting game sync due to game number mismatch (${componentName})`);
+              sharedSocket.emit('requestGameSync');
+            }
+            return;
+          }
+          
+          if (data.serverTime) {
+            syncServerTime(data.serverTime);
+          }
+          
+          const updatedGame = updateGameWithLiquidityData(
+            gameStateRef.current,
+            {
+              multiplier: data.multiplier,
+              serverTime: data.serverTime,
+              boostedPlayerCount: data.boostedPlayerCount || gameStateRef.current.boostedPlayerCount,
+              boostedTotalBets: data.boostedTotalBets || gameStateRef.current.boostedTotalBets,
+              liquidityBreakdown: data.liquidityGrowth !== undefined ? {
+                ...gameStateRef.current.liquidityBreakdown,
+                liquidityGrowth: parseFloat(data.liquidityGrowth)
+              } : gameStateRef.current.liquidityBreakdown
+            },
+            'multiplierUpdate'
+          );
+          
+          setCurrentGame(updatedGame);
+          gameStateRef.current = updatedGame;
         });
 
-        sharedSocket.on('gameStarted', (data: any) => {
+        addSubscription('gameStarted', (data: any) => {
+          console.log(`🎮 GameSocket: Game started (${componentName})`);
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
@@ -414,7 +448,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           gameStateRef.current = newGameState;
         });
 
-        sharedSocket.on('gameCrashed', (data: any) => {
+        addSubscription('gameCrashed', (data: any) => {
+          console.log(`💥 GameSocket: Game crashed (${componentName})`);
           setCountdown(0);
           setIsWaitingPeriod(false);
           setCanBet(false);
@@ -431,13 +466,14 @@ export function useGameSocket(walletAddress: string, userId?: string) {
             };
             
             setCurrentGame(crashedGame);
-            gameStateRef.current = null;
+            gameStateRef.current = null; // Clear current game
             
             setGameHistory(prev => [...prev.slice(-49), crashedGame]);
           }
         });
 
-        sharedSocket.on('gameSync', (data: any) => {
+        addSubscription('gameSync', (data: any) => {
+          console.log(`🔄 GameSocket: Game sync response (${componentName})`);
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
@@ -469,7 +505,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        sharedSocket.on('gameHistory', (history: any[]) => {
+        addSubscription('gameHistory', (history: any[]) => {
           const mappedHistory: GameState[] = history.map(game => ({
             id: game.id || '',
             gameNumber: game.gameNumber || 0,
@@ -488,7 +524,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           setGameHistory(mappedHistory);
         });
 
-        sharedSocket.on('betPlaced', (data: any) => {
+        addSubscription('betPlaced', (data: any) => {
           if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
             const updatedGame = updateGameWithLiquidityData(
               gameStateRef.current,
@@ -507,7 +543,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        sharedSocket.on('custodialBetPlaced', (data: any) => {
+        addSubscription('custodialBetPlaced', (data: any) => {
           if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
             const updatedGame = updateGameWithLiquidityData(
               gameStateRef.current,
@@ -525,7 +561,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        sharedSocket.on('playerCashedOut', (data: any) => {
+        addSubscription('playerCashedOut', (data: any) => {
           if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
             sharedSocket.emit('requestGameSync');
           }
@@ -536,42 +572,28 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           if (sharedSocket.isConnected() && gameStateRef.current) {
             sharedSocket.emit('requestGameSync');
           } else if (!sharedSocket.isConnected()) {
-            console.warn('⚠️ Game Socket: Shared socket disconnected during sync check');
+            console.warn(`⚠️ GameSocket: Shared socket disconnected during sync check (${componentName})`);
           }
         }, 15000);
 
-        // Cleanup function
+        // 🚀 IMPROVED: Cleanup function with proper subscription management
         return () => {
+          console.log(`🧹 GameSocket: Cleaning up all subscriptions for ${componentName}`);
+          
           clearInterval(syncInterval);
           if (syncTimeoutRef.current) {
             clearTimeout(syncTimeoutRef.current);
           }
           
-          // Remove our event handlers but don't close the shared socket
-          sharedSocket.off('connect', handleConnect);
-          sharedSocket.off('disconnect', handleDisconnect);
-          sharedSocket.off('connect_error', handleError);
+          // Remove all subscriptions for this component
+          sharedSocket.unsubscribeComponent(componentName);
+          subscriptionsRef.current = [];
           
-          // Remove game-specific handlers
-          sharedSocket.off('gameState', handleGameState);
-          sharedSocket.off('artificialBoostUpdate');
-          sharedSocket.off('gameWaiting');
-          sharedSocket.off('countdown');
-          sharedSocket.off('serverSync');
-          sharedSocket.off('multiplierUpdate');
-          sharedSocket.off('gameStarted');
-          sharedSocket.off('gameCrashed');
-          sharedSocket.off('gameSync');
-          sharedSocket.off('gameHistory');
-          sharedSocket.off('betPlaced');
-          sharedSocket.off('custodialBetPlaced');
-          sharedSocket.off('playerCashedOut');
-          
-          console.log('🧹 Game Socket: Cleaned up event handlers');
+          console.log(`✅ GameSocket: Cleanup completed for ${componentName}`);
         };
 
       } catch (error) {
-        console.error('❌ Game Socket: Setup error with shared service:', error);
+        console.error(`❌ GameSocket: Setup error with shared service (${componentName}):`, error);
         setConnectionError(`Setup failed: ${error}`);
         setIsConnected(false);
         socketInitRef.current = false;
@@ -579,7 +601,16 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     };
 
     initConnection();
-  }, [walletAddress, userId, syncServerTime, updateCountdownState, updateGameWithLiquidityData]);
+  }, [walletAddress, userId, componentName, addSubscription, syncServerTime, updateCountdownState, updateGameWithLiquidityData]);
+
+  // 🚀 IMPROVED: Cleanup on component unmount
+  useEffect(() => {
+    return () => {
+      console.log(`🗑️ GameSocket: Component unmounting, cleaning up ${componentName}`);
+      sharedSocket.unsubscribeComponent(componentName);
+      subscriptionsRef.current = [];
+    };
+  }, [componentName]);
 
   // Place bet using shared socket service
   const placeBet = useCallback(async (
@@ -621,7 +652,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
       
       const handleBetResult = (data: BetResult) => {
         clearTimeout(timeout);
-        sharedSocket.off('betResult', handleBetResult);
+        sharedSocket.unsubscribe(betResultSub);
         
         if (data.success) {
           resolve(true);
@@ -646,9 +677,9 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         }
       };
       
-      sharedSocket.on('betResult', handleBetResult);
+      const betResultSub = sharedSocket.subscribe('betResult', handleBetResult, `${componentName}-bet`);
     });
-  }, [currentGame, canBet, updateGameWithLiquidityData]);
+  }, [currentGame, canBet, updateGameWithLiquidityData, componentName]);
 
   // Cash out using shared socket
   const cashOut = useCallback(async (walletAddress: string): Promise<{ success: boolean; payout?: number; reason?: string }> => {
@@ -669,7 +700,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
       
       const handleCashoutResult = (data: CashOutResult) => {
         clearTimeout(timeout);
-        sharedSocket.off('cashOutResult', handleCashoutResult);
+        sharedSocket.unsubscribe(cashoutSub);
         resolve({
           success: data.success,
           payout: data.payout,
@@ -677,9 +708,9 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         });
       };
       
-      sharedSocket.on('cashOutResult', handleCashoutResult);
+      const cashoutSub = sharedSocket.subscribe('cashOutResult', handleCashoutResult, `${componentName}-cashout`);
     });
-  }, [currentGame]);
+  }, [currentGame, componentName]);
 
   // Custodial betting methods using shared socket
   const placeCustodialBet = useCallback(async (
@@ -702,7 +733,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
   
       const handleCustodialBetResult = (data: any) => {
         clearTimeout(timeout);
-        sharedSocket.off('custodialBetResult', handleCustodialBetResult);
+        sharedSocket.unsubscribe(custodialBetSub);
         
         if (data.success && data.gameState && gameStateRef.current) {
           const updatedGame = updateGameWithLiquidityData(
@@ -723,10 +754,10 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         resolve(data.success);
       };
       
-      sharedSocket.on('custodialBetResult', handleCustodialBetResult);
+      const custodialBetSub = sharedSocket.subscribe('custodialBetResult', handleCustodialBetResult, `${componentName}-custodialBet`);
       sharedSocket.emit('custodialBet', { userId, betAmount });
     });
-  }, [updateGameWithLiquidityData]);
+  }, [updateGameWithLiquidityData, componentName]);
 
   const custodialCashOut = useCallback(async (
     userId: string, 
@@ -747,7 +778,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
       const handleCustodialCashoutResult = (data: any) => {
         clearTimeout(timeout);
-        sharedSocket.off('custodialCashOutResult', handleCustodialCashoutResult);
+        sharedSocket.unsubscribe(custodialCashoutSub);
         
         resolve({
           success: data.success,
@@ -757,10 +788,10 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         });
       };
       
-      sharedSocket.on('custodialCashOutResult', handleCustodialCashoutResult);
+      const custodialCashoutSub = sharedSocket.subscribe('custodialCashOutResult', handleCustodialCashoutResult, `${componentName}-custodialCashout`);
       sharedSocket.emit('custodialCashOut', { userId, walletAddress });
     });
-  }, []);
+  }, [componentName]);
 
   const getCustodialBalance = useCallback(async (userId: string): Promise<number | null> => {
     return new Promise((resolve) => {
@@ -776,7 +807,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
       const handleBalanceResponse = (data: any) => {
         clearTimeout(timeout);
-        sharedSocket.off('custodialBalanceResponse', handleBalanceResponse);
+        sharedSocket.unsubscribe(balanceSub);
         
         if (data.success) {
           resolve(data.custodialBalance);
@@ -786,10 +817,10 @@ export function useGameSocket(walletAddress: string, userId?: string) {
         }
       };
       
-      sharedSocket.on('custodialBalanceResponse', handleBalanceResponse);
+      const balanceSub = sharedSocket.subscribe('custodialBalanceResponse', handleBalanceResponse, `${componentName}-balance`);
       sharedSocket.emit('getCustodialBalance', { userId });
     });
-  }, []);
+  }, [componentName]);
 
   return {
     currentGame,
@@ -854,14 +885,14 @@ export const initializeUser = async (
             toast.error(`Initialization failed: ${result.error}`);
           }
           
-          sharedSocket.off('userInitializeResult', handleUserInitResult);
+          sharedSocket.unsubscribe(initSub);
         };
         
-        sharedSocket.on('userInitializeResult', handleUserInitResult);
+        const initSub = sharedSocket.subscribe('userInitializeResult', handleUserInitResult, 'userInit');
         
         setTimeout(() => {
           console.warn('⚠️ Game Socket: User initialization timeout');
-          sharedSocket.off('userInitializeResult', handleUserInitResult);
+          sharedSocket.unsubscribe(initSub);
         }, 10000);
         
       } else {

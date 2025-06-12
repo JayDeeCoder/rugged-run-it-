@@ -1,4 +1,4 @@
-// src/app/leaderboard/page.tsx - COMPLETELY PASSIVE (No Socket Interference)
+// src/app/leaderboard/page.tsx - FIXED with Better Game State Coordination
 'use client';
 
 import { FC, useState, useEffect, useRef, useCallback } from 'react';
@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import Layout from '../../components/layout/Layout';
 import Leaderboard from '../../components/leaderboard/Leaderboard';
 import { useUser } from '../../context/UserContext';
-import { Trophy, RefreshCw, TrendingUp, Users, Award, Crown, Medal, Target, Star, Wifi, WifiOff } from 'lucide-react';
+import { Trophy, RefreshCw, TrendingUp, Users, Award, Crown, Medal, Target, Star, Zap, Wifi, WifiOff, AlertCircle } from 'lucide-react';
 import { LeaderboardAPI, LeaderboardEntry, UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import { sharedSocket } from '../../services/sharedSocket';
@@ -22,35 +22,147 @@ interface LeaderboardStats {
   topPlayerProfit: number;
 }
 
-// 🚀 COMPLETELY PASSIVE: No socket event listening, just status monitoring
-const usePassiveSocketStatus = () => {
+// 🚀 IMPROVED: Socket connection with proper subscription management
+const useSocketConnection = () => {
   const [isConnected, setIsConnected] = useState(false);
-  const statusCheckRef = useRef<NodeJS.Timeout | null>(null);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const socketRef = useRef<any>(null);
+  const connectionMonitorRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => {
-    console.log('🔍 Leaderboard: Starting PASSIVE socket status monitoring (no interference)');
-    
-    // Just check connection status periodically, don't interfere
-    statusCheckRef.current = setInterval(() => {
-      const connected = sharedSocket.isConnected();
-      if (connected !== isConnected) {
-        setIsConnected(connected);
-        console.log(`📊 Leaderboard: Socket status: ${connected ? 'Connected' : 'Disconnected'} (passive monitoring)`);
+  // 🚀 NEW: Initialize socket connection properly
+  const initializeSocket = useCallback(async () => {
+    try {
+      console.log('🔌 Leaderboard: Initializing socket connection...');
+      const socket = await sharedSocket.getSocket();
+      
+      if (socket) {
+        socketRef.current = socket;
+        setIsConnected(socket.connected);
+        setError(null);
+        setConnectionAttempts(0);
+        
+        console.log('✅ Leaderboard: Socket initialized successfully');
+        
+        // Signal page activity
+        sharedSocket.emit('pageActivity', { 
+          page: 'leaderboard',
+          action: 'active',
+          timestamp: Date.now()
+        });
+        
+        return true;
+      } else {
+        console.error('❌ Leaderboard: Failed to get socket');
+        setIsConnected(false);
+        setError('Failed to connect to game server');
+        setConnectionAttempts(prev => prev + 1);
+        return false;
       }
-    }, 3000);
+    } catch (err) {
+      console.error('❌ Leaderboard: Socket initialization error:', err);
+      setIsConnected(false);
+      setError(err instanceof Error ? err.message : 'Connection failed');
+      setConnectionAttempts(prev => prev + 1);
+      return false;
+    }
+  }, []);
 
-    // Initial check
-    setIsConnected(sharedSocket.isConnected());
+  // 🚀 NEW: Signal page activity without cleaning game state
+  const signalPageActivity = useCallback(() => {
+    if (sharedSocket.isConnected()) {
+      console.log('📍 Leaderboard: Signaling page activity (non-destructive)');
+      sharedSocket.emit('pageActivity', { 
+        page: 'leaderboard',
+        action: 'active',
+        timestamp: Date.now()
+      });
+    }
+  }, []);
 
-    return () => {
-      console.log('🔍 Leaderboard: Stopping passive socket status monitoring');
-      if (statusCheckRef.current) {
-        clearInterval(statusCheckRef.current);
+  // 🚀 NEW: Signal page inactive without destroying game state
+  const signalPageInactive = useCallback(() => {
+    if (sharedSocket.isConnected()) {
+      console.log('📍 Leaderboard: Signaling page inactive (preserving game state)');
+      sharedSocket.emit('pageActivity', { 
+        page: 'leaderboard',
+        action: 'inactive',
+        timestamp: Date.now()
+      });
+    }
+  }, []);
+
+  // Initialize socket on mount
+  useEffect(() => {
+    let mounted = true;
+
+    const init = async () => {
+      const success = await initializeSocket();
+      
+      if (mounted && success) {
+        // Set up connection monitoring
+        connectionMonitorRef.current = setInterval(() => {
+          const connected = sharedSocket.isConnected();
+          if (connected !== isConnected) {
+            setIsConnected(connected);
+            console.log(`🔌 Leaderboard: Connection status changed: ${connected}`);
+            
+            if (connected) {
+              setError(null);
+              setConnectionAttempts(0);
+              signalPageActivity();
+            }
+          }
+        }, 2000);
       }
     };
-  }, [isConnected]);
 
-  return { isConnected };
+    init();
+
+    return () => {
+      mounted = false;
+      if (connectionMonitorRef.current) {
+        clearInterval(connectionMonitorRef.current);
+      }
+      signalPageInactive();
+    };
+  }, [initializeSocket, isConnected, signalPageActivity, signalPageInactive]);
+
+  // 🚀 NEW: Handle page visibility changes (don't destroy game state)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        console.log('👁️ Leaderboard: Page hidden - signaling inactive');
+        signalPageInactive();
+      } else {
+        console.log('👁️ Leaderboard: Page visible - signaling active');
+        signalPageActivity();
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      console.log('🚪 Leaderboard: Page unloading - final inactive signal');
+      signalPageInactive();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      signalPageInactive();
+    };
+  }, [signalPageActivity, signalPageInactive]);
+
+  return { 
+    isConnected, 
+    connectionAttempts, 
+    error,
+    signalPageActivity,
+    signalPageInactive,
+    socket: socketRef.current
+  };
 };
 
 const LeaderboardPage: FC = () => {
@@ -60,8 +172,24 @@ const LeaderboardPage: FC = () => {
   const { isAuthenticated } = useUser();
   const router = useRouter();
   
-  // 🚀 PASSIVE: Only monitor socket status, don't interfere
-  const { isConnected: socketConnected } = usePassiveSocketStatus();
+  // 🚀 NEW: Use improved socket connection hook
+  const { 
+    isConnected: socketConnected, 
+    connectionAttempts, 
+    error: socketError,
+    signalPageActivity,
+    socket
+  } = useSocketConnection();
+
+  // 🚀 NEW: Debug function for development
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      (window as any).debugSharedSocket = () => {
+        console.log('🔍 Leaderboard: Shared socket status:', sharedSocket.getStatus());
+        sharedSocket.debugSubscriptions();
+      };
+    }
+  }, []);
   
   // State
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
@@ -80,17 +208,25 @@ const LeaderboardPage: FC = () => {
   const [currentUserData, setCurrentUserData] = useState<LeaderboardEntry | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
-  // Auto-polling state
-  const [lastUpdate, setLastUpdate] = useState<number>(0);
+  // Real-time state
+  const [isRealTimeConnected, setIsRealTimeConnected] = useState(false);
+  const [lastRealTimeUpdate, setLastRealTimeUpdate] = useState<number>(0);
+  const [pendingUpdates, setPendingUpdates] = useState<number>(0);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
 
-  // Polling intervals
-  const autoRefreshRef = useRef<NodeJS.Timeout | null>(null);
+  // Real-time update tracking
+  const realTimeUpdateRef = useRef<NodeJS.Timeout | null>(null);
+  const socketListenersSetup = useRef(false);
   const lastPeriodRef = useRef<Period>(period);
 
   // Get current user's wallet
   const embeddedWallet = wallets.find(wallet => wallet.walletClientType === 'privy');
   const currentUserWallet = embeddedWallet?.address || '';
+
+  // Update real-time connection status
+  useEffect(() => {
+    setIsRealTimeConnected(socketConnected);
+  }, [socketConnected]);
 
   // User initialization
   useEffect(() => {
@@ -111,6 +247,12 @@ const LeaderboardPage: FC = () => {
           
           const userLeaderboardData = await LeaderboardAPI.getCurrentUserData(userData.id);
           setCurrentUserData(userLeaderboardData);
+          
+          // Signal user activity without interfering with game state
+          if (socketConnected) {
+            console.log(`📡 Leaderboard: Signaling user activity...`);
+            signalPageActivity();
+          }
         }
       } catch (error) {
         console.error('❌ Leaderboard: Error initializing user:', error);
@@ -118,7 +260,7 @@ const LeaderboardPage: FC = () => {
     };
 
     initUser();
-  }, [authenticated, currentUserWallet]);
+  }, [authenticated, currentUserWallet, socketConnected, signalPageActivity]);
 
   // Calculate level progress
   const calculateLevelProgress = (user: LeaderboardEntry) => {
@@ -142,7 +284,158 @@ const LeaderboardPage: FC = () => {
     };
   };
 
-  // 🚀 PASSIVE: Fetch leaderboard data (no socket events)
+  // Debounced real-time leaderboard refresh
+  const debouncedLeaderboardRefresh = useCallback(() => {
+    if (!autoRefreshEnabled) {
+      console.log('🔄 Leaderboard: Auto-refresh disabled, skipping update');
+      return;
+    }
+
+    if (realTimeUpdateRef.current) {
+      clearTimeout(realTimeUpdateRef.current);
+    }
+
+    setPendingUpdates(prev => prev + 1);
+
+    realTimeUpdateRef.current = setTimeout(async () => {
+      console.log('🔄 Leaderboard REAL-TIME: Refreshing leaderboard data...');
+      
+      try {
+        const data = await LeaderboardAPI.getLeaderboard(period);
+        
+        setLeaderboardData(prevData => {
+          if (JSON.stringify(prevData) !== JSON.stringify(data)) {
+            console.log(`✅ Leaderboard REAL-TIME: Updated with ${data.length} entries`);
+            setLastRealTimeUpdate(Date.now());
+            
+            // Update stats
+            const totalPlayers = data.length;
+            const totalGames = data.reduce((sum, entry) => sum + (entry.games_played || 0), 0);
+            const totalVolume = data.reduce((sum, entry) => sum + (entry.total_profit || 0), 0);
+            const averageProfit = totalPlayers > 0 ? totalVolume / totalPlayers : 0;
+            const topPlayerProfit = data.length > 0 ? data[0].total_profit : 0;
+
+            setStats({
+              totalPlayers,
+              totalGames,
+              totalVolume: Number(totalVolume.toFixed(2)),
+              averageProfit: Number(averageProfit.toFixed(2)),
+              topPlayerProfit: Number(topPlayerProfit.toFixed(2))
+            });
+
+            return data;
+          }
+          return prevData;
+        });
+
+        // Update user rank if authenticated
+        if (isAuthenticated && currentUserWallet) {
+          try {
+            const rank = await LeaderboardAPI.getUserRank(currentUserWallet, period);
+            setUserRank(rank);
+          } catch (rankError) {
+            console.warn('Could not fetch user rank:', rankError);
+          }
+        }
+
+        // Refresh current user data
+        if (userId) {
+          try {
+            const userLeaderboardData = await LeaderboardAPI.getCurrentUserData(userId);
+            setCurrentUserData(userLeaderboardData);
+          } catch (error) {
+            console.warn('Could not refresh current user data:', error);
+          }
+        }
+
+      } catch (error) {
+        console.error('❌ Leaderboard REAL-TIME: Refresh failed:', error);
+      } finally {
+        setPendingUpdates(prev => Math.max(0, prev - 1));
+      }
+    }, 3000);
+  }, [period, isAuthenticated, currentUserWallet, userId, autoRefreshEnabled]);
+
+  // 🚀 IMPROVED: NON-DESTRUCTIVE socket listeners with new subscription system
+  useEffect(() => {
+    if (!socketConnected || socketListenersSetup.current) return;
+
+    console.log('🔌 Leaderboard: Setting up NON-DESTRUCTIVE socket listeners...');
+    socketListenersSetup.current = true;
+
+    const subscriptionIds: string[] = [];
+
+    // 🚀 NEW: Only listen to completion events, not in-progress game events
+    const handleGameEnd = (data: any) => {
+      console.log('🎮 Leaderboard: Game ended - triggering leaderboard refresh');
+      debouncedLeaderboardRefresh();
+    };
+
+    const handleCustodialCashout = (data: any) => {
+      console.log('💸 Leaderboard: Cashout processed - triggering leaderboard refresh');
+      debouncedLeaderboardRefresh();
+    };
+
+    const handleUserStatsUpdate = (data: any) => {
+      console.log('📊 Leaderboard: User stats updated - triggering leaderboard refresh');
+      debouncedLeaderboardRefresh();
+    };
+
+    const handleBetResult = (data: any) => {
+      console.log('🎲 Leaderboard: Bet resolved - triggering leaderboard refresh');
+      debouncedLeaderboardRefresh();
+    };
+
+    const handleLeaderboardUpdate = (data: any) => {
+      console.log('🏆 Leaderboard: Direct leaderboard update received');
+      debouncedLeaderboardRefresh();
+    };
+
+    // 🚀 NEW: DO NOT listen to multiplierUpdate, gameState, gameStarted, gameCrashed
+    // These are handled by the main component and listening here causes conflicts
+
+    // 🚀 NEW: Use improved subscription system
+    subscriptionIds.push(
+      sharedSocket.subscribe('gameEnd', handleGameEnd, 'leaderboard'),
+      sharedSocket.subscribe('custodialCashout', handleCustodialCashout, 'leaderboard'),
+      sharedSocket.subscribe('userStatsUpdate', handleUserStatsUpdate, 'leaderboard'),
+      sharedSocket.subscribe('betResult', handleBetResult, 'leaderboard'),
+      sharedSocket.subscribe('leaderboardUpdate', handleLeaderboardUpdate, 'leaderboard')
+    );
+
+    return () => {
+      console.log('🔌 Leaderboard: Cleaning up NON-DESTRUCTIVE socket listeners');
+      
+      // 🚀 NEW: Clean up using subscription IDs
+      subscriptionIds.forEach(id => sharedSocket.unsubscribe(id));
+      
+      if (realTimeUpdateRef.current) {
+        clearTimeout(realTimeUpdateRef.current);
+      }
+      
+      socketListenersSetup.current = false;
+    };
+  }, [socketConnected, debouncedLeaderboardRefresh]);
+
+  // 🚀 NEW: Component cleanup to unsubscribe all leaderboard events
+  useEffect(() => {
+    return () => {
+      console.log('🧹 Leaderboard: Component unmounting - cleaning up all subscriptions');
+      // Clean up all leaderboard-related subscriptions
+      sharedSocket.unsubscribeComponent('leaderboard');
+      
+      // Final inactive signal
+      if (sharedSocket.isConnected()) {
+        sharedSocket.emit('pageActivity', { 
+          page: 'leaderboard',
+          action: 'unmount',
+          timestamp: Date.now()
+        });
+      }
+    };
+  }, []);
+
+  // Fetch leaderboard data
   const fetchLeaderboardData = async (showRefreshing = false) => {
     try {
       if (showRefreshing) setRefreshing(true);
@@ -205,7 +498,6 @@ const LeaderboardPage: FC = () => {
         }
       }
 
-      setLastUpdate(Date.now());
       console.log(`✅ Leaderboard: Loaded ${data.length} entries for ${period}`);
 
     } catch (err) {
@@ -220,41 +512,16 @@ const LeaderboardPage: FC = () => {
 
   // Effect to fetch data when period changes
   useEffect(() => {
-    // Reset tracking when period changes
+    // Reset real-time tracking when period changes
     if (lastPeriodRef.current !== period) {
       console.log(`🔄 Leaderboard: Period changed from ${lastPeriodRef.current} to ${period}`);
       lastPeriodRef.current = period;
-      setLastUpdate(0);
+      setLastRealTimeUpdate(0);
+      setPendingUpdates(0);
     }
 
     fetchLeaderboardData();
   }, [period, isAuthenticated, currentUserWallet, userId]);
-
-  // 🚀 PASSIVE: Auto-refresh polling (since no real-time events)
-  useEffect(() => {
-    if (!autoRefreshEnabled) {
-      if (autoRefreshRef.current) {
-        clearInterval(autoRefreshRef.current);
-        autoRefreshRef.current = null;
-      }
-      return;
-    }
-
-    console.log('🔄 Leaderboard: Setting up auto-refresh polling...');
-    
-    autoRefreshRef.current = setInterval(() => {
-      if (!loading && !refreshing) {
-        console.log('🔄 Leaderboard: Auto-refresh polling triggered');
-        fetchLeaderboardData();
-      }
-    }, 60000); // Poll every minute
-
-    return () => {
-      if (autoRefreshRef.current) {
-        clearInterval(autoRefreshRef.current);
-      }
-    };
-  }, [autoRefreshEnabled, loading, refreshing, period, isAuthenticated, currentUserWallet, userId]);
 
   // Manual refresh function
   const handleRefresh = useCallback(() => {
@@ -270,24 +537,13 @@ const LeaderboardPage: FC = () => {
       console.log(`🔄 Leaderboard: Auto-refresh ${newValue ? 'enabled' : 'disabled'}`);
       
       if (newValue) {
-        toast.success('Auto-refresh enabled (polling mode)', { duration: 2000 });
+        toast.success('Real-time updates enabled', { duration: 2000 });
       } else {
-        toast('Auto-refresh disabled', { duration: 2000 });
+        toast('Real-time updates disabled', { duration: 2000 });
       }
       
       return newValue;
     });
-  }, []);
-
-  // 🚀 PASSIVE: Minimal component cleanup
-  useEffect(() => {
-    return () => {
-      console.log('🧹 Leaderboard: Component unmounting - PASSIVE cleanup (no socket interference)');
-      if (autoRefreshRef.current) {
-        clearInterval(autoRefreshRef.current);
-      }
-      // No socket cleanup needed - we don't listen to any events
-    };
   }, []);
 
   // Helper functions
@@ -317,13 +573,13 @@ const LeaderboardPage: FC = () => {
         <div className="scrollable-content-area">
           <div className="scrollable-inner-content">
             <div className="max-w-6xl mx-auto px-4 py-8">
-              {/* Enhanced Header with Polling Status */}
+              {/* Enhanced Header with Real-time Status */}
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                 <div className="flex items-center">
                   <div className="relative">
                     <Trophy className="text-yellow-400 mr-3" size={32} />
                     {leaderboardData.length > 0 && (
-                      <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full"></div>
+                      <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
                     )}
                   </div>
                   <div>
@@ -332,23 +588,37 @@ const LeaderboardPage: FC = () => {
                     <div className="flex items-center gap-3 mt-1">
                       <p className="text-xs text-gray-500">{getPeriodDescription(period)}</p>
                       
-                      {/* Polling status indicator */}
+                      {/* Real-time status indicator */}
                       <div className="flex items-center gap-2">
-                        {socketConnected ? (
-                          <div className="flex items-center text-xs text-blue-400">
+                        {isRealTimeConnected ? (
+                          <div className="flex items-center text-xs text-green-400">
                             <Wifi size={12} className="mr-1" />
-                            <span>Polling</span>
+                            <span>Live</span>
+                            {pendingUpdates > 0 && (
+                              <div className="ml-1 px-1 bg-green-500 text-white rounded-full text-xs">
+                                {pendingUpdates}
+                              </div>
+                            )}
                           </div>
                         ) : (
-                          <div className="flex items-center text-xs text-yellow-400">
+                          <div className="flex items-center text-xs text-red-400">
                             <WifiOff size={12} className="mr-1" />
                             <span>Offline</span>
+                            {connectionAttempts > 0 && (
+                              <span className="ml-1">({connectionAttempts})</span>
+                            )}
                           </div>
                         )}
                         
-                        {lastUpdate > 0 && (
+                        {socketError && (
+                          <div className="text-xs text-yellow-400 ml-2" title={socketError}>
+                            <AlertCircle size={12} />
+                          </div>
+                        )}
+                        
+                        {lastRealTimeUpdate > 0 && (
                           <span className="text-xs text-gray-500">
-                            Updated: {new Date(lastUpdate).toLocaleTimeString()}
+                            Updated: {new Date(lastRealTimeUpdate).toLocaleTimeString()}
                           </span>
                         )}
                       </div>
@@ -362,13 +632,13 @@ const LeaderboardPage: FC = () => {
                     onClick={toggleAutoRefresh}
                     className={`flex items-center px-3 py-2 rounded-lg text-sm transition-colors ${
                       autoRefreshEnabled 
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white' 
+                        ? 'bg-green-600 hover:bg-green-700 text-white' 
                         : 'bg-gray-600 hover:bg-gray-700 text-white'
                     }`}
                   >
-                    <RefreshCw size={14} className="mr-1" />
+                    <Zap size={14} className="mr-1" />
                     <span className="hidden sm:inline">
-                      {autoRefreshEnabled ? 'Auto' : 'Manual'}
+                      {autoRefreshEnabled ? 'Live' : 'Manual'}
                     </span>
                   </button>
                   
@@ -492,9 +762,11 @@ const LeaderboardPage: FC = () => {
                 </div>
               )}
 
-              {/* Stats Overview with polling indicators */}
+              {/* Enhanced Stats Overview with real-time indicators */}
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-                <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+                  pendingUpdates > 0 ? 'ring-2 ring-blue-400 ring-opacity-30' : ''
+                }`}>
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-gray-400 text-xs">Total Players</p>
@@ -504,7 +776,9 @@ const LeaderboardPage: FC = () => {
                   </div>
                 </div>
                 
-                <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+                  pendingUpdates > 0 ? 'ring-2 ring-green-400 ring-opacity-30' : ''
+                }`}>
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-gray-400 text-xs">Total Games</p>
@@ -514,7 +788,9 @@ const LeaderboardPage: FC = () => {
                   </div>
                 </div>
                 
-                <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+                  pendingUpdates > 0 ? 'ring-2 ring-purple-400 ring-opacity-30' : ''
+                }`}>
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-gray-400 text-xs">Volume</p>
@@ -524,7 +800,9 @@ const LeaderboardPage: FC = () => {
                   </div>
                 </div>
 
-                <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+                  pendingUpdates > 0 ? 'ring-2 ring-orange-400 ring-opacity-30' : ''
+                }`}>
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-gray-400 text-xs">Avg Profit</p>
@@ -534,7 +812,9 @@ const LeaderboardPage: FC = () => {
                   </div>
                 </div>
 
-                <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+                  pendingUpdates > 0 ? 'ring-2 ring-yellow-400 ring-opacity-30' : ''
+                }`}>
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-gray-400 text-xs">Top Player</p>
@@ -568,8 +848,8 @@ const LeaderboardPage: FC = () => {
                     {leaderboardData.length > 0 && (
                       <div className="text-xs text-gray-400 bg-gray-800 px-3 py-2 rounded-lg flex items-center gap-2">
                         <span>{leaderboardData.length} players</span>
-                        {autoRefreshEnabled && (
-                          <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                        {isRealTimeConnected && autoRefreshEnabled && (
+                          <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
                         )}
                       </div>
                     )}
@@ -581,7 +861,7 @@ const LeaderboardPage: FC = () => {
                   {loading && (
                     <div className="text-center py-16">
                       <div className="animate-spin h-8 w-8 border-2 border-blue-400 border-t-transparent rounded-full mx-auto mb-4"></div>
-                      <p className="text-gray-400">Loading RUGGER board...</p>
+                      <p className="text-gray-400">Loading RUGGER oard...</p>
                       <p className="text-xs text-gray-500 mt-2">Fetching {getPeriodDisplayName(period).toLowerCase()} rankings</p>
                     </div>
                   )}
@@ -631,7 +911,7 @@ const LeaderboardPage: FC = () => {
                   <ul className="list-disc list-inside text-gray-400 space-y-2 text-sm">
                     <li>Rankings based on profit percentage: (Total Profit / Total Wagered) × 100</li>
                     <li>Players must have completed games to qualify</li>
-                    <li>Auto-refresh updates via polling (every minute)</li>
+                    <li>Real-time updates as games are played</li>
                     <li>Rankings reset based on selected timeframe</li>
                     <li>Level and XP data synced with dashboard</li>
                     <li>Top performers earn exclusive recognition</li>
@@ -641,15 +921,15 @@ const LeaderboardPage: FC = () => {
                 <div className="bg-gray-900 rounded-lg p-6 border border-gray-800">
                   <h2 className="text-xl font-bold text-white mb-4 flex items-center">
                     <TrendingUp className="mr-2 text-green-400" size={20} />
-                    Polling Features
+                    Real-Time Features
                   </h2>
                   <ul className="list-disc list-inside text-gray-400 space-y-2 text-sm">
-                    <li><strong className="text-white">Auto-Refresh:</strong> Leaderboard updates automatically via polling</li>
-                    <li><strong className="text-white">Manual Refresh:</strong> Force refresh anytime for latest data</li>
-                    <li><strong className="text-white">Polling Mode:</strong> No interference with main game component</li>
-                    <li><strong className="text-white">Status Indicators:</strong> Clear visual feedback on update status</li>
-                    <li>Updates every minute when auto-refresh is enabled</li>
-                    <li>Completely passive - no real-time socket events</li>
+                    <li><strong className="text-white">Live Updates:</strong> Leaderboard refreshes automatically after games</li>
+                    <li><strong className="text-white">Connection Status:</strong> Real-time connection indicator</li>
+                    <li><strong className="text-white">Auto Refresh:</strong> Toggle automatic updates on/off</li>
+                    <li><strong className="text-white">Manual Refresh:</strong> Force refresh anytime</li>
+                    <li>Updates debounced to prevent excessive refreshing</li>
+                    <li>Visual indicators show when data is being updated</li>
                   </ul>
                 </div>
               </div>

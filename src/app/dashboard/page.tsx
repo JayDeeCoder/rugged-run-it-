@@ -1,4 +1,4 @@
-// src/app/dashboard/page.tsx - COMPLETELY PASSIVE (No Socket Interference)
+// src/app/dashboard/page.tsx - FIXED with Better Game State Coordination
 'use client';
 
 import { FC, useState, useEffect, useContext, useCallback, useRef } from 'react';
@@ -44,45 +44,167 @@ const getSupabaseClient = () => {
   return supabaseClient;
 };
 
-// 🚀 COMPLETELY PASSIVE: No socket event listening, just status monitoring
-const usePassiveSocketStatus = () => {
+// 🚀 IMPROVED: Socket connection with proper subscription management
+const useSocketConnection = () => {
   const [isConnected, setIsConnected] = useState(false);
-  const statusCheckRef = useRef<NodeJS.Timeout | null>(null);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const socketRef = useRef<any>(null);
+  const connectionMonitorRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => {
-    console.log('🔍 Dashboard: Starting PASSIVE socket status monitoring (no interference)');
-    
-    // Just check connection status periodically, don't interfere
-    statusCheckRef.current = setInterval(() => {
-      const connected = sharedSocket.isConnected();
-      if (connected !== isConnected) {
-        setIsConnected(connected);
-        console.log(`📊 Dashboard: Socket status: ${connected ? 'Connected' : 'Disconnected'} (passive monitoring)`);
+  // 🚀 NEW: Initialize socket connection properly
+  const initializeSocket = useCallback(async () => {
+    try {
+      console.log('🔌 Dashboard: Initializing socket connection...');
+      const socket = await sharedSocket.getSocket();
+      
+      if (socket) {
+        socketRef.current = socket;
+        setIsConnected(socket.connected);
+        setError(null);
+        setConnectionAttempts(0);
+        
+        console.log('✅ Dashboard: Socket initialized successfully');
+        
+        // Signal page activity
+        sharedSocket.emit('pageActivity', { 
+          page: 'dashboard',
+          action: 'active',
+          timestamp: Date.now()
+        });
+        
+        return true;
+      } else {
+        console.error('❌ Dashboard: Failed to get socket');
+        setIsConnected(false);
+        setError('Failed to connect to game server');
+        setConnectionAttempts(prev => prev + 1);
+        return false;
       }
-    }, 3000);
+    } catch (err) {
+      console.error('❌ Dashboard: Socket initialization error:', err);
+      setIsConnected(false);
+      setError(err instanceof Error ? err.message : 'Connection failed');
+      setConnectionAttempts(prev => prev + 1);
+      return false;
+    }
+  }, []);
 
-    // Initial check
-    setIsConnected(sharedSocket.isConnected());
+  // 🚀 NEW: Signal page activity without cleaning game state
+  const signalPageActivity = useCallback(() => {
+    if (sharedSocket.isConnected()) {
+      console.log('📍 Dashboard: Signaling page activity (non-destructive)');
+      sharedSocket.emit('pageActivity', { 
+        page: 'dashboard',
+        action: 'active',
+        timestamp: Date.now()
+      });
+    }
+  }, []);
 
-    return () => {
-      console.log('🔍 Dashboard: Stopping passive socket status monitoring');
-      if (statusCheckRef.current) {
-        clearInterval(statusCheckRef.current);
+  // 🚀 NEW: Signal page inactive without destroying game state
+  const signalPageInactive = useCallback(() => {
+    if (sharedSocket.isConnected()) {
+      console.log('📍 Dashboard: Signaling page inactive (preserving game state)');
+      sharedSocket.emit('pageActivity', { 
+        page: 'dashboard',
+        action: 'inactive',
+        timestamp: Date.now()
+      });
+    }
+  }, []);
+
+  // Initialize socket on mount
+  useEffect(() => {
+    let mounted = true;
+
+    const init = async () => {
+      const success = await initializeSocket();
+      
+      if (mounted && success) {
+        // Set up connection monitoring
+        connectionMonitorRef.current = setInterval(() => {
+          const connected = sharedSocket.isConnected();
+          if (connected !== isConnected) {
+            setIsConnected(connected);
+            console.log(`🔌 Dashboard: Connection status changed: ${connected}`);
+            
+            if (connected) {
+              setError(null);
+              setConnectionAttempts(0);
+              signalPageActivity();
+            }
+          }
+        }, 2000);
       }
     };
-  }, [isConnected]);
 
-  return { isConnected };
+    init();
+
+    return () => {
+      mounted = false;
+      if (connectionMonitorRef.current) {
+        clearInterval(connectionMonitorRef.current);
+      }
+      signalPageInactive();
+    };
+  }, [initializeSocket, isConnected, signalPageActivity, signalPageInactive]);
+
+  // 🚀 NEW: Handle page visibility changes (don't destroy game state)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        console.log('👁️ Dashboard: Page hidden - signaling inactive');
+        signalPageInactive();
+      } else {
+        console.log('👁️ Dashboard: Page visible - signaling active');
+        signalPageActivity();
+      }
+    };
+
+    const handleBeforeUnload = () => {
+      console.log('🚪 Dashboard: Page unloading - final inactive signal');
+      signalPageInactive();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      signalPageInactive();
+    };
+  }, [signalPageActivity, signalPageInactive]);
+
+  return { 
+    isConnected, 
+    connectionAttempts, 
+    error,
+    signalPageActivity,
+    signalPageInactive,
+    socket: socketRef.current
+  };
 };
 
-// 🚀 PASSIVE: Custodial balance with polling only - no socket events
-const useCustodialBalance = (userId: string) => {
+interface PlayerBet {
+  bet_amount: number;
+  profit_loss: number;
+  cashout_amount?: number;
+  cashout_multiplier?: number;
+  status: string;
+}
+
+// 🚀 IMPROVED: Custodial balance hook - moved before Dashboard component
+const useCustodialBalance = (userId: string, socketConnected: boolean) => {
   const [custodialBalance, setCustodialBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<number>(0);
   
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastUserIdRef = useRef<string>('');
+  const socketListenersRef = useRef<boolean>(false);
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const updateCustodialBalance = useCallback(async (skipDebounce = false) => {
     if (!userId) return;
@@ -134,14 +256,18 @@ const useCustodialBalance = (userId: string) => {
   const forceRefresh = useCallback(async () => {
     if (!userId) return;
     
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+    }
+    
     console.log(`🔄 Dashboard: Force refresh custodial balance for ${userId}...`);
     await updateCustodialBalance(true);
   }, [userId, updateCustodialBalance]);
   
-  // 🚀 PASSIVE: Only polling, no socket events
+  // Setup polling
   useEffect(() => {
     if (userId && userId !== lastUserIdRef.current) {
-      console.log(`🎯 Dashboard: Setting up PASSIVE custodial balance polling for user: ${userId}`);
+      console.log(`🎯 Dashboard: Setting up custodial balance polling for user: ${userId}`);
       lastUserIdRef.current = userId;
       
       if (updateIntervalRef.current) {
@@ -150,37 +276,113 @@ const useCustodialBalance = (userId: string) => {
       
       updateCustodialBalance(true);
       
-      // More frequent polling since we're not using real-time events
       updateIntervalRef.current = setInterval(() => {
         if (!loading) {
           updateCustodialBalance();
         }
-      }, 30000); // Poll every 30 seconds
+      }, 60000);
       
       return () => {
         if (updateIntervalRef.current) {
           clearInterval(updateIntervalRef.current);
         }
+        if (debounceTimeoutRef.current) {
+          clearTimeout(debounceTimeoutRef.current);
+        }
       };
     }
   }, [userId, updateCustodialBalance, loading]);
+   
+  // 🚀 IMPROVED: NON-DESTRUCTIVE socket listeners with new subscription system
+  useEffect(() => {
+    if (!userId || !socketConnected || socketListenersRef.current) return;
+    
+    console.log(`🔌 Dashboard: Setting up NON-DESTRUCTIVE balance listeners for user: ${userId}`);
+    socketListenersRef.current = true;
+    
+    const subscriptionIds: string[] = [];
+
+    const handleCustodialBalanceUpdate = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`💰 Dashboard REAL-TIME: Custodial balance update - ${data.custodialBalance?.toFixed(6)} SOL`);
+        
+        if (debounceTimeoutRef.current) {
+          clearTimeout(debounceTimeoutRef.current);
+        }
+        
+        debounceTimeoutRef.current = setTimeout(() => {
+          setCustodialBalance(parseFloat(data.custodialBalance) || 0);
+          setLastUpdated(Date.now());
+          
+          if (data.updateType === 'deposit_processed') {
+            toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL`);
+          } else if (data.updateType === 'cashout_processed') {
+            toast.success(`Cashout: +${data.change?.toFixed(3)} SOL`);
+          }
+        }, 1000);
+      }
+    };
+
+    const handleUserBalanceUpdate = (data: any) => {
+      if (data.userId === userId && data.balanceType === 'custodial') {
+        console.log(`💰 Dashboard REAL-TIME: User balance update - ${data.newBalance?.toFixed(6)} SOL`);
+        
+        if (debounceTimeoutRef.current) {
+          clearTimeout(debounceTimeoutRef.current);
+        }
+        
+        debounceTimeoutRef.current = setTimeout(() => {
+          setCustodialBalance(parseFloat(data.newBalance) || 0);
+          setLastUpdated(Date.now());
+        }, 1000);
+      }
+    };
+
+    const handleDepositConfirmation = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`💰 Dashboard REAL-TIME: Deposit confirmed for ${userId}`);
+        
+        setCustodialBalance(prev => prev + (parseFloat(data.depositAmount) || 0));
+        setLastUpdated(Date.now());
+        
+        setTimeout(() => {
+          updateCustodialBalance(true);
+        }, 3000);
+        
+        toast.success(`Deposit confirmed: +${data.depositAmount?.toFixed(3)} SOL!`);
+      }
+    };
+
+    // 🚀 NEW: Use the improved subscription system
+    subscriptionIds.push(
+      sharedSocket.subscribe('custodialBalanceUpdate', handleCustodialBalanceUpdate, 'dashboard-balance'),
+      sharedSocket.subscribe('userBalanceUpdate', handleUserBalanceUpdate, 'dashboard-balance'),
+      sharedSocket.subscribe('depositConfirmed', handleDepositConfirmation, 'dashboard-balance')
+    );
+    
+    return () => {
+      console.log(`🔌 Dashboard: Cleaning up NON-DESTRUCTIVE balance listeners for user: ${userId}`);
+      
+      // 🚀 NEW: Clean up using subscription IDs
+      subscriptionIds.forEach(id => sharedSocket.unsubscribe(id));
+      
+      socketListenersRef.current = false;
+      
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
+  }, [userId, socketConnected, updateCustodialBalance]);
 
   return { 
     custodialBalance, 
     loading, 
     lastUpdated, 
     updateCustodialBalance, 
-    forceRefresh
+    forceRefresh,
+    isConnected: socketConnected
   };
 };
-
-interface PlayerBet {
-  bet_amount: number;
-  profit_loss: number;
-  cashout_amount?: number;
-  cashout_multiplier?: number;
-  status: string;
-}
 
 const Dashboard: FC = () => {
   // Privy hooks
@@ -203,17 +405,34 @@ const Dashboard: FC = () => {
   // Validate wallet address
   const isValidWallet = isConnected && isValidSolanaAddress(walletAddress);
 
-  // 🚀 PASSIVE: Only monitor socket status, don't interfere
-  const { isConnected: socketConnected } = usePassiveSocketStatus();
+  // 🚀 IMPROVED: Use improved socket connection hook
+  const { 
+    isConnected: socketConnected, 
+    connectionAttempts, 
+    error: socketError,
+    signalPageActivity,
+    socket
+  } = useSocketConnection();
   
-  // 🚀 PASSIVE: Use polling-only custodial balance
+  // 🚀 FIXED: Now using correct parameters for useCustodialBalance
   const { 
     custodialBalance, 
     loading: custodialBalanceLoading, 
     updateCustodialBalance, 
     forceRefresh: refreshCustodialBalance,
-    lastUpdated: custodialLastUpdated
-  } = useCustodialBalance(userId || '');
+    lastUpdated: custodialLastUpdated,
+    isConnected: isSocketConnected
+  } = useCustodialBalance(userId || '', socketConnected);
+
+  // 🚀 NEW: Debug function for development
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      (window as any).debugSharedSocket = () => {
+        console.log('🔍 Dashboard: Shared socket status:', sharedSocket.getStatus());
+        sharedSocket.debugSubscriptions();
+      };
+    }
+  }, []);
   
   // Supabase client
   const supabase = getSupabaseClient();
@@ -247,6 +466,7 @@ const Dashboard: FC = () => {
   const [isManualRefreshing, setIsManualRefreshing] = useState<boolean>(false);
   
   const [statsLastUpdated, setStatsLastUpdated] = useState<number>(0);
+  const [isStatsUpdating, setIsStatsUpdating] = useState<boolean>(false);
   
   // Real-time connection status tracking
   const [realTimeStatus, setRealTimeStatus] = useState({
@@ -275,10 +495,10 @@ const Dashboard: FC = () => {
       ...prev,
       connected: socketConnected,
       lastHeartbeat: socketConnected ? Date.now() : prev.lastHeartbeat,
-      reconnectAttempts: 0,
-      error: null
+      reconnectAttempts: connectionAttempts,
+      error: socketError
     }));
-  }, [socketConnected]);
+  }, [socketConnected, connectionAttempts, socketError]);
 
   // User initialization
   useEffect(() => {
@@ -311,6 +531,12 @@ const Dashboard: FC = () => {
           initializationRef.current.lastUserId = userData.id;
           console.log(`👤 Dashboard: User ID set: ${userData.id}`);
           initializationRef.current.completed = true;
+          
+          // Initialize user via shared socket if available
+          if (socketConnected) {
+            console.log(`📡 Dashboard: Signaling user activity...`);
+            signalPageActivity();
+          }
         }
       } catch (error) {
         console.error('❌ Dashboard: Could not initialize user:', error);
@@ -321,7 +547,7 @@ const Dashboard: FC = () => {
     };
     
     initUser();
-  }, [authenticated, walletAddress]);
+  }, [authenticated, walletAddress, socketConnected, signalPageActivity]);
 
   // Reset initialization tracking when wallet changes
   useEffect(() => {
@@ -464,7 +690,7 @@ const Dashboard: FC = () => {
     }
   }, [userId, fetchLevelData]);
 
-  // 🚀 PASSIVE: User stats with polling only
+  // User stats fetch
   useEffect(() => {
     const fetchUserStats = async () => {
       if (!userId) {
@@ -513,8 +739,6 @@ const Dashboard: FC = () => {
             bestWinStreak: userStats.best_win_streak || 0
           });
           
-          setStatsLastUpdated(Date.now());
-          
           console.log(`📊 Dashboard: Stats updated from users_unified for ${userId}`);
         }
         
@@ -550,18 +774,246 @@ const Dashboard: FC = () => {
     };
 
     fetchUserStats();
-
-    // 🚀 PASSIVE: Set up periodic stats refresh (since no real-time events)
-    const statsInterval = setInterval(() => {
-      if (!isLoadingStats) {
-        fetchUserStats();
-      }
-    }, 60000); // Refresh every minute
-
-    return () => {
-      clearInterval(statsInterval);
-    };
   }, [userId, walletAddress]);
+
+  // 🚀 IMPROVED: NON-DESTRUCTIVE real-time stats updates with new subscription system
+  useEffect(() => {
+    if (!userId || !socketConnected) return;
+    
+    console.log(`📊 Dashboard: Setting up NON-DESTRUCTIVE stats listeners for user: ${userId}`);
+    
+    let statsRefreshTimeout: NodeJS.Timeout | null = null;
+    const subscriptionIds: string[] = [];
+    
+    const refreshStatsDebounced = () => {
+      if (statsRefreshTimeout) {
+        clearTimeout(statsRefreshTimeout);
+      }
+      
+      setIsStatsUpdating(true);
+      
+      statsRefreshTimeout = setTimeout(async () => {
+        console.log(`📊 Dashboard: Refreshing stats for ${userId} after event...`);
+        
+        try {
+          const userStats = await UserAPI.getUserStats(userId);
+          
+          if (userStats) {
+            console.log('📊 Dashboard: Stats updated:', userStats);
+            
+            setUserStats(prevStats => {
+              const newStats = {
+                totalWagered: userStats.total_wagered,
+                totalPayouts: userStats.total_won,
+                gamesPlayed: userStats.games_played,
+                profitLoss: userStats.net_profit
+              };
+              
+              if (JSON.stringify(prevStats) !== JSON.stringify(newStats)) {
+                console.log(`📊 Dashboard: Stats changed - updating display`);
+                setStatsLastUpdated(Date.now());
+                return newStats;
+              }
+              return prevStats;
+            });
+
+            setEnhancedUserStats(prevEnhanced => {
+              const newEnhanced = {
+                winRate: userStats.win_rate || 0,
+                bestMultiplier: userStats.best_multiplier || 0,
+                currentWinStreak: userStats.current_win_streak || 0,
+                bestWinStreak: userStats.best_win_streak || 0
+              };
+              
+              if (JSON.stringify(prevEnhanced) !== JSON.stringify(newEnhanced)) {
+                console.log(`📊 Dashboard: Enhanced stats changed - updating display`);
+                return newEnhanced;
+              }
+              return prevEnhanced;
+            });
+          }
+        } catch (error) {
+          console.error('❌ Dashboard: Failed to refresh stats:', error);
+        } finally {
+          setTimeout(() => setIsStatsUpdating(false), 500);
+        }
+      }, 2000);
+    };
+    
+    // 🚀 NEW: Only listen to completion events, not in-progress game events
+    const handleCustodialBetPlaced = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`🎯 Dashboard: Bet placed for ${userId} - refreshing stats...`);
+        refreshStatsDebounced();
+        
+        toast.success(`Bet placed: ${data.betAmount} SOL`, { 
+          duration: 2000,
+          id: 'bet-placed' 
+        });
+      }
+    };
+
+    const handleCustodialCashout = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`💸 Dashboard: Cashout processed for ${userId} - refreshing stats...`);
+        refreshStatsDebounced();
+        
+        if (data.payout && data.multiplier) {
+          toast.success(`Cashed out at ${data.multiplier.toFixed(2)}x: +${data.payout.toFixed(3)} SOL!`, { 
+            duration: 3000,
+            id: 'cashout-success' 
+          });
+        }
+      }
+    };
+
+    const handleGameEnd = (data: any) => {
+      console.log(`🎮 Dashboard: Game ended - refreshing stats for active players...`);
+      refreshStatsDebounced();
+    };
+
+    const handleUserStatsUpdate = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`📊 Dashboard: Direct stats update received for ${userId}`);
+        
+        if (data.stats) {
+          setUserStats({
+            totalWagered: data.stats.total_wagered || 0,
+            totalPayouts: data.stats.total_won || 0,
+            gamesPlayed: data.stats.games_played || 0,
+            profitLoss: data.stats.net_profit || 0
+          });
+
+          setEnhancedUserStats({
+            winRate: data.stats.win_rate || 0,
+            bestMultiplier: data.stats.best_multiplier || 0,
+            currentWinStreak: data.stats.current_win_streak || 0,
+            bestWinStreak: data.stats.best_win_streak || 0
+          });
+        } else {
+          refreshStatsDebounced();
+        }
+      }
+    };
+
+    const handleBetResult = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`🎲 Dashboard: Bet result received for ${userId}:`, data);
+        refreshStatsDebounced();
+      }
+    };
+
+    // 🚀 NEW: DO NOT listen to multiplierUpdate, gameState, etc. - let main component handle them
+
+    // 🚀 NEW: Use improved subscription system
+    subscriptionIds.push(
+      sharedSocket.subscribe('custodialBetPlaced', handleCustodialBetPlaced, 'dashboard-stats'),
+      sharedSocket.subscribe('custodialCashout', handleCustodialCashout, 'dashboard-stats'),
+      sharedSocket.subscribe('gameEnd', handleGameEnd, 'dashboard-stats'),
+      sharedSocket.subscribe('userStatsUpdate', handleUserStatsUpdate, 'dashboard-stats'),
+      sharedSocket.subscribe('betResult', handleBetResult, 'dashboard-stats')
+    );
+    
+    return () => {
+      console.log(`📊 Dashboard: Cleaning up NON-DESTRUCTIVE stats listeners for user: ${userId}`);
+      
+      // 🚀 NEW: Clean up using subscription IDs
+      subscriptionIds.forEach(id => sharedSocket.unsubscribe(id));
+      
+      if (statsRefreshTimeout) {
+        clearTimeout(statsRefreshTimeout);
+      }
+    };
+  }, [userId, socketConnected]);
+
+  // Transaction confirmation listener with improved subscription system
+  useEffect(() => {
+    if (!userId || !walletAddress || !socketConnected) return;
+    
+    console.log(`🔌 Dashboard: Setting up transaction listeners for user: ${userId}`);
+    
+    let walletRefreshTimeout: NodeJS.Timeout | null = null;
+    const subscriptionIds: string[] = [];
+    
+    const debouncedWalletRefresh = () => {
+      if (walletRefreshTimeout) {
+        clearTimeout(walletRefreshTimeout);
+      }
+      
+      walletRefreshTimeout = setTimeout(async () => {
+        console.log(`💼 Dashboard: Debounced wallet refresh for ${walletAddress}`);
+        
+        try {
+          const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
+          const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
+          
+          if (rpcUrl) {
+            const connectionConfig: any = { commitment: 'confirmed' };
+            if (apiKey) connectionConfig.httpHeaders = { 'x-api-key': apiKey };
+            
+            const connection = new Connection(rpcUrl, connectionConfig);
+            const publicKey = safeCreatePublicKey(walletAddress);
+            
+            if (publicKey) {
+              const lamports = await connection.getBalance(publicKey);
+              const newBalance = lamports / LAMPORTS_PER_SOL;
+              
+              setWalletBalance(prevBalance => {
+                if (Math.abs(prevBalance - newBalance) > 0.0001) {
+                  console.log(`💼 Dashboard: Wallet balance updated: ${newBalance.toFixed(6)} SOL`);
+                  return newBalance;
+                }
+                return prevBalance;
+              });
+            }
+          }
+        } catch (error) {
+          console.error('❌ Dashboard: Failed to refresh wallet balance:', error);
+        }
+      }, 3000);
+    };
+
+    const handleTransactionConfirmed = (data: any) => {
+      if (data.userId === userId || data.walletAddress === walletAddress) {
+        console.log(`🔗 Dashboard: Transaction confirmed - scheduling wallet refresh`);
+        debouncedWalletRefresh();
+      }
+    };
+
+    // 🚀 NEW: Use improved subscription system
+    subscriptionIds.push(
+      sharedSocket.subscribe('transactionConfirmed', handleTransactionConfirmed, 'dashboard-transactions')
+    );
+    
+    return () => {
+      console.log(`🔌 Dashboard: Cleaning up transaction listeners for user: ${userId}`);
+      
+      // 🚀 NEW: Clean up using subscription IDs
+      subscriptionIds.forEach(id => sharedSocket.unsubscribe(id));
+      
+      if (walletRefreshTimeout) clearTimeout(walletRefreshTimeout);
+    };
+  }, [userId, walletAddress, socketConnected]);
+
+  // 🚀 NEW: Component cleanup to unsubscribe all dashboard events
+  useEffect(() => {
+    return () => {
+      console.log('🧹 Dashboard: Component unmounting - cleaning up all subscriptions');
+      // Clean up all dashboard-related subscriptions
+      sharedSocket.unsubscribeComponent('dashboard-balance');
+      sharedSocket.unsubscribeComponent('dashboard-stats');
+      sharedSocket.unsubscribeComponent('dashboard-transactions');
+      
+      // Final inactive signal
+      if (sharedSocket.isConnected()) {
+        sharedSocket.emit('pageActivity', { 
+          page: 'dashboard',
+          action: 'unmount',
+          timestamp: Date.now()
+        });
+      }
+    };
+  }, []);
 
   // Enhanced refresh function
   const refreshData = useCallback(async () => {
@@ -629,8 +1081,6 @@ const Dashboard: FC = () => {
             bestWinStreak: userStats.best_win_streak || 0
           });
           
-          setStatsLastUpdated(Date.now());
-          
           console.log('📊 Dashboard: Manual stats refresh completed');
         }
       } catch (error) {
@@ -649,14 +1099,6 @@ const Dashboard: FC = () => {
       setIsManualRefreshing(false);
     }
   }, [isValidWallet, userId, walletAddress, refreshCustodialBalance, fetchLevelData]);
-
-  // 🚀 PASSIVE: Minimal component cleanup
-  useEffect(() => {
-    return () => {
-      console.log('🧹 Dashboard: Component unmounting - PASSIVE cleanup (no socket interference)');
-      // No socket cleanup needed - we don't listen to any events
-    };
-  }, []);
 
   // Loading state while Privy initializes
   if (!ready) {
@@ -683,23 +1125,32 @@ const Dashboard: FC = () => {
         <div className="scrollable-content-area">
           <div className="scrollable-inner-content">
             <div className="max-w-7xl mx-auto px-4 py-8">
-              {/* 🚀 PASSIVE: Header with simple connection status */}
+              {/* 🚀 NEW: Header with improved real-time status */}
               <div className="flex justify-between items-center mb-6">
                 <div className="flex items-center gap-4">
                   <h1 className="text-3xl font-bold text-white">Dashboard</h1>
                   
-                  {/* Simple connection indicator */}
+                  {/* Real-time status indicator */}
                   <div className="flex items-center gap-2">
                     {realTimeStatus.connected ? (
-                      <div className="flex items-center text-sm text-blue-400">
+                      <div className="flex items-center text-sm text-green-400">
                         <Wifi size={16} className="mr-1" />
-                        <span>Polling</span>
-                        <div className="w-2 h-2 bg-blue-400 rounded-full ml-1"></div>
+                        <span>Live</span>
+                        <div className="w-2 h-2 bg-green-400 rounded-full ml-1 animate-pulse"></div>
                       </div>
                     ) : (
-                      <div className="flex items-center text-sm text-yellow-400">
+                      <div className="flex items-center text-sm text-red-400">
                         <WifiOff size={16} className="mr-1" />
                         <span>Offline</span>
+                        {realTimeStatus.reconnectAttempts > 0 && (
+                          <span className="ml-1 text-xs">({realTimeStatus.reconnectAttempts})</span>
+                        )}
+                      </div>
+                    )}
+                    
+                    {realTimeStatus.error && (
+                      <div className="text-xs text-yellow-400 ml-2" title={realTimeStatus.error}>
+                        <AlertCircle size={12} />
                       </div>
                     )}
                   </div>
@@ -707,11 +1158,13 @@ const Dashboard: FC = () => {
                 
                 {(isValidWallet && userId) && (
                   <div className="flex items-center gap-3">
-                    {/* Polling indicator */}
-                    <div className="flex items-center text-xs text-blue-400 bg-blue-900/20 px-2 py-1 rounded border border-blue-700/30">
-                      <RefreshCw size={12} className="mr-1" />
-                      Auto-Polling
-                    </div>
+                    {/* Real-time toggle indicator */}
+                    {realTimeStatus.connected && (
+                      <div className="flex items-center text-xs text-green-400 bg-green-900/20 px-2 py-1 rounded border border-green-700/30">
+                        <Zap size={12} className="mr-1" />
+                        Auto-Update
+                      </div>
+                    )}
                     
                     <button
                       onClick={refreshData}
@@ -798,17 +1251,24 @@ const Dashboard: FC = () => {
                 </div>
               )}
 
-              {/* 🚀 PASSIVE: Wallet Status with polling indicators */}
+              {/* 🚀 ENHANCED: Wallet Status with connection indicators */}
               <div className="bg-gray-900 rounded-lg p-6 mb-8">
                 <h2 className="text-xl font-bold text-white mb-4 flex items-center">
                   <Wallet size={20} className="mr-2" />
                   Wallet Status
                   {isValidWallet && (
                     <div className="ml-3 flex items-center gap-2">
-                      <div className="flex items-center text-xs text-blue-400">
-                        <RefreshCw size={12} className="mr-1" />
-                        Polling updates
-                      </div>
+                      {isSocketConnected ? (
+                        <div className="flex items-center text-xs text-green-400">
+                          <div className="w-2 h-2 bg-green-400 rounded-full mr-1 animate-pulse"></div>
+                          Real-time
+                        </div>
+                      ) : (
+                        <div className="flex items-center text-xs text-yellow-400">
+                          <AlertCircle size={12} className="mr-1" />
+                          Limited updates
+                        </div>
+                      )}
                     </div>
                   )}
                 </h2>
@@ -842,7 +1302,9 @@ const Dashboard: FC = () => {
                             <span className="mr-2">🎮</span>
                             Game Balance
                           </div>
-                          <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                          {isSocketConnected && (
+                            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                          )}
                         </div>
                         <div className="text-2xl font-bold text-green-400">
                           {custodialBalanceLoading ? (
@@ -908,20 +1370,28 @@ const Dashboard: FC = () => {
                 />
               )}
 
-              {/* 🚀 PASSIVE: Game Statistics with polling indicators */}
+              {/* 🚀 ENHANCED: Game Statistics with improved real-time indicators */}
               {isValidWallet && (
                 <div className="bg-gray-900 rounded-lg p-6 mb-8">
                   <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-bold text-white flex items-center">
                       <TrendingUp size={20} className="mr-2" />
                       Game Statistics
+                      {isStatsUpdating && (
+                        <div className="ml-3 flex items-center text-green-400 text-sm">
+                          <div className="animate-pulse w-2 h-2 bg-green-400 rounded-full mr-2"></div>
+                          Updating...
+                        </div>
+                      )}
                     </h2>
                     
                     <div className="flex items-center gap-3">
-                      <div className="flex items-center text-xs text-blue-400">
-                        <RefreshCw size={12} className="mr-1" />
-                        Auto-polling
-                      </div>
+                      {realTimeStatus.connected && (
+                        <div className="flex items-center text-xs text-green-400">
+                          <Zap size={12} className="mr-1" />
+                          Live Updates
+                        </div>
+                      )}
                       
                       <div className="text-xs text-gray-500">
                         {statsLastUpdated > 0 && (
@@ -943,7 +1413,7 @@ const Dashboard: FC = () => {
                   ) : (
                     <>
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-                        <div>
+                        <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-50' : ''}`}>
                           <div className="text-gray-400 mb-1">Total Wagered</div>
                           <div className="text-2xl font-bold text-white">
                             {userStats.totalWagered.toFixed(3)} SOL
@@ -953,7 +1423,7 @@ const Dashboard: FC = () => {
                           </div>
                         </div>
                         
-                        <div>
+                        <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-green-400 ring-opacity-50' : ''}`}>
                           <div className="text-gray-400 mb-1">Total Won</div>
                           <div className="text-2xl font-bold text-green-400">
                             {userStats.totalPayouts.toFixed(3)} SOL
@@ -963,7 +1433,7 @@ const Dashboard: FC = () => {
                           </div>
                         </div>
                         
-                        <div>
+                        <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-purple-400 ring-opacity-50' : ''}`}>
                           <div className="text-gray-400 mb-1">Games Played</div>
                           <div className="text-2xl font-bold text-white">
                             {userStats.gamesPlayed}
@@ -973,7 +1443,7 @@ const Dashboard: FC = () => {
                           </div>
                         </div>
                         
-                        <div>
+                        <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-yellow-400 ring-opacity-50' : ''}`}>
                           <div className="text-gray-400 mb-1">Net Profit/Loss</div>
                           <div className={`text-2xl font-bold ${userStats.profitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {userStats.profitLoss >= 0 ? '+' : ''}{userStats.profitLoss.toFixed(3)} SOL
@@ -986,7 +1456,7 @@ const Dashboard: FC = () => {
 
                       {(enhancedUserStats.winRate > 0 || enhancedUserStats.bestMultiplier > 0 || userStats.gamesPlayed > 0) && (
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 border-t border-gray-700">
-                          <div>
+                          <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-30' : ''}`}>
                             <div className="text-gray-400 mb-1">Win Rate</div>
                             <div className="text-lg font-bold text-blue-400">
                             {enhancedUserStats.winRate.toFixed(1)}%
@@ -996,7 +1466,7 @@ const Dashboard: FC = () => {
                             </div>
                           </div>
                           
-                          <div>
+                          <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-purple-400 ring-opacity-30' : ''}`}>
                           <div className="text-gray-400 mb-1">Best Multiplier</div>
                             <div className="text-lg font-bold text-purple-400">
                               {enhancedUserStats.bestMultiplier.toFixed(2)}x
@@ -1006,7 +1476,7 @@ const Dashboard: FC = () => {
                             </div>
                           </div>
                           
-                          <div>
+                          <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-yellow-400 ring-opacity-30' : ''}`}>
                             <div className="text-gray-400 mb-1">Current Streak</div>
                             <div className="text-lg font-bold text-yellow-400">
                               {enhancedUserStats.currentWinStreak} wins
@@ -1016,7 +1486,7 @@ const Dashboard: FC = () => {
                             </div>
                           </div>
                           
-                          <div>
+                          <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-orange-400 ring-opacity-30' : ''}`}>
                             <div className="text-gray-400 mb-1">Best Streak</div>
                             <div className="text-lg font-bold text-orange-400">
                               {enhancedUserStats.bestWinStreak} wins
@@ -1031,8 +1501,17 @@ const Dashboard: FC = () => {
                       <div className="mt-4 pt-4 border-t border-gray-700">
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <div className="flex items-center">
-                            <div className="w-2 h-2 bg-blue-400 rounded-full mr-2"></div>
-                            <span>Stats update via polling (every minute)</span>
+                            {realTimeStatus.connected ? (
+                              <>
+                                <div className="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div>
+                                <span>Stats update automatically when you play</span>
+                              </>
+                            ) : (
+                              <>
+                                <div className="w-2 h-2 bg-yellow-400 rounded-full mr-2"></div>
+                                <span>Limited updates - connection issues</span>
+                              </>
+                            )}
                           </div>
                           <span>
                             Last sync: {statsLastUpdated > 0 ? new Date(statsLastUpdated).toLocaleTimeString() : 'Not yet synced'}

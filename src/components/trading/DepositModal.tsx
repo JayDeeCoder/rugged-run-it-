@@ -550,7 +550,7 @@ const DepositModal: FC<DepositModalProps> = ({
                 {/* Amount Input */}
                 <div className="mb-3">
                   <label className="block text-gray-400 text-xs mb-1">
-                    Transfer Amount (SOL) - Min: 0.001, Max: {embeddedWalletBalance.toFixed(3)}
+                    Transfer Amount (SOL) - Min: 0.005, Max: {embeddedWalletBalance.toFixed(3)}
                   </label>
                   <div className="flex">
                     <input
@@ -558,7 +558,7 @@ const DepositModal: FC<DepositModalProps> = ({
                       value={amount}
                       onChange={handleAmountChange}
                       className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-l-md focus:outline-none"
-                      placeholder="0.001"
+                      placeholder="0.005"
                       disabled={!addressValidated}
                     />
                     <button
@@ -592,14 +592,14 @@ const DepositModal: FC<DepositModalProps> = ({
                 </div>
 
                 {/* Transfer All Button */}
-                {embeddedWalletBalance > 0.001 && (
+                {embeddedWalletBalance > 0.005 && (
                   <button
                     onClick={handleTransferAll}
                     disabled={transferLoading || !addressValidated}
                     className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white py-2 px-3 rounded text-sm mb-3 flex items-center justify-center transition-colors"
                   >
                     <ArrowRightLeft size={14} className="mr-1" />
-                    Transfer All ({(embeddedWalletBalance - 0.001).toFixed(3)} SOL)
+                    Transfer All ({(embeddedWalletBalance - 0.005).toFixed(3)} SOL)
                   </button>
                 )}
                 

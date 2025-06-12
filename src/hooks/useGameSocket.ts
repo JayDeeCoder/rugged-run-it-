@@ -1,6 +1,9 @@
-// Enhanced useGameSocket hook with IMPROVED GAME STATE SYNCHRONIZATION
-// 🔧 FIXES: "Received multiplier update for different game" error
-// ✅ FIXED: TypeScript errors with liquidityBreakdown properties
+// 🚀 ULTRA-FAST Enhanced useGameSocket hook with LIGHTNING-FAST SYNC
+// ✅ FIXES: "Received multiplier update for different game" error
+// ⚡ PERFORMANCE: Ultra-fast sync with minimal delays (100ms-500ms vs 2000ms)
+// 🚨 CRITICAL SYNC: Emergency recovery for missing game states
+// 📈 PREDICTIVE: Immediate state updates while syncing
+// 🔧 OPTIMIZED: TypeScript errors resolved with safe type handling
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
@@ -258,20 +261,29 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     return false;
   }, []);
 
-  // 🔧 ENHANCED: Smart sync request with debouncing
-  const requestGameSync = useCallback((reason: string = 'generic') => {
+  // 🚀 ULTRA-FAST: Smart sync request with minimal debouncing for real-time gaming
+  const requestGameSync = useCallback((reason: string = 'generic', priority: 'low' | 'high' | 'critical' = 'low') => {
     if (!socket?.connected) return;
     
     const now = Date.now();
     const timeSinceLastSync = now - lastSyncRequestRef.current;
     
-    // Debounce sync requests (max 1 per 2 seconds)
-    if (timeSinceLastSync < 2000) {
-      console.log(`🔧 Game Socket: Sync request debounced (${reason})`);
+    // Critical sync requests bypass debouncing entirely
+    if (priority === 'critical') {
+      console.log(`🚨 Game Socket: CRITICAL sync request (${reason}) - bypassing debounce`);
+    }
+    // High priority sync requests have minimal debouncing (200ms)
+    else if (priority === 'high' && timeSinceLastSync < 200) {
+      console.log(`⚡ Game Socket: High priority sync debounced (${reason}) - ${200 - timeSinceLastSync}ms remaining`);
+      return;
+    }
+    // Low priority sync requests have normal debouncing (500ms - reduced from 2000ms)
+    else if (priority === 'low' && timeSinceLastSync < 500) {
+      console.log(`🔧 Game Socket: Sync request debounced (${reason}) - ${500 - timeSinceLastSync}ms remaining`);
       return;
     }
     
-    console.log(`🔄 Game Socket: Requesting game sync (${reason})`);
+    console.log(`🔄 Game Socket: Requesting ${priority} priority game sync (${reason})`);
     lastSyncRequestRef.current = now;
     
     // Set sync status
@@ -282,6 +294,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     
     socket.emit('requestGameSync', {
       reason,
+      priority,
       currentGameNumber: gameStateRef.current?.gameNumber,
       currentGameId: gameStateRef.current?.id,
       timestamp: now
@@ -334,8 +347,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
         
-        // Request sync instead of accepting invalid update
-        requestGameSync(`invalid_update_from_${source}`);
+        // 🚀 CRITICAL: Request immediate sync for invalid updates
+        requestGameSync(`invalid_update_from_${source}`, 'critical');
         return false;
       }
 
@@ -381,6 +394,29 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     }
   }, [isValidGameUpdate, requestGameSync]);
 
+  // 🚀 NEW: Immediate state recovery function for critical situations
+  const recoverGameState = useCallback((reason: string, fallbackData?: any) => {
+    console.log(`🚨 Game Socket: Initiating immediate state recovery (${reason})`);
+    
+    // If we have fallback data, use it immediately to reduce perceived delay
+    if (fallbackData && !gameStateRef.current) {
+      console.log('⚡ Game Socket: Using fallback data for immediate recovery');
+      updateGameState(fallbackData, `fallback_${reason}`, true);
+    }
+    
+    // Request critical sync
+    requestGameSync(reason, 'critical');
+    
+    // Emergency: try to get game state from server immediately
+    if (socket?.connected) {
+      socket.emit('getGameState', { 
+        emergency: true, 
+        reason,
+        timestamp: Date.now()
+      });
+    }
+  }, [socket, updateGameState, requestGameSync]);
+
   // 🔧 ENHANCED: Connection with improved game state handling
   useEffect(() => {
     if (socketInitRef.current) return;
@@ -419,11 +455,15 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           setConnectionError(null);
           setConnectionAttempts(0);
           
-          // 🔧 ENHANCED: Always request fresh game state on connect
+          // 🚀 ULTRA-FAST: Request immediate game state on connect
           setTimeout(() => {
             console.log('🔄 Game Socket: Requesting initial game sync...');
-            gameSocket.emit('requestGameSync', { reason: 'initial_connect' });
-          }, 500);
+            gameSocket.emit('requestGameSync', { 
+              reason: 'initial_connect',
+              priority: 'critical',
+              timestamp: Date.now()
+            });
+          }, 100); // Reduced from 500ms to 100ms
           
           // Auto-initialize user if available
           if (userId && walletAddress) {
@@ -498,14 +538,24 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        // ✅ FIXED: Enhanced multiplier update handler with proper validation and type safety
+        // ✅ ULTRA-FAST: Enhanced multiplier update handler with predictive state and critical sync
         gameSocket.on('multiplierUpdate', (data: any) => {
           // Enhanced validation and logging
           const currentGame = gameStateRef.current;
           
           if (!currentGame) {
-            console.log('🔧 Game Socket: No current game for multiplier update, requesting sync...');
-            requestGameSync('no_current_game');
+            console.log('🚨 Game Socket: CRITICAL - No current game for multiplier update, initiating emergency recovery...');
+            
+            // 🚀 EMERGENCY: Use recovery function with fallback data
+            recoverGameState('no_current_game_multiplier', {
+              gameId: data.gameId,
+              gameNumber: data.gameNumber,
+              multiplier: data.multiplier,
+              status: 'active',
+              serverTime: data.serverTime,
+              boostedPlayerCount: data.boostedPlayerCount,
+              boostedTotalBets: data.boostedTotalBets
+            });
             return;
           }
 
@@ -533,12 +583,12 @@ export function useGameSocket(walletAddress: string, userId?: string) {
               }
             });
             
-            // Only request sync if we haven't done so recently
-            requestGameSync('multiplier_game_mismatch');
+            // 🚀 HIGH PRIORITY: Fast sync for game mismatches
+            requestGameSync('multiplier_game_mismatch', 'high');
             return;
           }
 
-          // Update is valid, apply it with proper type safety
+          // ⚡ INSTANT: Update is valid, apply it immediately
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
@@ -640,18 +690,25 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }, 'gameWaiting');
         });
 
-        // 🔧 ENHANCED: Server sync handler
+        // 🚀 ULTRA-FAST: Server sync handler with immediate state recovery
         gameSocket.on('serverSync', (data: any) => {
+          console.log('⚡ Game Socket: Server sync received - immediate processing');
+          
           if (data.serverTime) {
             syncServerTime(data.serverTime);
           }
           
+          // Immediate UI state updates for better responsiveness
           if (data.countdown && data.countdown > 0) {
             setCountdown(data.countdown);
             setIsWaitingPeriod(true);
             setCanBet(data.canBet !== false);
           } else if (data.status === 'waiting') {
             setIsWaitingPeriod(true);
+          } else if (data.status === 'active') {
+            setIsWaitingPeriod(false);
+            setCountdown(0);
+            setCanBet(true);
           } else {
             setIsWaitingPeriod(false);
             setCountdown(0);
@@ -666,11 +723,12 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           }
         });
 
-        // 🔧 ENHANCED: Game sync response handler
+        // 🚀 ULTRA-FAST: Game sync response handler with immediate processing
         gameSocket.on('gameSync', (data: any) => {
-          console.log('🔄 Game Socket: Game sync response received:', {
+          console.log('⚡ Game Socket: Game sync response received (PRIORITY PROCESSING):', {
             gameNumber: data.gameNumber,
-            status: data.status
+            status: data.status,
+            multiplier: data.multiplier
           });
           
           if (data.serverTime) {
@@ -680,8 +738,17 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           if (data.status) {
             const updated = updateGameState(data, 'gameSync', true); // Force update for sync responses
             
-            if (updated && data.status === 'waiting' && data.countdown !== undefined) {
-              updateCountdownState(data.countdown, 'waiting');
+            if (updated) {
+              // Immediately update UI state for better responsiveness
+              if (data.status === 'active') {
+                setCanBet(true);
+                setIsWaitingPeriod(false);
+                setCountdown(0);
+              } else if (data.status === 'waiting' && data.countdown !== undefined) {
+                updateCountdownState(data.countdown, 'waiting');
+              }
+              
+              console.log('✅ Game Socket: Fast sync completed - UI updated');
             }
           }
         });
@@ -706,6 +773,35 @@ export function useGameSocket(walletAddress: string, userId?: string) {
             
             gameStateRef.current = updatedGame;
             setCurrentGame(updatedGame);
+          }
+        });
+
+        // 🚀 NEW: Emergency game state handler for immediate recovery
+        gameSocket.on('emergencyGameState', (data: any) => {
+          console.log('🚨 Game Socket: Emergency game state received - immediate processing!');
+          
+          if (data.serverTime) {
+            syncServerTime(data.serverTime);
+          }
+          
+          // Force update the game state immediately
+          const updated = updateGameState(data, 'emergencyGameState', true);
+          
+          if (updated) {
+            // Update UI state immediately based on game status
+            if (data.status === 'active') {
+              setCanBet(true);
+              setIsWaitingPeriod(false);
+              setCountdown(0);
+            } else if (data.status === 'waiting') {
+              setIsWaitingPeriod(true);
+              setCanBet(data.canBet !== false);
+              if (data.countdown) {
+                setCountdown(data.countdown);
+              }
+            }
+            
+            console.log('✅ Game Socket: Emergency recovery completed successfully');
           }
         });
 
@@ -764,10 +860,8 @@ export function useGameSocket(walletAddress: string, userId?: string) {
 
         gameSocket.on('playerCashedOut', (data: any) => {
           if (gameStateRef.current && gameStateRef.current.id === data.gameId) {
-            // Trigger a refresh to get latest values
-            if (gameSocket.connected) {
-              gameSocket.emit('requestGameSync', { reason: 'post_cashout' });
-            }
+            // Trigger a refresh to get latest values - using requestGameSync instead of direct emit
+            requestGameSync('post_cashout', 'high');
           }
         });
 
@@ -793,28 +887,42 @@ export function useGameSocket(walletAddress: string, userId?: string) {
           setGameHistory(mappedHistory);
         });
 
-        // 🔧 ENHANCED: More frequent sync for better state management
+        // 🚀 ULTRA-FAST: Aggressive sync for real-time gaming
         const syncInterval = setInterval(() => {
           if (gameSocket.connected) {
             // Only request sync if our game state seems outdated
             if (gameStateRef.current) {
               const timeSinceLastUpdate = Date.now() - (gameStateRef.current.lastUpdate || 0);
-              if (timeSinceLastUpdate > 30000) { // 30 seconds
-                console.log('🔄 Game Socket: Game state seems outdated, requesting sync...');
-                gameSocket.emit('requestGameSync', { reason: 'periodic_stale_check' });
+              // Reduced from 30 seconds to 10 seconds for more responsive sync
+              if (timeSinceLastUpdate > 10000) {
+                console.log('🔄 Game Socket: Game state seems outdated, requesting high priority sync...');
+                requestGameSync('periodic_stale_check', 'high');
               }
             } else {
-              // No current game, request sync
-              gameSocket.emit('requestGameSync', { reason: 'periodic_no_game' });
+              // No current game, request critical sync
+              console.log('🚨 Game Socket: No current game state, requesting critical sync...');
+              requestGameSync('periodic_no_game', 'critical');
             }
           } else if (!gameSocket.connected) {
             console.warn('⚠️ Game Socket: Socket disconnected during sync check');
           }
-        }, 15000); // Check every 15 seconds
+        }, 5000); // Reduced from 15 seconds to 5 seconds for faster detection
+
+        // 🚀 NEW: Ultra-fast heartbeat for active games (every 2 seconds during gameplay)
+        const fastHeartbeat = setInterval(() => {
+          if (gameSocket.connected && gameStateRef.current?.status === 'active') {
+            const timeSinceLastUpdate = Date.now() - (gameStateRef.current.lastUpdate || 0);
+            if (timeSinceLastUpdate > 3000) { // 3 seconds without update during active game
+              console.log('💓 Game Socket: Fast heartbeat - requesting sync during active game');
+              requestGameSync('active_game_heartbeat', 'high');
+            }
+          }
+        }, 2000); // Very fast check every 2 seconds during active games
 
         // Cleanup function
         return () => {
           clearInterval(syncInterval);
+          clearInterval(fastHeartbeat);
           if (syncTimeoutRef.current) {
             clearTimeout(syncTimeoutRef.current);
           }
@@ -830,7 +938,7 @@ export function useGameSocket(walletAddress: string, userId?: string) {
     };
 
     initConnection();
-  }, [walletAddress, userId, syncServerTime, updateCountdownState, updateGameState, requestGameSync]);
+  }, [walletAddress, userId, syncServerTime, updateCountdownState, updateGameState, requestGameSync, recoverGameState]);
 
   // 🔧 Rest of the functions remain the same...
   const placeBet = useCallback(async (

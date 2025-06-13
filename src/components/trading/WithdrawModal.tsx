@@ -44,7 +44,7 @@ interface WithdrawModalProps {
 
 type WithdrawStep = 'transfer' | 'withdraw';
 
-// Same embedded wallet balance hook as TradingControls and DepositModal
+// Same embedded wallet balance hook with strategic refresh
 const useWalletBalance = (walletAddress: string) => {
   const [balance, setBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -52,6 +52,7 @@ const useWalletBalance = (walletAddress: string) => {
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastWalletRef = useRef<string>('');
   const socketListenersRef = useRef<boolean>(false);
+  const lastSocketRefreshRef = useRef<number>(0);
 
   const updateBalance = useCallback(async () => {
     if (!walletAddress) return;
@@ -91,13 +92,21 @@ const useWalletBalance = (walletAddress: string) => {
 
   const forceRefresh = useCallback(async () => {
     if (!walletAddress) return;
-    console.log(`🔄 Force refreshing wallet balance for: ${walletAddress}`);
+    
+    const now = Date.now();
+    // Strategic debounce - prevent refreshes within 5 seconds
+    if (now - lastUpdated < 5000) {
+      console.log('🛑 WithdrawModal: Embedded wallet refresh blocked - too frequent');
+      return;
+    }
+    
+    console.log(`🔄 WithdrawModal: Strategic embedded wallet refresh for: ${walletAddress}`);
     await updateBalance();
-  }, [walletAddress, updateBalance]);
+  }, [walletAddress, updateBalance, lastUpdated]);
 
   useEffect(() => {
     if (walletAddress && walletAddress !== lastWalletRef.current) {
-      console.log(`🎯 Setting up wallet balance polling for: ${walletAddress}`);
+      console.log(`🎯 WithdrawModal: Setting up strategic wallet polling for: ${walletAddress}`);
       lastWalletRef.current = walletAddress;
       
       if (updateIntervalRef.current) {
@@ -106,11 +115,12 @@ const useWalletBalance = (walletAddress: string) => {
       
       updateBalance();
       
+      // Reduced polling frequency - every 30 seconds
       updateIntervalRef.current = setInterval(() => {
         if (!loading) {
           updateBalance();
         }
-      }, 15000);
+      }, 30000);
       
       return () => {
         if (updateIntervalRef.current) {
@@ -120,18 +130,18 @@ const useWalletBalance = (walletAddress: string) => {
     }
   }, [walletAddress, updateBalance]);
 
-  // Socket listeners for real-time updates
+  // Strategic socket listeners with smart debouncing
   useEffect(() => {
     if (!walletAddress || socketListenersRef.current) return;
     
     const socket = (window as any).gameSocket;
     if (socket) {
-      console.log(`🔌 Setting up REAL-TIME wallet balance listeners for: ${walletAddress}`);
+      console.log(`🔌 WithdrawModal: Setting up strategic socket listeners for: ${walletAddress}`);
       socketListenersRef.current = true;
       
       const handleWalletBalanceUpdate = (data: any) => {
         if (data.walletAddress === walletAddress) {
-          console.log(`💰 REAL-TIME: Wallet balance update - ${data.balance?.toFixed(6)} SOL`);
+          console.log(`💰 WithdrawModal: Real-time balance update - ${data.balance?.toFixed(6)} SOL`);
           setBalance(parseFloat(data.balance) || 0);
           setLastUpdated(Date.now());
         }
@@ -139,8 +149,18 @@ const useWalletBalance = (walletAddress: string) => {
 
       const handleTransactionConfirmed = (data: any) => {
         if (data.walletAddress === walletAddress) {
-          console.log(`🔗 REAL-TIME: Transaction confirmed for ${walletAddress}, refreshing balance...`);
-          setTimeout(forceRefresh, 2000);
+          const now = Date.now();
+          
+          // Strategic debounce for socket-triggered refreshes
+          if (now - lastSocketRefreshRef.current < 10000) {
+            console.log('🛑 WithdrawModal: Socket refresh blocked - too frequent');
+            return;
+          }
+          
+          lastSocketRefreshRef.current = now;
+          console.log(`🔗 WithdrawModal: Transaction confirmed, scheduling strategic refresh in 5s`);
+          
+          setTimeout(forceRefresh, 5000); // Increased delay to 5 seconds
         }
       };
 
@@ -148,7 +168,7 @@ const useWalletBalance = (walletAddress: string) => {
       socket.on('transactionConfirmed', handleTransactionConfirmed);
       
       return () => {
-        console.log(`🔌 Cleaning up REAL-TIME wallet balance listeners for: ${walletAddress}`);
+        console.log(`🔌 WithdrawModal: Cleaning up socket listeners for: ${walletAddress}`);
         socket.off('walletBalanceUpdate', handleWalletBalanceUpdate);
         socket.off('transactionConfirmed', handleTransactionConfirmed);
         socketListenersRef.current = false;
@@ -176,7 +196,7 @@ const BalanceDisplay: FC<{
           onClick={onRefresh}
           className="absolute top-1 right-1 text-gray-400 hover:text-blue-400 transition-colors p-1 rounded hover:bg-gray-700"
           disabled={isLoading}
-          title="Refresh all balances"
+          title={isLoading ? "Refreshing..." : "Refresh all balances"}
         >
           <span className={`text-sm ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
         </button>
@@ -264,13 +284,47 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     return () => setMounted(false);
   }, []);
   
-  // Refresh function for all balances
+  // Strategic refresh with debouncing
+  const [lastRefreshTime, setLastRefreshTime] = useState<number>(0);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Refresh function for all balances with strategic timing
   const refreshAllBalances = useCallback(() => {
-    refreshCustodialBalance();
-    if (embeddedWalletAddress) {
-      refreshEmbeddedBalance();
+    const now = Date.now();
+    
+    // Prevent rapid successive refreshes (minimum 3 seconds between)
+    if (now - lastRefreshTime < 3000) {
+      console.log('🛑 WithdrawModal: Refresh blocked - too frequent');
+      return;
     }
-  }, [refreshCustodialBalance, refreshEmbeddedBalance, embeddedWalletAddress]);
+    
+    console.log('🔄 WithdrawModal: Strategic refresh triggered');
+    setLastRefreshTime(now);
+    
+    // Clear any pending refresh
+    if (refreshTimeoutRef.current) {
+      clearTimeout(refreshTimeoutRef.current);
+    }
+    
+    // Stagger the refreshes to prevent collision
+    refreshCustodialBalance();
+    
+    if (embeddedWalletAddress) {
+      refreshTimeoutRef.current = setTimeout(() => {
+        refreshEmbeddedBalance();
+      }, 1000); // 1 second delay between balance refreshes
+    }
+    
+  }, [refreshCustodialBalance, refreshEmbeddedBalance, embeddedWalletAddress, lastRefreshTime]);
+  
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Handle transfer from custodial to embedded wallet
   const handleTransferToEmbedded = useCallback(async () => {
@@ -322,13 +376,18 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         
         toast.success(`Successfully transferred ${amount} SOL to embedded wallet!`);
         
-        // Force immediate balance refresh
+        // Force immediate balance refresh with strategic timing
         setTimeout(() => {
+          console.log('📡 Refreshing custodial balance post-custodial-transfer');
           refreshCustodialBalance();
-          if (embeddedWalletAddress) {
-            refreshEmbeddedBalance();
-          }
         }, 2000);
+        
+        if (embeddedWalletAddress) {
+          setTimeout(() => {
+            console.log('📡 Refreshing embedded balance post-custodial-transfer');
+            refreshEmbeddedBalance();
+          }, 4000);
+        }
         
         // Clear transfer amount and move to next step
         setTransferAmount('');
@@ -537,7 +596,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
     }
   };
 
-  // Reset state when modal opens/closes
+  // Reset state when modal opens/closes with strategic refresh
   useEffect(() => {
     if (isOpen) {
       setTransferAmount('');
@@ -559,9 +618,16 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         document.body.style.bottom = '0';
       }
       
-      setTimeout(() => {
-        refreshAllBalances();
-      }, 500);
+      // Strategic initial refresh - only if modal just opened
+      const now = Date.now();
+      if (now - lastRefreshTime > 5000) { // Only refresh if it's been 5+ seconds
+        console.log('🔄 WithdrawModal: Initial strategic refresh on open');
+        setTimeout(() => {
+          refreshAllBalances();
+        }, 1000); // 1 second delay after modal opens
+      } else {
+        console.log('🛑 WithdrawModal: Skipping initial refresh - recent refresh detected');
+      }
     } else {
       // Restore body scroll
       if (isMobile) {
@@ -585,7 +651,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
         document.body.style.bottom = '';
       }
     };
-  }, [isOpen, refreshAllBalances, isMobile]);
+  }, [isOpen, isMobile, refreshAllBalances, lastRefreshTime]);
 
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
     if (isOpen && !isTransferring && !isWithdrawing) onClose();

@@ -488,20 +488,19 @@ const Dashboard: FC = () => {
     };
   }, [isValidWallet, walletAddress]);
 
-  // 🚀 ENHANCED: Use new XP system for level calculations
+  // 🚀 FIXED: Use exact same XP system as leaderboard
   const fetchLevelData = useCallback(async () => {
     if (!userId) {
       setLevelData({
         level: 1,
         experience: 0,
         experiencePoints: 0,
-        experienceToNextLevel: 100,
+        experienceToNextLevel: 25, // Match API: Level 2 needs 25 XP
         progressPercentage: 0,
-        // 🚀 NEW: Enhanced XP system properties for initial state
         isEarlyLevel: true,
         readyToLevelUp: false,
         xpThisLevel: 0,
-        xpNeededThisLevel: 100
+        xpNeededThisLevel: 25
       });
       return;
     }
@@ -512,7 +511,7 @@ const Dashboard: FC = () => {
       
       const { data: user, error } = await supabase
         .from('users_unified')
-        .select('level, experience, experience_points, badges_earned, achievements, games_played, win_rate')
+        .select('level, experience, experience_points, badges_earned, achievements, games_played, win_rate, total_games_played')
         .eq('id', userId)
         .single();
 
@@ -523,27 +522,42 @@ const Dashboard: FC = () => {
 
       const currentLevel = user.level || 1;
       const currentXP = user.experience_points || 0;
+      const gamesPlayed = user.total_games_played || user.games_played || 0;
+      const winRate = user.win_rate || 0;
       
-      // 🚀 NEW: Use enhanced XP system calculation
+      console.log(`🎯 Dashboard: Raw user data:`, {
+        level: currentLevel,
+        xp: currentXP,
+        games: gamesPlayed,
+        winRate: winRate
+      });
+      
+      // 🚀 FIXED: Use exact UserAPI method with same parameters as leaderboard
       const levelProgress = UserAPI.calculateLevelProgress({
         level: currentLevel,
         experience_points: currentXP,
-        total_games_played: user.games_played || 0,
-        win_rate: user.win_rate || 0
+        total_games_played: gamesPlayed,
+        win_rate: winRate
       });
 
-      setLevelData({
+      console.log(`🎯 Dashboard: Calculated level progress:`, levelProgress);
+
+      // 🚀 FIXED: Use the exact same properties that UserAPI returns
+      const newLevelData = {
         level: currentLevel,
         experience: user.experience || 0,
         experiencePoints: currentXP,
-        experienceToNextLevel: levelProgress.xpNeeded,
-        progressPercentage: levelProgress.progressPercentage,
-        // 🚀 NEW: Enhanced data
-        isEarlyLevel: levelProgress.isEarlyLevel,
-        readyToLevelUp: levelProgress.readyToLevelUp,
-        xpThisLevel: levelProgress.xpThisLevel,
-        xpNeededThisLevel: levelProgress.xpNeededThisLevel
-      });
+        experienceToNextLevel: levelProgress.xpNeeded || 0,
+        progressPercentage: levelProgress.progressPercentage || 0,
+        // Use the exact properties from UserAPI.calculateLevelProgress
+        isEarlyLevel: levelProgress.isEarlyLevel || false,
+        readyToLevelUp: levelProgress.readyToLevelUp || false,
+        xpThisLevel: levelProgress.xpThisLevel || 0,
+        xpNeededThisLevel: levelProgress.xpNeededThisLevel || 100
+      };
+
+      console.log(`🎯 Dashboard: Setting level data:`, newLevelData);
+      setLevelData(newLevelData);
 
     } catch (error) {
       console.error('❌ Error fetching enhanced level data:', error);
@@ -1169,7 +1183,10 @@ const Dashboard: FC = () => {
                                   ? 'bg-gradient-to-r from-yellow-400 to-green-400 animate-pulse'
                                   : 'bg-gradient-to-r from-purple-500 via-blue-500 to-purple-600'
                             }`}
-                            style={{ width: `${Math.max(5, levelData.progressPercentage)}%` }}
+                            style={{ 
+                              width: `${Math.max(5, levelData.progressPercentage || 0)}%`,
+                              minWidth: levelData.progressPercentage > 0 ? '8px' : '5%'
+                            }}
                           >
                             <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-blue-400 rounded-full blur-sm opacity-60"></div>
                             {/* 🚀 NEW: Ready to level up bouncing indicator */}
@@ -1183,13 +1200,23 @@ const Dashboard: FC = () => {
                           </div>
                         </div>
                         <div className="flex justify-between mt-1 text-xs text-gray-400">
-                          <span>{levelData.progressPercentage.toFixed(1)}%</span>
+                          <span>{(levelData.progressPercentage || 0).toFixed(1)}%</span>
                           <span className="hidden sm:inline">
-                            {/* 🚀 NEW: Enhanced progress text */}
-                            {levelData.readyToLevelUp ? 'Ready!' : `${formatXP(levelData.xpThisLevel)} / ${formatXP(levelData.xpNeededThisLevel)} XP`}
+                            {/* 🚀 NEW: Enhanced progress text with debugging */}
+                            {levelData.readyToLevelUp ? 'Ready!' : `${formatXP(levelData.xpThisLevel || 0)} / ${formatXP(levelData.xpNeededThisLevel || 100)} XP`}
                           </span>
                           <span className="sm:hidden">L{levelData.level + 1}</span>
                         </div>
+                        
+                        {/* 🚀 DEBUG: Show progress calculation details in development */}
+                        {process.env.NODE_ENV === 'development' && (
+                          <div className="mt-1 text-xs text-yellow-400 bg-gray-800 p-1 rounded">
+                            Progress: {(levelData.progressPercentage || 0).toFixed(2)}% | 
+                            This Level: {levelData.xpThisLevel || 0} | 
+                            Needed: {levelData.xpNeededThisLevel || 100} | 
+                            To Next: {levelData.experienceToNextLevel || 0}
+                          </div>
+                        )}
                       </div>
 
                       {/* Compact Stats Grid */}

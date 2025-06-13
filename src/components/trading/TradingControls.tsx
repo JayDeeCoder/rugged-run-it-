@@ -1576,12 +1576,14 @@ const handleBuy = useCallback(async () => {
       const tokenDisplay = currentToken === TokenType.SOL ? 'SOL (game balance)' : 'RUGGED tokens';
       toast.success(`${betType} placed: ${amountNum} ${tokenDisplay} (Entry: ${entryMultiplier.toFixed(2)}x)`);
       
+    
       if (onBuy) onBuy(amountNum);
     } else if (!serverError) {
       const errorMsg = 'Failed to place buy - server returned false';
       setServerError(errorMsg);
       toast.error(errorMsg);
     }
+    
   } catch (error) {
     console.error('❌ Error placing bet:', error);
     const errorMsg = `Failed to place buy: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -1715,6 +1717,41 @@ setTimeout(() => {
           console.error('❌ RUGGED cashout error:', error);
           success = false;
           clearActiveBet(); // Use shared state setter
+        }
+      }
+
+      if (success && activeBet && userId) {
+        try {
+          const profitLoss = payout - activeBet.amount;
+          const currentMultiplier = gameState.activeCurrentMultiplier;
+          
+          console.log('📊 Updating cashout stats:', {
+            betAmount: activeBet.amount,
+            payout,
+            profitLoss,
+            multiplier: currentMultiplier
+          });
+          
+          // Update user stats with the win
+          const statsResult = await UserAPI.updateUserStatsOnly(
+            userId,
+            activeBet.amount,
+            profitLoss, // Win/loss amount
+            currentMultiplier // Cashout multiplier
+          );
+          
+          if (statsResult.success) {
+            console.log('✅ Cashout stats updated:', {
+              gamesPlayed: statsResult.userStats?.total_games_played,
+              winRate: statsResult.userStats?.win_rate,
+              netProfit: statsResult.userStats?.net_profit
+            });
+          } else {
+            console.warn('⚠️ Cashout stats update failed:', statsResult.error);
+          }
+          
+        } catch (error) {
+          console.warn('⚠️ Cashout stats update error:', error);
         }
       }
   
@@ -1856,7 +1893,51 @@ setTimeout(() => {
     }
   }, [userId, refreshCustodialBalance, updateCustodialBalance]);
 
+  // 🚀 ADD THIS: Handle losing bets when game crashes
+const handleAutomaticBetLoss = useCallback(async () => {
+  if (!activeBet || !userId) return;
+  
+  console.log(`💸 Resolving losing bet: ${activeBet.amount} ${activeBet.tokenType || 'SOL'}`);
+  
+  try {
+    const profitLoss = -activeBet.amount; // Loss
+    const gameEndMultiplier = currentGame?.multiplier || 0; // Crash point
+    
+    // Update user stats with the loss
+    const statsResult = await UserAPI.updateUserStatsOnly(
+      userId,
+      activeBet.amount,
+      profitLoss, // Negative for loss
+      gameEndMultiplier // Crash multiplier
+    );
+    
+    if (statsResult.success) {
+      console.log('✅ Loss stats updated:', {
+        gamesPlayed: statsResult.userStats?.total_games_played,
+        netProfit: statsResult.userStats?.net_profit
+      });
+    }
+    
+    // Clear the active bet
+    clearActiveBet();
+    
+    // Show loss notification
+    toast.error(`Bet lost: -${activeBet.amount} ${activeBet.tokenType || 'SOL'} (Crashed at ${gameEndMultiplier.toFixed(2)}x)`);
+    
+  } catch (error) {
+    console.error('❌ Error resolving losing bet:', error);
+    // Still clear the bet to prevent stuck state
+    clearActiveBet();
+  }
+}, [activeBet, userId, currentGame?.multiplier, clearActiveBet]);
   // Now all useEffects after all variables are declared
+
+  useEffect(() => {
+    if (currentGame?.status === 'crashed' && activeBet && !isCashingOut) {
+      console.log('💥 Game crashed, resolving losing bet...');
+      handleAutomaticBetLoss();
+    }
+  }, [currentGame?.status, activeBet, isCashingOut, handleAutomaticBetLoss]);
 
   // Use localStorage to remember user's preferred amount
   useEffect(() => {

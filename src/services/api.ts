@@ -1,4 +1,4 @@
-// src/services/api.ts - FIXED VERSION WITH NO TYPESCRIPT ERRORS
+// src/services/api.ts - UPDATED VERSION WITH ENHANCED XP SYSTEM
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { io, Socket } from 'socket.io-client';
 import logger from '../utils/logger';
@@ -29,7 +29,7 @@ export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseKey);
 // Game server WebSocket connection
 const GAME_SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL || '';
 
-// UPDATED TYPES FOR USERS_UNIFIED TABLE
+// UPDATED TYPES FOR USERS_UNIFIED TABLE WITH XP SYSTEM
 export interface UserData {
   id: string;
   username: string;
@@ -73,6 +73,13 @@ export interface UserData {
   created_at: string;
   updated_at: string;
   last_active?: string;
+  // NEW XP SYSTEM FIELDS
+  daily_login_streak?: number;
+  last_daily_bonus?: string;
+  recent_chat_activity?: boolean;
+  risk_preference?: RiskLevel;
+  xp_boost_active?: boolean;
+  total_referrals?: number;
 }
 
 export interface CustodialBalanceData {
@@ -193,6 +200,37 @@ export interface BetEntry {
   profit_loss?: number;
   created_at: string;
   status: string;
+}
+
+// NEW: Enhanced XP interfaces
+export type RiskLevel = 'low' | 'medium' | 'high' | 'extreme';
+
+export interface XPCalculationResult {
+  totalXP: number;
+  breakdown: {
+    baseXP: number;
+    winBonus: number;
+    riskMultiplier: number;
+    winStreakBonus: number;
+    dailyBonus: number;
+    chatBonus: number;
+    levelBoost: number;
+    riskLevel: RiskLevel;
+  };
+  shouldUpdateDailyBonus: boolean;
+}
+
+export interface LevelProgressData {
+  currentLevel: number;
+  currentXP: number;
+  progressPercentage: number;
+  xpForNextLevel: number;
+  xpNeeded: number;
+  xpThisLevel: number;
+  xpNeededThisLevel: number;
+  readyToLevelUp: boolean;
+  isEarlyLevel: boolean;
+  canLevelUp: boolean;
 }
 
 // GameAPI class
@@ -376,8 +414,328 @@ export class GameAPI {
   }
 }
 
-// COMPLETELY UPDATED UserAPI FOR USERS_UNIFIED TABLE
+// COMPLETELY UPDATED UserAPI FOR USERS_UNIFIED TABLE WITH ENHANCED XP SYSTEM
 export class UserAPI {
+  /**
+   * 🎯 NEW: Enhanced XP calculation with multiple factors
+   */
+  static calculateEnhancedXP(gameData: {
+    betAmount: number;
+    isWin: boolean;
+    cashoutMultiplier?: number;
+    profitLoss: number;
+  }, userData: {
+    level?: number;
+    current_win_streak?: number;
+    last_daily_bonus?: string;
+    recent_chat_activity?: boolean;
+  }): XPCalculationResult {
+    const {
+      betAmount,
+      isWin,
+      cashoutMultiplier = 1,
+      profitLoss
+    } = gameData;
+
+    const {
+      level = 1,
+      current_win_streak = 0,
+      last_daily_bonus,
+      recent_chat_activity = false
+    } = userData;
+
+    // Determine risk level from bet amount
+    const getRiskLevel = (amount: number): RiskLevel => {
+      if (amount >= 1.0) return 'extreme';
+      if (amount >= 0.1) return 'high';
+      if (amount >= 0.01) return 'medium';
+      return 'low';
+    };
+
+    const riskLevel = getRiskLevel(betAmount);
+    
+    // Check if first game today
+    const today = new Date().toDateString();
+    const lastBonus = last_daily_bonus ? new Date(last_daily_bonus).toDateString() : null;
+    const isFirstGameToday = lastBonus !== today;
+
+    let totalXP = 0;
+
+    // 1. Base XP (minimum guarantee)
+    totalXP += Math.max(1, Math.floor(betAmount * 100 * 2)); // 2 XP per 0.01 SOL
+
+    // 2. Win Bonus (major XP source)
+    if (isWin && profitLoss > 0) {
+      const winBonus = Math.floor(betAmount * 100 * cashoutMultiplier * 3);
+      totalXP += winBonus;
+      
+      // High multiplier bonuses
+      if (cashoutMultiplier >= 2) totalXP += 10;
+      if (cashoutMultiplier >= 5) totalXP += 25;
+      if (cashoutMultiplier >= 10) totalXP += 50;
+    }
+
+    // 3. Risk Level Multipliers
+    const riskMultipliers: Record<RiskLevel, number> = {
+      low: 1.0,
+      medium: 1.3,
+      high: 1.6,
+      extreme: 2.0
+    };
+    totalXP = Math.floor(totalXP * riskMultipliers[riskLevel]);
+
+    // 4. Win Streak Bonuses
+    if (current_win_streak >= 3) totalXP += 5;
+    if (current_win_streak >= 5) totalXP += 10;
+    if (current_win_streak >= 10) totalXP += 25;
+
+    // 5. Daily Activity Bonus
+    if (isFirstGameToday) {
+      totalXP += 15;
+    }
+
+    // 6. Chat Activity Bonus
+    if (recent_chat_activity) {
+      totalXP += 2;
+    }
+
+    // 7. EARLY LEVEL MASSIVE BOOST (key feature!)
+    const getEarlyLevelBoost = (level: number): number => {
+      if (level <= 3) return 3.0;  // 300% XP boost!
+      if (level <= 5) return 2.0;  // 200% XP boost
+      if (level <= 8) return 1.5;  // 150% XP boost
+      return 1.0; // Normal XP
+    };
+
+    const levelBoost = getEarlyLevelBoost(level);
+    totalXP = Math.floor(totalXP * levelBoost);
+
+    return {
+      totalXP: Math.max(1, totalXP),
+      breakdown: {
+        baseXP: Math.floor(betAmount * 100 * 2),
+        winBonus: isWin ? Math.floor(betAmount * 100 * cashoutMultiplier * 3) : 0,
+        riskMultiplier: riskMultipliers[riskLevel],
+        winStreakBonus: current_win_streak >= 3 ? (current_win_streak >= 10 ? 25 : current_win_streak >= 5 ? 10 : 5) : 0,
+        dailyBonus: isFirstGameToday ? 15 : 0,
+        chatBonus: recent_chat_activity ? 2 : 0,
+        levelBoost: levelBoost,
+        riskLevel
+      },
+      shouldUpdateDailyBonus: isFirstGameToday
+    };
+  }
+
+  /**
+   * 🎯 NEW: Get XP requirement for any level (new easy progression)
+   */
+  static getXPRequirement(level: number): number {
+    const easyLevels: Record<number, number> = {
+      1: 0,
+      2: 25,      // SUPER EASY
+      3: 75,      // STILL EASY 
+      4: 150,     // Start ramping up
+      5: 250,
+      6: 400,
+      7: 600,
+      8: 900,
+      9: 1350,
+      10: 2000
+    };
+
+    if (easyLevels[level] !== undefined) {
+      return easyLevels[level];
+    }
+
+    // For levels 11+, use exponential growth
+    if (level > 10) {
+      let xp = easyLevels[10];
+      for (let i = 11; i <= level; i++) {
+        xp = Math.floor(xp * 1.5);
+      }
+      return xp;
+    }
+
+    return 0;
+  }
+
+  /**
+   * 🎯 NEW: Enhanced level progress calculation
+   */
+  static calculateLevelProgress(userData: {
+    level?: number;
+    experience_points?: number;
+    total_games_played?: number;
+    win_rate?: number;
+  }): LevelProgressData {
+    const {
+      level = 1,
+      experience_points = 0,
+      total_games_played = 0,
+      win_rate = 0
+    } = userData;
+
+    const currentLevelXP = this.getXPRequirement(level);
+    const nextLevelXP = this.getXPRequirement(level + 1);
+    const xpNeededThisLevel = nextLevelXP - currentLevelXP;
+    const xpProgressThisLevel = Math.max(0, experience_points - currentLevelXP);
+    
+    let progressPercentage = Math.min(100, (xpProgressThisLevel / xpNeededThisLevel) * 100);
+
+    // BONUS PROGRESS for early levels (makes them even easier!)
+    if (level <= 3) {
+      // Game participation bonus (up to 25%)
+      const gameBonus = Math.min(25, total_games_played * 2);
+      
+      // Learning bonus (up to 15%)  
+      const winBonus = Math.min(15, win_rate * 0.3);
+      
+      progressPercentage += gameBonus + winBonus;
+      progressPercentage = Math.min(100, progressPercentage);
+    }
+
+    const readyToLevelUp = progressPercentage >= 100;
+
+    return {
+      currentLevel: level,
+      currentXP: experience_points,
+      progressPercentage: Math.max(0, progressPercentage),
+      xpForNextLevel: nextLevelXP,
+      xpNeeded: Math.max(0, nextLevelXP - experience_points),
+      xpThisLevel: xpProgressThisLevel,
+      xpNeededThisLevel,
+      readyToLevelUp,
+      isEarlyLevel: level <= 3,
+      canLevelUp: readyToLevelUp && level === Math.floor(experience_points / nextLevelXP) + 1
+    };
+  }
+
+  /**
+   * 🎯 NEW: Calculate new level from total XP
+   */
+  static calculateNewLevel(totalXP: number): number {
+    let level = 1;
+    while (this.getXPRequirement(level + 1) <= totalXP) {
+      level++;
+      if (level > 100) break; // Safety limit
+    }
+    return level;
+  }
+
+  /**
+   * 🎯 NEW: Enhanced bet resolution with new XP system
+   */
+  static async handleBetResolutionEnhanced(
+    gameId: string,
+    userId: string,
+    walletAddress: string,
+    betAmount: number,
+    cashoutMultiplier?: number,
+    profitLoss?: number
+  ): Promise<{ 
+    success: boolean; 
+    xpGained?: number; 
+    xpBreakdown?: any; 
+    newXP?: number; 
+    newLevel?: number; 
+    leveledUp?: boolean; 
+    levelProgress?: LevelProgressData; 
+    error?: string; 
+  }> {
+    try {
+      console.log(`🎯 Enhanced bet resolution for user: ${userId}`);
+
+      // Get current user data
+      const { data: currentUser, error: userError } = await supabase
+        .from('users_unified')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (userError || !currentUser) {
+        console.error('❌ Failed to get user data:', userError);
+        return { success: false, error: 'User not found' };
+      }
+
+      // Calculate enhanced XP
+      const xpResult = this.calculateEnhancedXP({
+        betAmount,
+        isWin: (profitLoss || 0) > 0,
+        cashoutMultiplier,
+        profitLoss: profitLoss || 0
+      }, currentUser);
+
+      console.log('📊 XP Calculation:', xpResult);
+
+      // Update user with new XP and stats
+      const newXP = (currentUser.experience_points || 0) + xpResult.totalXP;
+      const newLevel = this.calculateNewLevel(newXP);
+      const leveledUp = newLevel > currentUser.level;
+
+      const updates: any = {
+        experience_points: newXP,
+        level: newLevel,
+        updated_at: new Date().toISOString()
+      };
+
+      // Update daily bonus if applicable
+      if (xpResult.shouldUpdateDailyBonus) {
+        updates.last_daily_bonus = new Date().toISOString().split('T')[0];
+        updates.daily_login_streak = (currentUser.daily_login_streak || 0) + 1;
+      }
+
+      // Record the bet
+      const { error: betError } = await supabase
+        .from('player_bets')
+        .insert({
+          game_id: gameId,
+          user_id: userId,
+          wallet_address: walletAddress,
+          bet_amount: betAmount,
+          cashout_multiplier: cashoutMultiplier,
+          profit_loss: profitLoss
+        });
+
+      if (betError) {
+        console.error('❌ Failed to record bet:', betError);
+      }
+
+      // Update user stats and XP
+      const { error: updateError } = await supabase
+        .from('users_unified')
+        .update(updates)
+        .eq('id', userId);
+
+      if (updateError) {
+        console.error('❌ Failed to update user:', updateError);
+        return { success: false, error: 'Failed to update user' };
+      }
+
+      // Also update game stats using existing method
+      await this.updateUserStatsOnly(userId, betAmount, profitLoss || 0, cashoutMultiplier);
+
+      console.log(`✅ Enhanced bet resolution complete: +${xpResult.totalXP} XP${leveledUp ? `, LEVEL UP to ${newLevel}!` : ''}`);
+
+      return {
+        success: true,
+        xpGained: xpResult.totalXP,
+        xpBreakdown: xpResult.breakdown,
+        newXP,
+        newLevel,
+        leveledUp,
+        levelProgress: this.calculateLevelProgress({
+          ...currentUser,
+          experience_points: newXP,
+          level: newLevel
+        })
+      };
+
+    } catch (error) {
+      console.error('❌ Enhanced bet resolution error:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
   /**
    * Get or create user from users_unified table
    */
@@ -429,9 +787,16 @@ export class UserAPI {
             privy_wallet_address: walletAddress,
             custodial_balance: 0,
             level: 1,
+            experience_points: 0, // Initialize XP
             avatar: '👤',
             created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            updated_at: new Date().toISOString(),
+            // NEW XP SYSTEM DEFAULTS
+            daily_login_streak: 0,
+            recent_chat_activity: false,
+            risk_preference: 'low',
+            xp_boost_active: false,
+            total_referrals: 0
             // Let database set defaults for everything else
           })
           .select()
@@ -561,7 +926,14 @@ export class UserAPI {
       is_connected: rawUser.is_connected || false,
       created_at: rawUser.created_at,
       updated_at: rawUser.updated_at,
-      last_active: rawUser.last_active
+      last_active: rawUser.last_active,
+      // NEW XP SYSTEM FIELDS
+      daily_login_streak: rawUser.daily_login_streak || 0,
+      last_daily_bonus: rawUser.last_daily_bonus,
+      recent_chat_activity: rawUser.recent_chat_activity || false,
+      risk_preference: (rawUser.risk_preference as RiskLevel) || 'low',
+      xp_boost_active: rawUser.xp_boost_active || false,
+      total_referrals: rawUser.total_referrals || 0
     };
   }
 

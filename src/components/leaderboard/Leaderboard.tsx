@@ -1,6 +1,6 @@
-// Enhanced Leaderboard Component with users_unified data
+// Enhanced Leaderboard Component with NEW XP SYSTEM from users_unified
 import { FC, useState } from 'react';
-import { LeaderboardEntry } from '../../services/api';
+import { LeaderboardEntry, UserAPI } from '../../services/api';
 import { Crown, Star, Medal, Trophy, TrendingUp, Zap, Shield, Award } from 'lucide-react';
 
 interface LeaderboardProps {
@@ -87,20 +87,68 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
     };
   };
 
-  // Calculate level progress (same logic as dashboard)
+  // 🚀 NEW: Use the enhanced XP system from UserAPI
   const calculateLevelProgress = (user: LeaderboardEntry) => {
-    const currentLevel = user.level;
-    const currentXP = user.experience_points;
-    
-    const baseXP = 100;
-    const xpForNextLevel = baseXP * Math.pow(1.5, currentLevel - 1);
-    const xpForCurrentLevel = currentLevel > 1 ? baseXP * Math.pow(1.5, currentLevel - 2) : 0;
-    const xpNeededThisLevel = xpForNextLevel - xpForCurrentLevel;
-    const xpProgressThisLevel = currentXP - xpForCurrentLevel;
-    
-    const progressPercentage = Math.min(100, Math.max(0, (xpProgressThisLevel / xpNeededThisLevel) * 100));
+    // Use the new UserAPI method for accurate level progress calculation
+    return UserAPI.calculateLevelProgress({
+      level: user.level,
+      experience_points: user.experience_points,
+      total_games_played: user.games_played,
+      win_rate: user.win_rate
+    });
+  };
 
-    return { progressPercentage };
+  // 🚀 NEW: Get XP requirement for display
+  const getXPRequirement = (level: number) => {
+    return UserAPI.getXPRequirement(level);
+  };
+
+  // 🚀 NEW: Format XP numbers for display
+  const formatXP = (xp: number) => {
+    if (xp >= 10000) {
+      return `${(xp / 1000).toFixed(1)}k`;
+    }
+    return xp.toString();
+  };
+
+  // 🚀 NEW: Get level tier and styling
+  const getLevelInfo = (level: number) => {
+    const tier = Math.ceil(level / 10);
+    const isEarlyLevel = level <= 3;
+    
+    if (isEarlyLevel) {
+      return { 
+        tierText: 'Rookie', 
+        color: 'text-green-400', 
+        bgColor: 'bg-green-600/20',
+        icon: '🌱'
+      };
+    }
+    
+    if (level <= 8) {
+      return { 
+        tierText: 'Rising', 
+        color: 'text-blue-400', 
+        bgColor: 'bg-blue-600/20',
+        icon: '⭐'
+      };
+    }
+
+    if (tier <= 2) {
+      return { 
+        tierText: `Tier ${tier}`, 
+        color: 'text-purple-400', 
+        bgColor: 'bg-purple-600/20',
+        icon: '💎'
+      };
+    }
+
+    return { 
+      tierText: `Elite T${tier}`, 
+      color: 'text-yellow-400', 
+      bgColor: 'bg-yellow-600/20',
+      icon: '👑'
+    };
   };
 
   const toggleExpanded = (entryId: string) => {
@@ -124,7 +172,12 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
         const percentageFormatted = formatPercentage(entry.profit_percentage);
         const rankStyling = getRankStyling(entry.rank);
         const isExpanded = expandedEntry === entry.id;
+        
+        // 🚀 NEW: Use enhanced XP system calculations
         const levelProgress = calculateLevelProgress(entry);
+        const levelInfo = getLevelInfo(entry.level);
+        const nextLevelXP = getXPRequirement(entry.level + 1);
+        const currentLevelXP = getXPRequirement(entry.level);
 
         return (
           <div key={entry.id} className="transition-all duration-200">
@@ -155,17 +208,24 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
                 </div>
                 
                 <div className="min-w-0 flex-1">
-                  {/* Username with level and badge */}
+                  {/* Username with enhanced level display */}
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-white font-semibold truncate text-sm sm:text-base">
                       {entry.username}
                     </span>
                     
-                    {/* Level badge */}
-                    <div className="flex items-center bg-purple-600/20 text-purple-300 px-2 py-0.5 rounded text-xs border border-purple-600/30">
-                      <Crown size={10} className="mr-1" />
-                      {entry.level}
+                    {/* 🚀 ENHANCED: Level badge with tier info */}
+                    <div className={`flex items-center px-2 py-0.5 rounded text-xs border ${levelInfo.color} ${levelInfo.bgColor} border-current/30`}>
+                      <span className="mr-1">{levelInfo.icon}</span>
+                      L{entry.level}
                     </div>
+                    
+                    {/* Tier indicator for higher levels */}
+                    {entry.level > 8 && (
+                      <div className="text-xs text-gray-400">
+                        {levelInfo.tierText}
+                      </div>
+                    )}
                     
                     {/* User badge */}
                     {entry.badge && badgeInfo.icon && (
@@ -178,25 +238,40 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
                     )}
                   </div>
                   
-                  {/* Stats row */}
+                  {/* 🚀 ENHANCED: Stats row with XP info */}
                   <div className="flex items-center gap-3 text-xs text-gray-400">
                     <span className="flex items-center">
                       <Star size={10} className="mr-1 text-blue-400" />
-                      {entry.experience_points} XP
+                      {formatXP(entry.experience_points)} XP
                     </span>
                     <span>•</span>
                     <span>{entry.games_played} games</span>
                     <span>•</span>
                     <span className="text-green-400">{entry.win_rate.toFixed(1)}% win</span>
+                    {/* Show early level boost indicator */}
+                    {levelProgress.isEarlyLevel && (
+                      <>
+                        <span>•</span>
+                        <span className="text-yellow-400 font-medium">BOOST!</span>
+                      </>
+                    )}
                   </div>
 
-                  {/* Level progress bar (compact) */}
+                  {/* 🚀 ENHANCED: Level progress bar with better calculations */}
                   <div className="mt-1 w-full max-w-24 sm:max-w-32">
-                    <div className="w-full bg-gray-700 rounded-full h-1">
+                    <div className="w-full bg-gray-700 rounded-full h-1 relative">
                       <div 
-                        className="bg-gradient-to-r from-purple-500 to-blue-500 h-1 rounded-full transition-all duration-300"
+                        className={`h-1 rounded-full transition-all duration-300 ${
+                          levelProgress.isEarlyLevel 
+                            ? 'bg-gradient-to-r from-green-400 to-yellow-400' 
+                            : 'bg-gradient-to-r from-purple-500 to-blue-500'
+                        }`}
                         style={{ width: `${Math.max(2, levelProgress.progressPercentage)}%` }}
                       ></div>
+                      {/* Ready to level up indicator */}
+                      {levelProgress.readyToLevelUp && (
+                        <div className="absolute -top-0.5 right-0 w-2 h-2 bg-yellow-400 rounded-full animate-bounce"></div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -228,32 +303,60 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
               </div>
             </div>
 
-            {/* Expanded details section */}
+            {/* 🚀 ENHANCED: Expanded details section with new XP system info */}
             {isExpanded && (
               <div className="bg-gray-800/30 px-4 sm:px-6 py-4 border-t border-gray-700">
                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 text-sm">
-                  {/* Level & XP Details */}
+                  
+                  {/* 🚀 ENHANCED: Level & XP Details with new system */}
                   <div className="col-span-2 sm:col-span-4 lg:col-span-6 mb-3">
                     <h4 className="text-white font-medium mb-2 flex items-center">
                       <Crown className="mr-2 text-purple-400" size={16} />
-                      Player Profile
+                      Player Profile {levelProgress.isEarlyLevel && <span className="ml-2 text-xs text-yellow-400 bg-yellow-400/20 px-2 py-0.5 rounded">EARLY BOOST ACTIVE</span>}
                     </h4>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       <div>
-                        <div className="text-gray-400 text-xs">Level</div>
-                        <div className="text-purple-400 font-semibold">{entry.level}</div>
+                        <div className="text-gray-400 text-xs">Level ({levelInfo.tierText})</div>
+                        <div className={`font-semibold ${levelInfo.color}`}>
+                          {levelInfo.icon} {entry.level}
+                        </div>
                       </div>
                       <div>
-                        <div className="text-gray-400 text-xs">Experience</div>
-                        <div className="text-blue-400 font-semibold">{entry.experience_points}</div>
+                        <div className="text-gray-400 text-xs">Total XP</div>
+                        <div className="text-blue-400 font-semibold">{formatXP(entry.experience_points)}</div>
                       </div>
                       <div>
-                        <div className="text-gray-400 text-xs">Tier</div>
-                        <div className="text-yellow-400 font-semibold">{entry.tier}</div>
+                        <div className="text-gray-400 text-xs">Level Progress</div>
+                        <div className="text-green-400 font-semibold">
+                          {levelProgress.progressPercentage.toFixed(1)}%
+                          {levelProgress.readyToLevelUp && <span className="ml-1 text-yellow-400">🎉</span>}
+                        </div>
                       </div>
                       <div>
-                        <div className="text-gray-400 text-xs">Progress</div>
-                        <div className="text-green-400 font-semibold">{levelProgress.progressPercentage.toFixed(1)}%</div>
+                        <div className="text-gray-400 text-xs">Next Level XP</div>
+                        <div className="text-purple-400 font-semibold">
+                          {levelProgress.xpNeeded > 0 ? formatXP(levelProgress.xpNeeded) : 'Ready!'}
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* 🚀 NEW: XP Progress visualization */}
+                    <div className="mt-3">
+                      <div className="flex justify-between text-xs text-gray-400 mb-1">
+                        <span>XP Progress to Level {entry.level + 1}</span>
+                        <span>{formatXP(levelProgress.xpThisLevel)} / {formatXP(levelProgress.xpNeededThisLevel)}</span>
+                      </div>
+                      <div className="w-full bg-gray-700 rounded-full h-2">
+                        <div 
+                          className={`h-2 rounded-full transition-all duration-500 ${
+                            levelProgress.isEarlyLevel 
+                              ? 'bg-gradient-to-r from-green-400 via-yellow-400 to-orange-400' 
+                              : levelProgress.readyToLevelUp
+                                ? 'bg-gradient-to-r from-yellow-400 to-green-400'
+                                : 'bg-gradient-to-r from-purple-500 to-blue-500'
+                          }`}
+                          style={{ width: `${Math.max(2, levelProgress.progressPercentage)}%` }}
+                        ></div>
                       </div>
                     </div>
                   </div>

@@ -918,90 +918,90 @@ useEffect(() => {
                   </div>
                 </div>
               )}
-
-              {/* Enhanced Stats Overview with real-time indicators */}
-              <div className="grid grid-cols-2 lg:grid-cols-7 gap-4 mb-8">
-                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-                  pendingUpdates > 0 ? 'ring-2 ring-blue-400 ring-opacity-30' : ''
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-gray-400 text-xs">Total Ruggers</p>
-                      <p className="text-xl font-bold text-white">{stats.totalPlayers}</p>
-                    </div>
-                    <Users className="text-blue-400" size={20} />
-                  </div>
-                </div>
-                
-                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-                  pendingUpdates > 0 ? 'ring-2 ring-green-400 ring-opacity-30' : ''
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-gray-400 text-xs">Total Games</p>
-                      <p className="text-xl font-bold text-white">{stats.totalGames.toLocaleString()}</p>
-                    </div>
-                    <TrendingUp className="text-green-400" size={20} />
-                  </div>
-                </div>
-                
-                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-                  pendingUpdates > 0 ? 'ring-2 ring-purple-400 ring-opacity-30' : ''
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-gray-400 text-xs">Volume</p>
-                      <p className="text-xl font-bold text-white">{stats.totalVolume.toFixed(2)}</p>
-                    </div>
-                    <Award className="text-purple-400" size={20} />
-                  </div>
-                </div>
-
-                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-                  pendingUpdates > 0 ? 'ring-2 ring-orange-400 ring-opacity-30' : ''
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-gray-400 text-xs">Avg Profit</p>
-                      <p className="text-xl font-bold text-white">{stats.averageProfit.toFixed(2)}</p>
-                    </div>
-                    <Target className="text-orange-400" size={20} />
-                  </div>
-                </div>
-
-                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-                  pendingUpdates > 0 ? 'ring-2 ring-yellow-400 ring-opacity-30' : ''
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-gray-400 text-xs">Top Player</p>
-                      <p className="text-xl font-bold text-yellow-400">{stats.topPlayerProfit.toFixed(2)}</p>
-                    </div>
-                    <Medal className="text-yellow-400" size={20} />
-                  </div>
-                </div>
-              </div>
-              <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-  pendingUpdates > 0 ? 'ring-2 ring-red-400 ring-opacity-30' : ''
-}`}>
-  <div className="flex items-center justify-between">
-    <div>
-      <p className="text-gray-400 text-xs">Avg Win Rate</p>
-      <p className="text-xl font-bold text-white">{stats.averageWinRate?.toFixed(1) || '0.0'}%</p>
+{/* Enhanced Stats Overview with real-time indicators */}
+<div className="grid grid-cols-2 lg:grid-cols-7 gap-4 mb-8">
+  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+    pendingUpdates > 0 ? 'ring-2 ring-blue-400 ring-opacity-30' : ''
+  }`}>
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-gray-400 text-xs">Total Ruggers</p>
+        <p className="text-xl font-bold text-white">{stats.totalPlayers}</p>
+      </div>
+      <Users className="text-blue-400" size={20} />
     </div>
-    <TrendingUp className="text-green-400" size={20} />
   </div>
-</div>
-
-<div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-  pendingUpdates > 0 ? 'ring-2 ring-red-400 ring-opacity-30' : ''
-}`}>
-  <div className="flex items-center justify-between">
-    <div>
-      <p className="text-gray-400 text-xs">Total Losses</p>
-      <p className="text-xl font-bold text-red-400">{stats.totalBetsLost?.toLocaleString() || '0'}</p>
+  
+  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+    pendingUpdates > 0 ? 'ring-2 ring-green-400 ring-opacity-30' : ''
+  }`}>
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-gray-400 text-xs">Total Games</p>
+        <p className="text-xl font-bold text-white">{stats.totalGames.toLocaleString()}</p>
+      </div>
+      <TrendingUp className="text-green-400" size={20} />
     </div>
-    <AlertCircle className="text-red-400" size={20} />
+  </div>
+  
+  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+    pendingUpdates > 0 ? 'ring-2 ring-purple-400 ring-opacity-30' : ''
+  }`}>
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-gray-400 text-xs">Volume</p>
+        <p className="text-xl font-bold text-white">{stats.totalVolume.toFixed(2)}</p>
+      </div>
+      <Award className="text-purple-400" size={20} />
+    </div>
+  </div>
+
+  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+    pendingUpdates > 0 ? 'ring-2 ring-orange-400 ring-opacity-30' : ''
+  }`}>
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-gray-400 text-xs">Avg Profit</p>
+        <p className="text-xl font-bold text-white">{stats.averageProfit.toFixed(2)}</p>
+      </div>
+      <Target className="text-orange-400" size={20} />
+    </div>
+  </div>
+
+  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+    pendingUpdates > 0 ? 'ring-2 ring-yellow-400 ring-opacity-30' : ''
+  }`}>
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-gray-400 text-xs">Top Player</p>
+        <p className="text-xl font-bold text-yellow-400">{stats.topPlayerProfit.toFixed(2)}</p>
+      </div>
+      <Medal className="text-yellow-400" size={20} />
+    </div>
+  </div>
+
+  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+    pendingUpdates > 0 ? 'ring-2 ring-cyan-400 ring-opacity-30' : ''
+  }`}>
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-gray-400 text-xs">Avg Win Rate</p>
+        <p className="text-xl font-bold text-white">{stats.averageWinRate?.toFixed(1) || '0.0'}%</p>
+      </div>
+      <TrendingUp className="text-cyan-400" size={20} />
+    </div>
+  </div>
+
+  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+    pendingUpdates > 0 ? 'ring-2 ring-red-400 ring-opacity-30' : ''
+  }`}>
+    <div className="flex items-center justify-between">
+      <div>
+        <p className="text-gray-400 text-xs">Total Losses</p>
+        <p className="text-xl font-bold text-red-400">{stats.totalBetsLost?.toLocaleString() || '0'}</p>
+      </div>
+      <AlertCircle className="text-red-400" size={20} />
+    </div>
   </div>
 </div>
               

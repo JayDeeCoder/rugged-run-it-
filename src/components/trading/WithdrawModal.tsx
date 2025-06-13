@@ -825,7 +825,7 @@ const WithdrawModal: FC<WithdrawModalProps> = ({
                   {/* Amount Input */}
                   <div className="mb-2">
                     <label className="block text-gray-400 text-xs mb-1">
-                      Withdraw Amount (SOL) - Min: 0.001, Max: 1.0
+                      Withdraw Amount (SOL) - Min: 0.002, Max: 1.0
                     </label>
                     <div className="flex">
                       <input

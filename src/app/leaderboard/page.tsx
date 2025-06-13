@@ -1,4 +1,4 @@
-// src/app/leaderboard/page.tsx - FIXED with Better Game State Coordination
+// src/app/leaderboard/page.tsx - ENHANCED with NEW XP SYSTEM
 'use client';
 
 import { FC, useState, useEffect, useRef, useCallback } from 'react';
@@ -20,14 +20,90 @@ interface LeaderboardStats {
   totalVolume: number;
   averageProfit: number;
   topPlayerProfit: number;
-  // 🚀 NEW: Enhanced stats properties
   totalWinnings?: number;
   totalLosses?: number;
   averageWinRate?: number;
   totalBetsLost?: number;
 }
 
-// 🚀 IMPROVED: Socket connection with proper subscription management
+// 🚀 ENHANCED: XP System Integration
+const useEnhancedXPSystem = () => {
+  // 🚀 NEW: Enhanced level progress calculation using UserAPI
+  const calculateLevelProgress = useCallback((user: LeaderboardEntry) => {
+    return UserAPI.calculateLevelProgress({
+      level: user.level,
+      experience_points: user.experience_points,
+      total_games_played: user.games_played,
+      win_rate: user.win_rate
+    });
+  }, []);
+
+  // 🚀 NEW: Get XP requirement for display
+  const getXPRequirement = useCallback((level: number) => {
+    return UserAPI.getXPRequirement(level);
+  }, []);
+
+  // 🚀 NEW: Format XP numbers for display
+  const formatXP = useCallback((xp: number) => {
+    if (xp >= 10000) {
+      return `${(xp / 1000).toFixed(1)}k`;
+    }
+    return xp.toLocaleString();
+  }, []);
+
+  // 🚀 NEW: Get level tier and styling
+  const getLevelInfo = useCallback((level: number) => {
+    const tier = Math.ceil(level / 10);
+    const isEarlyLevel = level <= 3;
+    
+    if (isEarlyLevel) {
+      return { 
+        tierText: 'Rookie', 
+        color: 'text-green-400', 
+        bgColor: 'bg-green-600/20',
+        icon: '🌱',
+        description: 'Early Level Boost Active!'
+      };
+    }
+    
+    if (level <= 8) {
+      return { 
+        tierText: 'Rising', 
+        color: 'text-blue-400', 
+        bgColor: 'bg-blue-600/20',
+        icon: '⭐',
+        description: 'Building momentum'
+      };
+    }
+
+    if (tier <= 2) {
+      return { 
+        tierText: `Tier ${tier}`, 
+        color: 'text-purple-400', 
+        bgColor: 'bg-purple-600/20',
+        icon: '💎',
+        description: 'Advanced player'
+      };
+    }
+
+    return { 
+      tierText: `Elite T${tier}`, 
+      color: 'text-yellow-400', 
+      bgColor: 'bg-yellow-600/20',
+      icon: '👑',
+      description: 'Elite performer'
+    };
+  }, []);
+
+  return {
+    calculateLevelProgress,
+    getXPRequirement,
+    formatXP,
+    getLevelInfo
+  };
+};
+
+// Socket connection hook (unchanged)
 const useSocketConnection = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
@@ -35,7 +111,6 @@ const useSocketConnection = () => {
   const socketRef = useRef<any>(null);
   const connectionMonitorRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 🚀 NEW: Initialize socket connection properly
   const initializeSocket = useCallback(async () => {
     try {
       console.log('🔌 Leaderboard: Initializing socket connection...');
@@ -49,7 +124,6 @@ const useSocketConnection = () => {
         
         console.log('✅ Leaderboard: Socket initialized successfully');
         
-        // Signal page activity
         sharedSocket.emit('pageActivity', { 
           page: 'leaderboard',
           action: 'active',
@@ -73,7 +147,6 @@ const useSocketConnection = () => {
     }
   }, []);
 
-  // 🚀 NEW: Signal page activity without cleaning game state
   const signalPageActivity = useCallback(() => {
     if (sharedSocket.isConnected()) {
       console.log('📍 Leaderboard: Signaling page activity (non-destructive)');
@@ -85,7 +158,6 @@ const useSocketConnection = () => {
     }
   }, []);
 
-  // 🚀 NEW: Signal page inactive without destroying game state
   const signalPageInactive = useCallback(() => {
     if (sharedSocket.isConnected()) {
       console.log('📍 Leaderboard: Signaling page inactive (preserving game state)');
@@ -97,40 +169,6 @@ const useSocketConnection = () => {
     }
   }, []);
 
-// 🚀 ADD THIS: Enhanced stats calculation with bet loss tracking
-const calculateEnhancedStats = useCallback((data: LeaderboardEntry[]) => {
-  const totalPlayers = data.length;
-  const totalGames = data.reduce((sum, entry) => sum + (entry.games_played || 0), 0);
-  const totalVolume = data.reduce((sum, entry) => sum + Math.abs(entry.total_profit || 0), 0);
-  const totalWinnings = data.reduce((sum, entry) => sum + Math.max(0, entry.total_profit || 0), 0);
-  const totalLosses = data.reduce((sum, entry) => sum + Math.abs(Math.min(0, entry.total_profit || 0)), 0);
-  const averageProfit = totalPlayers > 0 ? totalVolume / totalPlayers : 0;
-  const topPlayerProfit = data.length > 0 ? data[0].total_profit : 0;
-  
-  // 🚀 NEW: Enhanced metrics
-  const averageWinRate = totalPlayers > 0 
-    ? data.reduce((sum, entry) => sum + (entry.win_rate || 0), 0) / totalPlayers 
-    : 0;
-  
-  const totalBetsLost = data.reduce((sum, entry) => {
-    const lossCount = entry.games_played - (entry.games_played * (entry.win_rate / 100));
-    return sum + Math.round(lossCount);
-  }, 0);
-
-  return {
-    totalPlayers,
-    totalGames,
-    totalVolume: Number(totalVolume.toFixed(2)),
-    totalWinnings: Number(totalWinnings.toFixed(2)),
-    totalLosses: Number(totalLosses.toFixed(2)),
-    averageProfit: Number(averageProfit.toFixed(2)),
-    topPlayerProfit: Number(topPlayerProfit.toFixed(2)),
-    averageWinRate: Number(averageWinRate.toFixed(1)),
-    totalBetsLost
-  };
-}, []);
-
-  // Initialize socket on mount
   useEffect(() => {
     let mounted = true;
 
@@ -138,7 +176,6 @@ const calculateEnhancedStats = useCallback((data: LeaderboardEntry[]) => {
       const success = await initializeSocket();
       
       if (mounted && success) {
-        // Set up connection monitoring
         connectionMonitorRef.current = setInterval(() => {
           const connected = sharedSocket.isConnected();
           if (connected !== isConnected) {
@@ -166,7 +203,6 @@ const calculateEnhancedStats = useCallback((data: LeaderboardEntry[]) => {
     };
   }, [initializeSocket, isConnected, signalPageActivity, signalPageInactive]);
 
-  // 🚀 NEW: Handle page visibility changes (don't destroy game state)
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden) {
@@ -210,7 +246,14 @@ const LeaderboardPage: FC = () => {
   const { isAuthenticated } = useUser();
   const router = useRouter();
   
-  // 🚀 NEW: Use improved socket connection hook
+  // 🚀 ENHANCED: Use new XP system hook
+  const { 
+    calculateLevelProgress,
+    getXPRequirement,
+    formatXP,
+    getLevelInfo
+  } = useEnhancedXPSystem();
+  
   const { 
     isConnected: socketConnected, 
     connectionAttempts, 
@@ -219,7 +262,6 @@ const LeaderboardPage: FC = () => {
     socket
   } = useSocketConnection();
 
-  // 🚀 NEW: Debug function for development
   useEffect(() => {
     if (process.env.NODE_ENV === 'development') {
       (window as any).debugSharedSocket = () => {
@@ -286,7 +328,6 @@ const LeaderboardPage: FC = () => {
           const userLeaderboardData = await LeaderboardAPI.getCurrentUserData(userData.id);
           setCurrentUserData(userLeaderboardData);
           
-          // Signal user activity without interfering with game state
           if (socketConnected) {
             console.log(`📡 Leaderboard: Signaling user activity...`);
             signalPageActivity();
@@ -300,27 +341,37 @@ const LeaderboardPage: FC = () => {
     initUser();
   }, [authenticated, currentUserWallet, socketConnected, signalPageActivity]);
 
-  // Calculate level progress
-  const calculateLevelProgress = (user: LeaderboardEntry) => {
-    const currentLevel = user.level;
-    const currentXP = user.experience_points;
+  // 🚀 ENHANCED: Enhanced stats calculation with bet loss tracking
+  const calculateEnhancedStats = useCallback((data: LeaderboardEntry[]) => {
+    const totalPlayers = data.length;
+    const totalGames = data.reduce((sum, entry) => sum + (entry.games_played || 0), 0);
+    const totalVolume = data.reduce((sum, entry) => sum + Math.abs(entry.total_profit || 0), 0);
+    const totalWinnings = data.reduce((sum, entry) => sum + Math.max(0, entry.total_profit || 0), 0);
+    const totalLosses = data.reduce((sum, entry) => sum + Math.abs(Math.min(0, entry.total_profit || 0)), 0);
+    const averageProfit = totalPlayers > 0 ? totalVolume / totalPlayers : 0;
+    const topPlayerProfit = data.length > 0 ? data[0].total_profit : 0;
     
-    const baseXP = 100;
-    const xpForNextLevel = baseXP * Math.pow(1.5, currentLevel - 1);
-    const xpForCurrentLevel = currentLevel > 1 ? baseXP * Math.pow(1.5, currentLevel - 2) : 0;
-    const xpNeededThisLevel = xpForNextLevel - xpForCurrentLevel;
-    const xpProgressThisLevel = currentXP - xpForCurrentLevel;
+    const averageWinRate = totalPlayers > 0 
+      ? data.reduce((sum, entry) => sum + (entry.win_rate || 0), 0) / totalPlayers 
+      : 0;
     
-    const progressPercentage = Math.min(100, Math.max(0, (xpProgressThisLevel / xpNeededThisLevel) * 100));
-    const xpToNextLevel = Math.ceil(xpForNextLevel - currentXP);
+    const totalBetsLost = data.reduce((sum, entry) => {
+      const lossCount = entry.games_played - (entry.games_played * (entry.win_rate / 100));
+      return sum + Math.round(lossCount);
+    }, 0);
 
     return {
-      progressPercentage,
-      xpToNextLevel,
-      xpNeededThisLevel,
-      xpProgressThisLevel
+      totalPlayers,
+      totalGames,
+      totalVolume: Number(totalVolume.toFixed(2)),
+      totalWinnings: Number(totalWinnings.toFixed(2)),
+      totalLosses: Number(totalLosses.toFixed(2)),
+      averageProfit: Number(averageProfit.toFixed(2)),
+      topPlayerProfit: Number(topPlayerProfit.toFixed(2)),
+      averageWinRate: Number(averageWinRate.toFixed(1)),
+      totalBetsLost
     };
-  };
+  }, []);
 
   // Debounced real-time leaderboard refresh
   const debouncedLeaderboardRefresh = useCallback(() => {
@@ -346,20 +397,9 @@ const LeaderboardPage: FC = () => {
             console.log(`✅ Leaderboard REAL-TIME: Updated with ${data.length} entries`);
             setLastRealTimeUpdate(Date.now());
             
-            // Update stats
-            const totalPlayers = data.length;
-            const totalGames = data.reduce((sum, entry) => sum + (entry.games_played || 0), 0);
-            const totalVolume = data.reduce((sum, entry) => sum + (entry.total_profit || 0), 0);
-            const averageProfit = totalPlayers > 0 ? totalVolume / totalPlayers : 0;
-            const topPlayerProfit = data.length > 0 ? data[0].total_profit : 0;
-
-            setStats({
-              totalPlayers,
-              totalGames,
-              totalVolume: Number(totalVolume.toFixed(2)),
-              averageProfit: Number(averageProfit.toFixed(2)),
-              topPlayerProfit: Number(topPlayerProfit.toFixed(2))
-            });
+            // Update stats with enhanced calculation
+            const enhancedStats = calculateEnhancedStats(data);
+            setStats(enhancedStats);
 
             return data;
           }
@@ -392,168 +432,128 @@ const LeaderboardPage: FC = () => {
         setPendingUpdates(prev => Math.max(0, prev - 1));
       }
     }, 3000);
-  }, [period, isAuthenticated, currentUserWallet, userId, autoRefreshEnabled]);
+  }, [period, isAuthenticated, currentUserWallet, userId, autoRefreshEnabled, calculateEnhancedStats]);
 
-  // 🚀 IMPROVED: NON-DESTRUCTIVE socket listeners with new subscription system
-// ADD THESE UPDATES TO YOUR EXISTING LEADERBOARD PAGE
+  // Enhanced socket listeners with XP events
+  useEffect(() => {
+    if (!socketConnected || socketListenersSetup.current) return;
 
-// 🚀 ADD THIS: Enhanced socket listeners for bet loss resolution
-// Replace your existing socket listeners section with this enhanced version:
+    console.log('🔌 Leaderboard: Setting up ENHANCED socket listeners with XP tracking...');
+    socketListenersSetup.current = true;
 
-// 🚀 IMPROVED: Enhanced socket listeners with bet loss resolution support
-useEffect(() => {
-  if (!socketConnected || socketListenersSetup.current) return;
+    const subscriptionIds: string[] = [];
 
-  console.log('🔌 Leaderboard: Setting up ENHANCED socket listeners with bet loss tracking...');
-  socketListenersSetup.current = true;
+    // Existing game events
+    const handleGameEnd = (data: any) => {
+      console.log('🎮 Leaderboard: Game ended - triggering leaderboard refresh');
+      debouncedLeaderboardRefresh();
+    };
 
-  const subscriptionIds: string[] = [];
+    const handleCustodialCashout = (data: any) => {
+      console.log('💸 Leaderboard: Cashout processed - triggering leaderboard refresh');
+      debouncedLeaderboardRefresh();
+    };
 
-  // 🚀 EXISTING: Game completion events
-  const handleGameEnd = (data: any) => {
-    console.log('🎮 Leaderboard: Game ended - triggering leaderboard refresh');
-    debouncedLeaderboardRefresh();
-  };
+    const handleUserStatsUpdate = (data: any) => {
+      console.log('📊 Leaderboard: User stats updated - triggering leaderboard refresh');
+      debouncedLeaderboardRefresh();
+    };
 
-  const handleCustodialCashout = (data: any) => {
-    console.log('💸 Leaderboard: Cashout processed - triggering leaderboard refresh');
-    debouncedLeaderboardRefresh();
-  };
-
-  const handleUserStatsUpdate = (data: any) => {
-    console.log('📊 Leaderboard: User stats updated - triggering leaderboard refresh');
-    debouncedLeaderboardRefresh();
-  };
-
-  const handleBetResult = (data: any) => {
-    console.log('🎲 Leaderboard: Bet resolved - triggering leaderboard refresh');
-    debouncedLeaderboardRefresh();
-  };
-
-  const handleLeaderboardUpdate = (data: any) => {
-    console.log('🏆 Leaderboard: Direct leaderboard update received');
-    debouncedLeaderboardRefresh();
-  };
-
-  // 🚀 NEW: Handle automatic bet loss resolution events
-  const handleAutomaticBetLoss = (data: any) => {
-    console.log('💥 Leaderboard: Automatic bet loss resolved:', {
-      userId: data.userId,
-      amount: data.amount,
-      crashMultiplier: data.crashMultiplier,
-      gameId: data.gameId
-    });
-    
-    // Update stats immediately for better UX
-    setStats(prevStats => ({
-      ...prevStats,
-      totalGames: prevStats.totalGames + 1,
-      totalVolume: prevStats.totalVolume - (data.amount || 0)
-    }));
-    
-    // Trigger leaderboard refresh
-    debouncedLeaderboardRefresh();
-    
-    // Show toast notification for current user if it's their bet
-    if (data.userId === userId) {
-      toast.error(`Bet lost: -${data.amount?.toFixed(3)} SOL (Crashed at ${data.crashMultiplier?.toFixed(2)}x)`, {
-        duration: 4000,
-        position: 'top-center'
+    // 🚀 NEW: XP-specific events
+    const handleXPGained = (data: any) => {
+      console.log('🎯 Leaderboard: XP gained event:', {
+        userId: data.userId,
+        amount: data.amount,
+        source: data.source,
+        multiplier: data.multiplier
       });
-    }
-  };
-
-  // 🚀 NEW: Handle bet placement events for real-time tracking
-  const handleBetPlaced = (data: any) => {
-    console.log('🎯 Leaderboard: Bet placed - updating volume stats');
-    
-    // Update volume stats immediately
-    setStats(prevStats => ({
-      ...prevStats,
-      totalVolume: prevStats.totalVolume + (data.amount || 0)
-    }));
-  };
-
-  // 🚀 NEW: Handle game crash events specifically
-  const handleGameCrashed = (data: any) => {
-    console.log('💥 Leaderboard: Game crashed - checking for unresolved bets', {
-      crashMultiplier: data.multiplier,
-      gameId: data.gameId,
-      playersAffected: data.playersWithActiveBets
-    });
-    
-    // Refresh leaderboard after crash to catch any automatic bet resolutions
-    setTimeout(() => {
-      console.log('🔄 Leaderboard: Post-crash refresh for bet loss resolution');
+      
+      // Show XP notification for current user
+      if (data.userId === userId) {
+        const multiplierText = data.multiplier > 1 ? ` (${data.multiplier}x boost!)` : '';
+        toast.success(`+${data.amount} XP${multiplierText}`, {
+          duration: 3000,
+          position: 'top-center',
+          icon: '⭐'
+        });
+      }
+      
       debouncedLeaderboardRefresh();
-    }, 2000); // Delay to allow bet loss resolution to complete
-  };
+    };
 
-  // 🚀 NEW: Handle enhanced stats updates with detailed tracking
-  const handleEnhancedStatsUpdate = (data: any) => {
-    console.log('📊 Leaderboard: Enhanced stats update received:', {
-      userId: data.userId,
-      gamesPlayed: data.gamesPlayed,
-      netProfit: data.netProfit,
-      winRate: data.winRate,
-      eventType: data.eventType // 'bet_placed', 'cashout', 'bet_lost'
-    });
-    
-    // Update current user data if it matches
-    if (data.userId === userId && currentUserData) {
-      setCurrentUserData(prevData => prevData ? {
-        ...prevData,
-        games_played: data.gamesPlayed || prevData.games_played,
-        total_profit: data.netProfit || prevData.total_profit,
-        win_rate: data.winRate || prevData.win_rate,
-        experience_points: data.experience || prevData.experience_points
-      } : null);
-    }
-    
-    // Trigger leaderboard refresh for significant changes
-    if (data.eventType === 'cashout' || data.eventType === 'bet_lost') {
+    const handleLevelUp = (data: any) => {
+      console.log('🎉 Leaderboard: Level up event:', {
+        userId: data.userId,
+        oldLevel: data.oldLevel,
+        newLevel: data.newLevel,
+        rewardsEarned: data.rewardsEarned
+      });
+      
+      // Show level up celebration for current user
+      if (data.userId === userId) {
+        toast.success(`🎉 Level Up! You reached Level ${data.newLevel}!`, {
+          duration: 6000,
+          position: 'top-center',
+          icon: '🎊'
+        });
+      }
+      
       debouncedLeaderboardRefresh();
-    }
-  };
+    };
 
-  // 🚀 NEW: Use improved subscription system with new events
-  subscriptionIds.push(
-    // Existing events
-    sharedSocket.subscribe('gameEnd', handleGameEnd, 'leaderboard'),
-    sharedSocket.subscribe('custodialCashout', handleCustodialCashout, 'leaderboard'),
-    sharedSocket.subscribe('userStatsUpdate', handleUserStatsUpdate, 'leaderboard'),
-    sharedSocket.subscribe('betResult', handleBetResult, 'leaderboard'),
-    sharedSocket.subscribe('leaderboardUpdate', handleLeaderboardUpdate, 'leaderboard'),
-    
-    // 🚀 NEW: Enhanced events for bet loss resolution
-    sharedSocket.subscribe('automaticBetLoss', handleAutomaticBetLoss, 'leaderboard'),
-    sharedSocket.subscribe('betPlaced', handleBetPlaced, 'leaderboard'),
-    sharedSocket.subscribe('gameCrashed', handleGameCrashed, 'leaderboard'),
-    sharedSocket.subscribe('enhancedStatsUpdate', handleEnhancedStatsUpdate, 'leaderboard')
-  );
+    const handleAutomaticBetLoss = (data: any) => {
+      console.log('💥 Leaderboard: Automatic bet loss resolved:', {
+        userId: data.userId,
+        amount: data.amount,
+        crashMultiplier: data.crashMultiplier,
+        gameId: data.gameId
+      });
+      
+      setStats(prevStats => ({
+        ...prevStats,
+        totalGames: prevStats.totalGames + 1,
+        totalVolume: prevStats.totalVolume - (data.amount || 0)
+      }));
+      
+      debouncedLeaderboardRefresh();
+      
+      if (data.userId === userId) {
+        toast.error(`Bet lost: -${data.amount?.toFixed(3)} SOL (Crashed at ${data.crashMultiplier?.toFixed(2)}x)`, {
+          duration: 4000,
+          position: 'top-center'
+        });
+      }
+    };
 
-  return () => {
-    console.log('🔌 Leaderboard: Cleaning up ENHANCED socket listeners');
-    
-    // Clean up using subscription IDs
-    subscriptionIds.forEach(id => sharedSocket.unsubscribe(id));
-    
-    if (realTimeUpdateRef.current) {
-      clearTimeout(realTimeUpdateRef.current);
-    }
-    
-    socketListenersSetup.current = false;
-  };
-}, [socketConnected, debouncedLeaderboardRefresh, userId, currentUserData]);
+    // Subscribe to all events
+    subscriptionIds.push(
+      sharedSocket.subscribe('gameEnd', handleGameEnd, 'leaderboard'),
+      sharedSocket.subscribe('custodialCashout', handleCustodialCashout, 'leaderboard'),
+      sharedSocket.subscribe('userStatsUpdate', handleUserStatsUpdate, 'leaderboard'),
+      sharedSocket.subscribe('xpGained', handleXPGained, 'leaderboard'),
+      sharedSocket.subscribe('levelUp', handleLevelUp, 'leaderboard'),
+      sharedSocket.subscribe('automaticBetLoss', handleAutomaticBetLoss, 'leaderboard')
+    );
 
-  // 🚀 NEW: Component cleanup to unsubscribe all leaderboard events
+    return () => {
+      console.log('🔌 Leaderboard: Cleaning up ENHANCED socket listeners');
+      
+      subscriptionIds.forEach(id => sharedSocket.unsubscribe(id));
+      
+      if (realTimeUpdateRef.current) {
+        clearTimeout(realTimeUpdateRef.current);
+      }
+      
+      socketListenersSetup.current = false;
+    };
+  }, [socketConnected, debouncedLeaderboardRefresh, userId]);
+
+  // Component cleanup
   useEffect(() => {
     return () => {
       console.log('🧹 Leaderboard: Component unmounting - cleaning up all subscriptions');
-      // Clean up all leaderboard-related subscriptions
       sharedSocket.unsubscribeComponent('leaderboard');
       
-      // Final inactive signal
       if (sharedSocket.isConnected()) {
         sharedSocket.emit('pageActivity', { 
           page: 'leaderboard',
@@ -561,38 +561,6 @@ useEffect(() => {
           timestamp: Date.now()
         });
       }
-    };
-  }, []);
-
-  const calculateEnhancedStats = useCallback((data: LeaderboardEntry[]) => {
-    const totalPlayers = data.length;
-    const totalGames = data.reduce((sum, entry) => sum + (entry.games_played || 0), 0);
-    const totalVolume = data.reduce((sum, entry) => sum + Math.abs(entry.total_profit || 0), 0);
-    const totalWinnings = data.reduce((sum, entry) => sum + Math.max(0, entry.total_profit || 0), 0);
-    const totalLosses = data.reduce((sum, entry) => sum + Math.abs(Math.min(0, entry.total_profit || 0)), 0);
-    const averageProfit = totalPlayers > 0 ? totalVolume / totalPlayers : 0;
-    const topPlayerProfit = data.length > 0 ? data[0].total_profit : 0;
-    
-    // 🚀 NEW: Enhanced metrics
-    const averageWinRate = totalPlayers > 0 
-      ? data.reduce((sum, entry) => sum + (entry.win_rate || 0), 0) / totalPlayers 
-      : 0;
-    
-    const totalBetsLost = data.reduce((sum, entry) => {
-      const lossCount = entry.games_played - (entry.games_played * (entry.win_rate / 100));
-      return sum + Math.round(lossCount);
-    }, 0);
-  
-    return {
-      totalPlayers,
-      totalGames,
-      totalVolume: Number(totalVolume.toFixed(2)),
-      totalWinnings: Number(totalWinnings.toFixed(2)),
-      totalLosses: Number(totalLosses.toFixed(2)),
-      averageProfit: Number(averageProfit.toFixed(2)),
-      topPlayerProfit: Number(topPlayerProfit.toFixed(2)),
-      averageWinRate: Number(averageWinRate.toFixed(1)),
-      totalBetsLost
     };
   }, []);
 
@@ -617,7 +585,6 @@ useEffect(() => {
           totalVolume: 0,
           averageProfit: 0,
           topPlayerProfit: 0,
-          // 🚀 NEW: Enhanced stats properties
           totalWinnings: 0,
           totalLosses: 0,
           averageWinRate: 0,
@@ -628,11 +595,11 @@ useEffect(() => {
 
       setLeaderboardData(data);
 
-      // 🚀 NEW: Use enhanced stats calculation
-    const enhancedStats = calculateEnhancedStats(data);
-    setStats(enhancedStats);
+      // Use enhanced stats calculation
+      const enhancedStats = calculateEnhancedStats(data);
+      setStats(enhancedStats);
 
-    console.log(`✅ Leaderboard: Loaded ${data.length} entries with enhanced stats:`, enhancedStats);
+      console.log(`✅ Leaderboard: Loaded ${data.length} entries with enhanced stats:`, enhancedStats);
 
       // Get current user's rank
       if (isAuthenticated && currentUserWallet) {
@@ -655,8 +622,6 @@ useEffect(() => {
         }
       }
 
-      console.log(`✅ Leaderboard: Loaded ${data.length} entries for ${period}`);
-
     } catch (err) {
       console.error('❌ Leaderboard fetch error:', err);
       setError(err instanceof Error ? err.message : 'Failed to load leaderboard');
@@ -669,7 +634,6 @@ useEffect(() => {
 
   // Effect to fetch data when period changes
   useEffect(() => {
-    // Reset real-time tracking when period changes
     if (lastPeriodRef.current !== period) {
       console.log(`🔄 Leaderboard: Period changed from ${lastPeriodRef.current} to ${period}`);
       lastPeriodRef.current = period;
@@ -745,12 +709,12 @@ useEffect(() => {
                     <div className="flex items-center gap-3 mt-1">
                       <p className="text-xs text-gray-500">{getPeriodDescription(period)}</p>
                       
-                      {/* Real-time status indicator */}
+                      {/* Real-time status indicator with XP tracking */}
                       <div className="flex items-center gap-2">
                         {isRealTimeConnected ? (
                           <div className="flex items-center text-xs text-green-400">
                             <Wifi size={12} className="mr-1" />
-                            <span>Live</span>
+                            <span>Live XP</span>
                             {pendingUpdates > 0 && (
                               <div className="ml-1 px-1 bg-green-500 text-white rounded-full text-xs">
                                 {pendingUpdates}
@@ -795,7 +759,7 @@ useEffect(() => {
                   >
                     <Zap size={14} className="mr-1" />
                     <span className="hidden sm:inline">
-                      {autoRefreshEnabled ? 'Live' : 'Manual'}
+                      {autoRefreshEnabled ? 'Live XP' : 'Manual'}
                     </span>
                   </button>
                   
@@ -810,7 +774,7 @@ useEffect(() => {
                 </div>
               </div>
 
-              {/* User Level Info */}
+              {/* 🚀 ENHANCED: User Level Info with NEW XP SYSTEM */}
               {isAuthenticated && currentUserData && (
                 <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-800/30 rounded-lg p-6 mb-6">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -820,7 +784,9 @@ useEffect(() => {
                       </div>
                       <div className="flex-1">
                         <h3 className="text-white font-semibold text-lg">{currentUserData.username}</h3>
-                        <div className="flex items-center gap-4 text-sm text-gray-400">
+                        
+                        {/* 🚀 ENHANCED: Level info with tier system */}
+                        <div className="flex items-center gap-4 text-sm text-gray-400 mb-2">
                           <span className="flex items-center">
                             <Crown size={14} className="mr-1 text-purple-400" />
                             Level {currentUserData.level}
@@ -828,7 +794,7 @@ useEffect(() => {
                           <span>•</span>
                           <span className="flex items-center">
                             <Star size={14} className="mr-1 text-blue-400" />
-                            {currentUserData.experience_points} XP
+                            {formatXP(currentUserData.experience_points)} XP
                           </span>
                           <span>•</span>
                           <span className="flex items-center">
@@ -836,6 +802,18 @@ useEffect(() => {
                             Tier {currentUserData.tier}
                           </span>
                         </div>
+
+                        {/* 🚀 NEW: Enhanced level tier display */}
+                        {(() => {
+                          const levelInfo = getLevelInfo(currentUserData.level);
+                          return (
+                            <div className={`inline-flex items-center px-3 py-1 rounded-lg text-xs border ${levelInfo.color} ${levelInfo.bgColor} border-current/30`}>
+                              <span className="mr-2">{levelInfo.icon}</span>
+                              <span className="font-medium">{levelInfo.tierText}</span>
+                              <span className="ml-2 text-gray-400">- {levelInfo.description}</span>
+                            </div>
+                          );
+                        })()}
                         
                         {currentUserData.badge && (
                           <div className="mt-2 flex items-center gap-2">
@@ -859,38 +837,63 @@ useEffect(() => {
                       )}
                     </div>
 
+                    {/* 🚀 ENHANCED: XP Progress with NEW SYSTEM */}
                     <div className="space-y-3">
                       {(() => {
                         const progress = calculateLevelProgress(currentUserData);
+                        const nextLevelXP = getXPRequirement(currentUserData.level + 1);
+                        const currentLevelXP = getXPRequirement(currentUserData.level);
+                        const levelInfo = getLevelInfo(currentUserData.level);
+                        
                         return (
                           <>
                             <div className="flex items-center justify-between">
                               <span className="text-sm text-gray-400">
                                 Level {currentUserData.level} Progress
+                                {progress.isEarlyLevel && (
+                                  <span className="ml-2 text-xs text-yellow-400 bg-yellow-400/20 px-2 py-0.5 rounded font-medium">
+                                    🚀 3x XP BOOST
+                                  </span>
+                                )}
                               </span>
                               <span className="text-sm text-purple-400">
-                                {progress.xpToNextLevel > 0 
-                                  ? `${progress.xpToNextLevel} XP to Level ${currentUserData.level + 1}`
-                                  : "Max Level Reached!"
-                                }
+                                {progress.readyToLevelUp ? (
+                                  <span className="text-green-400 font-bold">Ready to Level Up! 🎉</span>
+                                ) : progress.xpNeeded > 0 ? (
+                                  `${formatXP(progress.xpNeeded)} XP to Level ${currentUserData.level + 1}`
+                                ) : (
+                                  "Max Level Reached!"
+                                )}
                               </span>
                             </div>
                             
                             <div className="relative">
                               <div className="w-full bg-gray-700 rounded-full h-3">
                                 <div 
-                                  className="bg-gradient-to-r from-purple-500 via-blue-500 to-purple-600 h-3 rounded-full transition-all duration-700 ease-out relative"
+                                  className={`h-3 rounded-full transition-all duration-700 ease-out relative ${
+                                    progress.isEarlyLevel 
+                                      ? 'bg-gradient-to-r from-green-400 via-yellow-400 to-orange-400' 
+                                      : progress.readyToLevelUp
+                                        ? 'bg-gradient-to-r from-yellow-400 to-green-400 animate-pulse'
+                                        : 'bg-gradient-to-r from-purple-500 via-blue-500 to-purple-600'
+                                  }`}
                                   style={{ width: `${Math.max(5, progress.progressPercentage)}%` }}
                                 >
                                   <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-blue-400 rounded-full blur-sm opacity-60"></div>
+                                  {progress.readyToLevelUp && (
+                                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-400 rounded-full animate-bounce"></div>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex justify-between mt-1 text-xs text-gray-400">
                                 <span>{progress.progressPercentage.toFixed(1)}% Complete</span>
-                                <span>Level {currentUserData.level + 1}</span>
+                                <span>
+                                  {formatXP(progress.xpThisLevel)} / {formatXP(progress.xpNeededThisLevel)} XP
+                                </span>
                               </div>
                             </div>
 
+                            {/* 🚀 NEW: XP breakdown */}
                             <div className="grid grid-cols-3 gap-3 mt-4">
                               <div className="text-center">
                                 <div className="text-lg font-bold text-green-400">
@@ -911,6 +914,16 @@ useEffect(() => {
                                 <div className="text-xs text-gray-400">Win Streak</div>
                               </div>
                             </div>
+
+                            {/* 🚀 NEW: Next level rewards preview */}
+                            {!progress.readyToLevelUp && progress.xpNeeded > 0 && progress.xpNeeded <= 500 && (
+                              <div className="mt-3 p-2 bg-purple-600/20 border border-purple-600/30 rounded text-xs text-purple-300">
+                                <div className="font-medium mb-1">🎁 Next Level Rewards:</div>
+                                <div className="text-gray-400">
+                                  • Increased XP multiplier • New badge tier • Bonus features
+                                </div>
+                              </div>
+                            )}
                           </>
                         );
                       })()}
@@ -918,92 +931,93 @@ useEffect(() => {
                   </div>
                 </div>
               )}
-{/* Enhanced Stats Overview with real-time indicators */}
-<div className="grid grid-cols-2 lg:grid-cols-7 gap-4 mb-8">
-  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-    pendingUpdates > 0 ? 'ring-2 ring-blue-400 ring-opacity-30' : ''
-  }`}>
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-gray-400 text-xs">Total Ruggers</p>
-        <p className="text-xl font-bold text-white">{stats.totalPlayers}</p>
-      </div>
-      <Users className="text-blue-400" size={20} />
-    </div>
-  </div>
-  
-  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-    pendingUpdates > 0 ? 'ring-2 ring-green-400 ring-opacity-30' : ''
-  }`}>
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-gray-400 text-xs">Total Games</p>
-        <p className="text-xl font-bold text-white">{stats.totalGames.toLocaleString()}</p>
-      </div>
-      <TrendingUp className="text-green-400" size={20} />
-    </div>
-  </div>
-  
-  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-    pendingUpdates > 0 ? 'ring-2 ring-purple-400 ring-opacity-30' : ''
-  }`}>
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-gray-400 text-xs">Volume</p>
-        <p className="text-xl font-bold text-white">{stats.totalVolume.toFixed(2)}</p>
-      </div>
-      <Award className="text-purple-400" size={20} />
-    </div>
-  </div>
 
-  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-    pendingUpdates > 0 ? 'ring-2 ring-orange-400 ring-opacity-30' : ''
-  }`}>
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-gray-400 text-xs">Avg Profit</p>
-        <p className="text-xl font-bold text-white">{stats.averageProfit.toFixed(2)}</p>
-      </div>
-      <Target className="text-orange-400" size={20} />
-    </div>
-  </div>
+              {/* Enhanced Stats Overview with real-time indicators */}
+              <div className="grid grid-cols-2 lg:grid-cols-7 gap-4 mb-8">
+                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+                  pendingUpdates > 0 ? 'ring-2 ring-blue-400 ring-opacity-30' : ''
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-400 text-xs">Total Ruggers</p>
+                      <p className="text-xl font-bold text-white">{stats.totalPlayers}</p>
+                    </div>
+                    <Users className="text-blue-400" size={20} />
+                  </div>
+                </div>
+                
+                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+                  pendingUpdates > 0 ? 'ring-2 ring-green-400 ring-opacity-30' : ''
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-400 text-xs">Total Games</p>
+                      <p className="text-xl font-bold text-white">{stats.totalGames.toLocaleString()}</p>
+                    </div>
+                    <TrendingUp className="text-green-400" size={20} />
+                  </div>
+                </div>
+                
+                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+                  pendingUpdates > 0 ? 'ring-2 ring-purple-400 ring-opacity-30' : ''
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-400 text-xs">Volume</p>
+                      <p className="text-xl font-bold text-white">{stats.totalVolume.toFixed(2)}</p>
+                    </div>
+                    <Award className="text-purple-400" size={20} />
+                  </div>
+                </div>
 
-  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-    pendingUpdates > 0 ? 'ring-2 ring-yellow-400 ring-opacity-30' : ''
-  }`}>
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-gray-400 text-xs">Top Player</p>
-        <p className="text-xl font-bold text-yellow-400">{stats.topPlayerProfit.toFixed(2)}</p>
-      </div>
-      <Medal className="text-yellow-400" size={20} />
-    </div>
-  </div>
+                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+                  pendingUpdates > 0 ? 'ring-2 ring-orange-400 ring-opacity-30' : ''
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-400 text-xs">Avg Profit</p>
+                      <p className="text-xl font-bold text-white">{stats.averageProfit.toFixed(2)}</p>
+                    </div>
+                    <Target className="text-orange-400" size={20} />
+                  </div>
+                </div>
 
-  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-    pendingUpdates > 0 ? 'ring-2 ring-cyan-400 ring-opacity-30' : ''
-  }`}>
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-gray-400 text-xs">Avg Win Rate</p>
-        <p className="text-xl font-bold text-white">{stats.averageWinRate?.toFixed(1) || '0.0'}%</p>
-      </div>
-      <TrendingUp className="text-cyan-400" size={20} />
-    </div>
-  </div>
+                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+                  pendingUpdates > 0 ? 'ring-2 ring-yellow-400 ring-opacity-30' : ''
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-400 text-xs">Top Player</p>
+                      <p className="text-xl font-bold text-yellow-400">{stats.topPlayerProfit.toFixed(2)}</p>
+                    </div>
+                    <Medal className="text-yellow-400" size={20} />
+                  </div>
+                </div>
 
-  <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
-    pendingUpdates > 0 ? 'ring-2 ring-red-400 ring-opacity-30' : ''
-  }`}>
-    <div className="flex items-center justify-between">
-      <div>
-        <p className="text-gray-400 text-xs">Total Losses</p>
-        <p className="text-xl font-bold text-red-400">{stats.totalBetsLost?.toLocaleString() || '0'}</p>
-      </div>
-      <AlertCircle className="text-red-400" size={20} />
-    </div>
-  </div>
-</div>
+                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+                  pendingUpdates > 0 ? 'ring-2 ring-cyan-400 ring-opacity-30' : ''
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-400 text-xs">Avg Win Rate</p>
+                      <p className="text-xl font-bold text-white">{stats.averageWinRate?.toFixed(1) || '0.0'}%</p>
+                    </div>
+                    <TrendingUp className="text-cyan-400" size={20} />
+                  </div>
+                </div>
+
+                <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
+                  pendingUpdates > 0 ? 'ring-2 ring-red-400 ring-opacity-30' : ''
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-gray-400 text-xs">Total Losses</p>
+                      <p className="text-xl font-bold text-red-400">{stats.totalBetsLost?.toLocaleString() || '0'}</p>
+                    </div>
+                    <AlertCircle className="text-red-400" size={20} />
+                  </div>
+                </div>
+              </div>
               
               {/* Period Selector & Leaderboard */}
               <div className="bg-gray-900 rounded-lg border border-gray-800 overflow-hidden">
@@ -1031,6 +1045,7 @@ useEffect(() => {
                         {isRealTimeConnected && autoRefreshEnabled && (
                           <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
                         )}
+                        <span className="text-blue-400">XP</span>
                       </div>
                     )}
                   </div>
@@ -1041,8 +1056,8 @@ useEffect(() => {
                   {loading && (
                     <div className="text-center py-16">
                       <div className="animate-spin h-8 w-8 border-2 border-blue-400 border-t-transparent rounded-full mx-auto mb-4"></div>
-                      <p className="text-gray-400">Loading RUGGER oard...</p>
-                      <p className="text-xs text-gray-500 mt-2">Fetching {getPeriodDisplayName(period).toLowerCase()} rankings</p>
+                      <p className="text-gray-400">Loading RUGGER Board...</p>
+                      <p className="text-xs text-gray-500 mt-2">Fetching {getPeriodDisplayName(period).toLowerCase()} rankings with XP data</p>
                     </div>
                   )}
                   
@@ -1081,7 +1096,7 @@ useEffect(() => {
                 </div>
               </div>
               
-              {/* Enhanced Information Section */}
+              {/* Enhanced Information Section with XP details */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
                 <div className="bg-gray-900 rounded-lg p-6 border border-gray-800">
                   <h2 className="text-xl font-bold text-white mb-4 flex items-center">
@@ -1091,25 +1106,26 @@ useEffect(() => {
                   <ul className="list-disc list-inside text-gray-400 space-y-2 text-sm">
                     <li>Rankings based on profit percentage: (Total Profit / Total Wagered) × 100</li>
                     <li>Players must have completed games to qualify</li>
-                    <li>Real-time updates as games are played</li>
+                    <li>Real-time updates as games are played and XP is earned</li>
                     <li>Rankings reset based on selected timeframe</li>
-                    <li>Level and XP data synced with dashboard</li>
-                    <li>Top performers earn exclusive recognition</li>
+                    <li>🚀 <strong className="text-blue-400">NEW:</strong> Enhanced XP system with level progression</li>
+                    <li>Early level boost (3x XP) for levels 1-3</li>
+                    <li>Level tiers: Rookie → Rising → Tier 1+ → Elite</li>
                   </ul>
                 </div>
 
                 <div className="bg-gray-900 rounded-lg p-6 border border-gray-800">
                   <h2 className="text-xl font-bold text-white mb-4 flex items-center">
-                    <TrendingUp className="mr-2 text-green-400" size={20} />
-                    Real-Time Features
+                    <Star className="mr-2 text-purple-400" size={20} />
+                    XP System Features
                   </h2>
                   <ul className="list-disc list-inside text-gray-400 space-y-2 text-sm">
-                    <li><strong className="text-white">Live Updates:</strong> Leaderboard refreshes automatically after games</li>
-                    <li><strong className="text-white">Connection Status:</strong> Real-time connection indicator</li>
-                    <li><strong className="text-white">Auto Refresh:</strong> Toggle automatic updates on/off</li>
-                    <li><strong className="text-white">Manual Refresh:</strong> Force refresh anytime</li>
-                    <li>Updates debounced to prevent excessive refreshing</li>
-                    <li>Visual indicators show when data is being updated</li>
+                    <li><strong className="text-white">Live XP Tracking:</strong> Real-time XP gains and level progress</li>
+                    <li><strong className="text-white">Early Boost:</strong> 3x XP multiplier for new players (levels 1-3)</li>
+                    <li><strong className="text-white">Level Notifications:</strong> Instant alerts for level ups and XP gains</li>
+                    <li><strong className="text-white">Progress Visualization:</strong> Enhanced progress bars with tier indicators</li>
+                    <li>XP sources: base play, wins, multipliers, streaks, achievements</li>
+                    <li>Level rewards: badges, increased multipliers, special features</li>
                   </ul>
                 </div>
               </div>

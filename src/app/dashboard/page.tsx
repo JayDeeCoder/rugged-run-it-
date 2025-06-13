@@ -591,7 +591,7 @@ const Dashboard: FC = () => {
       
       const { data: user, error } = await supabase
         .from('users_unified')
-        .select('level, experience, experience_points, badges_earned, achievements, games_played, win_rate, total_games_played')
+        .select('level, experience, experience_points, badges_earned, achievements, total_games_played, win_rate')
         .eq('id', userId)
         .single();
 
@@ -602,7 +602,7 @@ const Dashboard: FC = () => {
 
       const currentLevel = user.level || 1;
       const currentXP = user.experience_points || 0;
-      const gamesPlayed = user.total_games_played || user.games_played || 0;
+      const gamesPlayed = user.total_games_played || 0;
       const winRate = user.win_rate || 0;
       
       console.log(`🎯 Dashboard: Raw user data:`, {

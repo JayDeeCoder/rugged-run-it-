@@ -1,4 +1,4 @@
-// src/app/dashboard/page.tsx - COMPLETE FIX with proper scrolling and all existing functionality
+// src/app/dashboard/page.tsx - ENHANCED UI with compact mobile design
 'use client';
 
 import { FC, useState, useEffect, useContext, useCallback, useRef } from 'react';
@@ -9,7 +9,7 @@ import Layout from '../../components/layout/Layout';
 import Link from 'next/link';
 import { UserContext } from '../../context/UserContext';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../../utils/walletUtils';
-import { Wallet, TrendingUp, GamepadIcon, RefreshCw } from 'lucide-react';
+import { Wallet, TrendingUp, GamepadIcon, RefreshCw, Star, Crown, Medal, Trophy, Zap, Target, Award, Users, AlertCircle } from 'lucide-react';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import ReferralSection from '../../components/ReferralSection';
@@ -278,7 +278,12 @@ const Dashboard: FC = () => {
     experience: 0,
     experiencePoints: 0,
     experienceToNextLevel: 100,
-    progressPercentage: 0
+    progressPercentage: 0,
+    // 🚀 NEW: Enhanced XP system properties
+    isEarlyLevel: false,
+    readyToLevelUp: false,
+    xpThisLevel: 0,
+    xpNeededThisLevel: 100
   });
   const [isLoadingLevel, setIsLoadingLevel] = useState(false);
 
@@ -483,6 +488,7 @@ const Dashboard: FC = () => {
     };
   }, [isValidWallet, walletAddress]);
 
+  // 🚀 ENHANCED: Use new XP system for level calculations
   const fetchLevelData = useCallback(async () => {
     if (!userId) {
       setLevelData({
@@ -490,18 +496,23 @@ const Dashboard: FC = () => {
         experience: 0,
         experiencePoints: 0,
         experienceToNextLevel: 100,
-        progressPercentage: 0
+        progressPercentage: 0,
+        // 🚀 NEW: Enhanced XP system properties for initial state
+        isEarlyLevel: true,
+        readyToLevelUp: false,
+        xpThisLevel: 0,
+        xpNeededThisLevel: 100
       });
       return;
     }
 
     setIsLoadingLevel(true);
     try {
-      console.log(`🎯 Dashboard: Fetching level data for user ${userId}`);
+      console.log(`🎯 Dashboard: Fetching enhanced level data for user ${userId}`);
       
       const { data: user, error } = await supabase
         .from('users_unified')
-        .select('level, experience, experience_points, badges_earned, achievements')
+        .select('level, experience, experience_points, badges_earned, achievements, games_played, win_rate')
         .eq('id', userId)
         .single();
 
@@ -513,24 +524,29 @@ const Dashboard: FC = () => {
       const currentLevel = user.level || 1;
       const currentXP = user.experience_points || 0;
       
-      const baseXP = 100;
-      const xpForNextLevel = baseXP * Math.pow(1.5, currentLevel - 1);
-      const xpForCurrentLevel = currentLevel > 1 ? baseXP * Math.pow(1.5, currentLevel - 2) : 0;
-      const xpNeededThisLevel = xpForNextLevel - xpForCurrentLevel;
-      const xpProgressThisLevel = currentXP - xpForCurrentLevel;
-      
-      const progressPercentage = Math.min(100, Math.max(0, (xpProgressThisLevel / xpNeededThisLevel) * 100));
+      // 🚀 NEW: Use enhanced XP system calculation
+      const levelProgress = UserAPI.calculateLevelProgress({
+        level: currentLevel,
+        experience_points: currentXP,
+        total_games_played: user.games_played || 0,
+        win_rate: user.win_rate || 0
+      });
 
       setLevelData({
         level: currentLevel,
         experience: user.experience || 0,
         experiencePoints: currentXP,
-        experienceToNextLevel: Math.ceil(xpForNextLevel - currentXP),
-        progressPercentage: progressPercentage
+        experienceToNextLevel: levelProgress.xpNeeded,
+        progressPercentage: levelProgress.progressPercentage,
+        // 🚀 NEW: Enhanced data
+        isEarlyLevel: levelProgress.isEarlyLevel,
+        readyToLevelUp: levelProgress.readyToLevelUp,
+        xpThisLevel: levelProgress.xpThisLevel,
+        xpNeededThisLevel: levelProgress.xpNeededThisLevel
       });
 
     } catch (error) {
-      console.error('❌ Error fetching level data:', error);
+      console.error('❌ Error fetching enhanced level data:', error);
     } finally {
       setIsLoadingLevel(false);
     }
@@ -759,11 +775,53 @@ const Dashboard: FC = () => {
       }
     };
 
+    // 🚀 NEW: Enhanced XP system events
+    const handleXPGained = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`🎯 Dashboard LIVE: XP gained for ${userId}:`, data);
+        
+        // Show XP notification with multiplier info
+        const multiplierText = data.multiplier > 1 ? ` (${data.multiplier}x boost!)` : '';
+        toast.success(`+${data.amount} XP${multiplierText}`, {
+          duration: 3000,
+          position: 'top-center',
+          icon: '⭐'
+        });
+        
+        // Refresh level data
+        setTimeout(() => {
+          fetchLevelData();
+        }, 1000);
+      }
+    };
+
+    const handleLevelUp = (data: any) => {
+      if (data.userId === userId) {
+        console.log(`🎉 Dashboard LIVE: Level up for ${userId}:`, data);
+        
+        // Show level up celebration
+        toast.success(`🎉 Level Up! You reached Level ${data.newLevel}!`, {
+          duration: 6000,
+          position: 'top-center',
+          icon: '🎊'
+        });
+        
+        // Refresh level data immediately
+        fetchLevelData();
+        
+        // Also refresh stats as level ups may affect other metrics
+        refreshStatsDebounced();
+      }
+    };
+
     socket.on('custodialBetPlaced', handleCustodialBetPlaced);
     socket.on('custodialCashout', handleCustodialCashout);
     socket.on('gameEnd', handleGameEnd);
     socket.on('userStatsUpdate', handleUserStatsUpdate);
     socket.on('betResult', handleBetResult);
+    // 🚀 NEW: XP system events
+    socket.on('xpGained', handleXPGained);
+    socket.on('levelUp', handleLevelUp);
     
     return () => {
       console.log(`📊 Dashboard: Cleaning up LIVE stats listeners for user: ${userId}`);
@@ -772,6 +830,9 @@ const Dashboard: FC = () => {
       socket.off('gameEnd', handleGameEnd);
       socket.off('userStatsUpdate', handleUserStatsUpdate);
       socket.off('betResult', handleBetResult);
+      // 🚀 NEW: Clean up XP system events
+      socket.off('xpGained', handleXPGained);
+      socket.off('levelUp', handleLevelUp);
       
       if (statsRefreshTimeout) {
         clearTimeout(statsRefreshTimeout);
@@ -801,9 +862,9 @@ const Dashboard: FC = () => {
       
       try {
         await fetchLevelData();
-        console.log('🎯 Dashboard: Level data refreshed');
+        console.log('🎯 Dashboard: Enhanced level data refreshed');
       } catch (error) {
-        console.error('❌ Dashboard: Failed to refresh level data:', error);
+        console.error('❌ Dashboard: Failed to refresh enhanced level data:', error);
       }
       
       try {
@@ -930,6 +991,61 @@ const Dashboard: FC = () => {
     }
   }, [userId, walletAddress]);
 
+  // Helper functions for mobile-friendly formatting
+  const formatXP = (xp: number) => {
+    if (xp >= 10000) return `${(xp / 1000).toFixed(1)}k`;
+    return xp.toLocaleString();
+  };
+
+  const formatSOL = (amount: number) => {
+    if (amount >= 1000) return `${(amount / 1000).toFixed(1)}k`;
+    return amount.toFixed(3);
+  };
+
+  // 🚀 NEW: Enhanced XP system helper functions
+  const getLevelInfo = (level: number) => {
+    const tier = Math.ceil(level / 10);
+    const isEarlyLevel = level <= 3;
+    
+    if (isEarlyLevel) {
+      return { 
+        tierText: 'Rookie', 
+        color: 'text-green-400', 
+        bgColor: 'bg-green-600/20',
+        icon: '🌱',
+        description: 'Early Level Boost Active!'
+      };
+    }
+    
+    if (level <= 8) {
+      return { 
+        tierText: 'Rising', 
+        color: 'text-blue-400', 
+        bgColor: 'bg-blue-600/20',
+        icon: '⭐',
+        description: 'Building momentum'
+      };
+    }
+
+    if (tier <= 2) {
+      return { 
+        tierText: `Tier ${tier}`, 
+        color: 'text-purple-400', 
+        bgColor: 'bg-purple-600/20',
+        icon: '💎',
+        description: 'Advanced player'
+      };
+    }
+
+    return { 
+      tierText: `Elite T${tier}`, 
+      color: 'text-yellow-400', 
+      bgColor: 'bg-yellow-600/20',
+      icon: '👑',
+      description: 'Elite performer'
+    };
+  };
+
   // Loading state while Privy initializes
   if (!ready) {
     return (
@@ -937,7 +1053,7 @@ const Dashboard: FC = () => {
         <div className="scrollable-page-container">
           <div className="scrollable-content-area">
             <div className="scrollable-inner-content">
-              <div className="max-w-7xl mx-auto px-4 py-8">
+              <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
                 <div className="flex justify-center items-center h-64">
                   <div className="animate-spin h-8 w-8 border-2 border-blue-400 border-t-transparent rounded-full"></div>
                 </div>
@@ -954,324 +1070,402 @@ const Dashboard: FC = () => {
       <div className="scrollable-page-container">
         <div className="scrollable-content-area">
           <div className="scrollable-inner-content">
-            <div className="max-w-7xl mx-auto px-4 py-8">
-              {/* Header */}
-              <div className="flex justify-between items-center mb-6">
-                <h1 className="text-3xl font-bold text-white">Dashboard</h1>
+            <div className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-8">
+              
+              {/* 🚀 ENHANCED: Compact Header with mobile optimization */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 gap-3">
+                <div className="flex items-center">
+                  <Trophy className="text-yellow-400 mr-2 sm:mr-3" size={24} />
+                  <div>
+                    <h1 className="text-2xl sm:text-3xl font-bold text-white">Dashboard</h1>
+                    <p className="text-xs sm:text-sm text-gray-400 mt-0.5">Player Performance Center</p>
+                  </div>
+                </div>
+                
                 {(isValidWallet && userId) && (
                   <button
                     onClick={refreshData}
-                    className="flex items-center bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-md transition-colors"
+                    className="flex items-center bg-gray-800 hover:bg-gray-700 text-white px-3 py-2 rounded-lg transition-colors text-sm disabled:opacity-50"
                     disabled={isManualRefreshing}
                   >
-                    <RefreshCw size={16} className={`mr-2 ${isManualRefreshing ? 'animate-spin' : ''}`} />
-                    Refresh
+                    <RefreshCw size={14} className={`mr-2 ${isManualRefreshing ? 'animate-spin' : ''}`} />
+                    <span className="hidden sm:inline">Refresh</span>
+                    <span className="sm:hidden">↻</span>
                   </button>
                 )}
               </div>
 
-              {/* Enhanced Player Profile with Real Level System */}
+              {/* 🚀 ENHANCED: Compact Player Profile with mobile-first design */}
               {isValidWallet && userId && (
-                <div className="bg-gray-900 rounded-lg p-6 mb-8">
-                  <h2 className="text-xl font-bold text-white mb-4">Player Profile</h2>
-                  
+                <div className="bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-800/30 rounded-lg p-4 sm:p-6 mb-4 sm:mb-6">
                   {isLoadingLevel ? (
-                    <div className="animate-pulse space-y-4">
-                      <div className="h-6 bg-gray-700 rounded w-32"></div>
-                      <div className="h-4 bg-gray-700 rounded w-full"></div>
-                      <div className="grid grid-cols-3 gap-4">
-                        <div className="h-16 bg-gray-700 rounded"></div>
-                        <div className="h-16 bg-gray-700 rounded"></div>
-                        <div className="h-16 bg-gray-700 rounded"></div>
+                    <div className="animate-pulse space-y-3">
+                      <div className="h-4 bg-gray-700 rounded w-24"></div>
+                      <div className="h-3 bg-gray-700 rounded w-full"></div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="h-12 bg-gray-700 rounded"></div>
+                        <div className="h-12 bg-gray-700 rounded"></div>
+                        <div className="h-12 bg-gray-700 rounded"></div>
                       </div>
                     </div>
                   ) : (
-                    <div className="space-y-6">
-                      {/* Level and XP Section */}
-                      <div>
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="flex items-center space-x-4">
-                            <div className="bg-purple-600 rounded-full w-12 h-12 flex items-center justify-center">
-                              <span className="text-white font-bold text-lg">{levelData.level}</span>
-                            </div>
-                            <div>
-                              <h3 className="text-white font-bold text-lg">Level {levelData.level}</h3>
-                              <p className="text-gray-400 text-sm">{levelData.experiencePoints} Experience Points</p>
-                            </div>
+                    <div className="space-y-4">
+                      {/* Compact Level Section */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className="bg-purple-600 rounded-full w-10 sm:w-12 h-10 sm:h-12 flex items-center justify-center">
+                            <span className="text-white font-bold text-sm sm:text-lg">{levelData.level}</span>
                           </div>
-                          <div className="text-right">
-                            <p className="text-purple-400 font-semibold">
-                              {levelData.experienceToNextLevel > 0 
-                                ? `${levelData.experienceToNextLevel} XP to Level ${levelData.level + 1}`
-                                : "Max Level Reached!"
-                              }
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-white font-bold text-base sm:text-lg">Level {levelData.level}</h3>
+                              {/* 🚀 ENHANCED: Early level boost indicator */}
+                              {levelData.isEarlyLevel && (
+                                <span className="text-xs bg-yellow-400/20 text-yellow-400 px-2 py-0.5 rounded font-medium border border-yellow-400/30">
+                                  🚀 3x XP BOOST
+                                </span>
+                              )}
+                              {/* 🚀 NEW: Ready to level up indicator */}
+                              {levelData.readyToLevelUp && (
+                                <span className="text-xs bg-green-400/20 text-green-400 px-2 py-0.5 rounded font-medium border border-green-400/30 animate-pulse">
+                                  🎉 READY!
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-gray-400 text-xs sm:text-sm">
+                              {formatXP(levelData.experiencePoints)} XP
+                              {/* 🚀 NEW: Show level progress in subtitle */}
+                              {levelData.readyToLevelUp ? (
+                                <span className="text-green-400 ml-2">• Ready to level up!</span>
+                              ) : levelData.experienceToNextLevel > 0 && (
+                                <span className="text-purple-400 ml-2">• {formatXP(levelData.experienceToNextLevel)} needed</span>
+                              )}
                             </p>
                           </div>
                         </div>
                         
-                        {/* Enhanced Progress Bar */}
-                        <div className="relative">
-                          <div className="w-full bg-gray-700 rounded-full h-3">
-                            <div 
-                              className="bg-gradient-to-r from-purple-500 via-blue-500 to-purple-600 h-3 rounded-full transition-all duration-700 ease-out relative"
-                              style={{ width: `${Math.max(5, levelData.progressPercentage)}%` }}
-                            >
-                              <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-blue-400 rounded-full blur-sm opacity-60"></div>
-                            </div>
+                        <div className="text-right">
+                          <p className="text-purple-400 font-semibold text-xs sm:text-sm">
+                            {/* 🚀 ENHANCED: Better level progress display */}
+                            {levelData.readyToLevelUp ? (
+                              <span className="text-green-400 font-bold">Ready to Level Up! 🎉</span>
+                            ) : levelData.experienceToNextLevel > 0 ? (
+                              `${formatXP(levelData.experienceToNextLevel)} to L${levelData.level + 1}`
+                            ) : (
+                              "Max Level!"
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      
+                      {/* 🚀 ENHANCED: Enhanced Progress Bar with tier-based styling */}
+                      <div className="relative">
+                        <div className="w-full bg-gray-700 rounded-full h-2 sm:h-3">
+                          <div 
+                            className={`h-2 sm:h-3 rounded-full transition-all duration-700 ease-out relative ${
+                              levelData.isEarlyLevel 
+                                ? 'bg-gradient-to-r from-green-400 via-yellow-400 to-orange-400' 
+                                : levelData.readyToLevelUp
+                                  ? 'bg-gradient-to-r from-yellow-400 to-green-400 animate-pulse'
+                                  : 'bg-gradient-to-r from-purple-500 via-blue-500 to-purple-600'
+                            }`}
+                            style={{ width: `${Math.max(5, levelData.progressPercentage)}%` }}
+                          >
+                            <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-blue-400 rounded-full blur-sm opacity-60"></div>
+                            {/* 🚀 NEW: Ready to level up bouncing indicator */}
+                            {levelData.readyToLevelUp && (
+                              <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-yellow-400 rounded-full animate-bounce"></div>
+                            )}
+                            {/* 🚀 NEW: Close to level up pulsing indicator */}
+                            {!levelData.readyToLevelUp && levelData.experienceToNextLevel <= 50 && levelData.experienceToNextLevel > 0 && (
+                              <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
+                            )}
                           </div>
-                          <div className="flex justify-between mt-1 text-xs text-gray-400">
-                            <span>{levelData.progressPercentage.toFixed(1)}% Complete</span>
-                            <span>Level {levelData.level + 1}</span>
+                        </div>
+                        <div className="flex justify-between mt-1 text-xs text-gray-400">
+                          <span>{levelData.progressPercentage.toFixed(1)}%</span>
+                          <span className="hidden sm:inline">
+                            {/* 🚀 NEW: Enhanced progress text */}
+                            {levelData.readyToLevelUp ? 'Ready!' : `${formatXP(levelData.xpThisLevel)} / ${formatXP(levelData.xpNeededThisLevel)} XP`}
+                          </span>
+                          <span className="sm:hidden">L{levelData.level + 1}</span>
+                        </div>
+                      </div>
+
+                      {/* Compact Stats Grid */}
+                      <div className="grid grid-cols-3 gap-2 sm:gap-4">
+                        <div className="bg-gray-800/50 rounded-lg p-2 sm:p-3 text-center">
+                          <div className="text-lg sm:text-xl font-bold text-purple-400">{levelData.level}</div>
+                          <div className="text-gray-400 text-xs">Level</div>
+                        </div>
+                        <div className="bg-gray-800/50 rounded-lg p-2 sm:p-3 text-center">
+                          <div className="text-lg sm:text-xl font-bold text-blue-400">{formatXP(levelData.experiencePoints)}</div>
+                          <div className="text-gray-400 text-xs">Total XP</div>
+                        </div>
+                        <div className="bg-gray-800/50 rounded-lg p-2 sm:p-3 text-center">
+                          <div className={`text-lg sm:text-xl font-bold ${levelData.readyToLevelUp ? 'text-green-400' : 'text-green-400'}`}>
+                            {levelData.readyToLevelUp ? '🎉' : formatXP(levelData.experienceToNextLevel)}
+                          </div>
+                          <div className="text-gray-400 text-xs">
+                            {levelData.readyToLevelUp ? 'Ready!' : 'To Next'}
                           </div>
                         </div>
                       </div>
 
-                      {/* Stats Grid */}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="bg-gray-800 rounded-lg p-4 text-center">
-                          <div className="text-2xl font-bold text-purple-400">{levelData.level}</div>
-                          <div className="text-gray-400 text-sm">Current Level</div>
+                      {/* 🚀 NEW: Next level rewards preview for close players */}
+                      {!levelData.readyToLevelUp && levelData.experienceToNextLevel > 0 && levelData.experienceToNextLevel <= 200 && (
+                        <div className="mt-3 p-2 bg-purple-600/20 border border-purple-600/30 rounded text-xs text-purple-300">
+                          <div className="font-medium mb-1">🎁 Next Level Rewards:</div>
+                          <div className="text-gray-400">
+                            • Increased XP multiplier • New achievement tier • Bonus features
+                          </div>
                         </div>
-                        <div className="bg-gray-800 rounded-lg p-4 text-center">
-                          <div className="text-2xl font-bold text-blue-400">{levelData.experiencePoints}</div>
-                          <div className="text-gray-400 text-sm">Total XP</div>
+                      )}
+
+                      {/* 🚀 NEW: Early level boost explanation */}
+                      {levelData.isEarlyLevel && (
+                        <div className="mt-3 p-2 bg-yellow-600/20 border border-yellow-600/30 rounded text-xs text-yellow-300">
+                          <div className="font-medium mb-1">🚀 Early Player Boost Active!</div>
+                          <div className="text-gray-400">
+                            You're earning 3x XP for your first few levels. Keep playing to level up fast!
+                          </div>
                         </div>
-                        <div className="bg-gray-800 rounded-lg p-4 text-center">
-                          <div className="text-2xl font-bold text-green-400">{levelData.experienceToNextLevel}</div>
-                          <div className="text-gray-400 text-sm">XP to Next Level</div>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Wallet Status */}
-              <div className="bg-gray-900 rounded-lg p-6 mb-8">
-                <h2 className="text-xl font-bold text-white mb-4 flex items-center">
-                  <Wallet size={20} className="mr-2" />
-                  Wallet Status
+              {/* 🚀 ENHANCED: Compact Wallet & Balance Section */}
+              <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 sm:p-6 mb-4 sm:mb-6">
+                <h2 className="text-lg sm:text-xl font-bold text-white mb-3 sm:mb-4 flex items-center">
+                  <Wallet size={18} className="mr-2" />
+                  Wallet & Balance
                 </h2>
                 
                 {!authenticated ? (
-                  <div className="text-center py-6">
-                    <p className="text-gray-400 mb-4">Please log in to view your wallet and stats</p>
+                  <div className="text-center py-4 sm:py-6">
+                    <p className="text-gray-400 mb-3 text-sm">Please log in to view your wallet and stats</p>
                     <button 
                       onClick={() => window.location.href = '/'}
-                      className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md transition-colors"
+                      className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors text-sm"
                     >
                       Login
                     </button>
                   </div>
                 ) : isValidWallet ? (
                   <div className="space-y-4">
-                    {/* Wallet Address */}
-                    <div>
-                      <div className="text-gray-400 mb-1">Wallet Address</div>
-                      <div className="text-white font-mono text-sm">
-                        {walletAddress.substring(0, 8)}...{walletAddress.substring(walletAddress.length - 8)}
+                    {/* Compact Wallet Address */}
+                    <div className="bg-gray-800/50 rounded-lg p-3">
+                      <div className="text-gray-400 mb-1 text-xs">Wallet Address</div>
+                      <div className="text-white font-mono text-xs sm:text-sm">
+                        {walletAddress.substring(0, 6)}...{walletAddress.substring(walletAddress.length - 6)}
                       </div>
-                      <div className="text-green-400 text-sm mt-1">✓ Connected</div>
+                      <div className="text-green-400 text-xs mt-1">✓ Connected</div>
                     </div>
                     
-                    {/* Primary balance is now custodial game balance */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="bg-gray-800 rounded-lg p-4">
-                        <div className="text-green-400 mb-2 flex items-center">
-                          <span className="mr-2">🎮</span>
-                          Game Balance
+                    {/* Enhanced Balance Cards - Mobile optimized */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                      <div className={`bg-gray-800/50 rounded-lg p-3 sm:p-4 border-l-4 border-green-400 transition-all duration-500 ${
+                        custodialBalanceLoading ? 'ring-2 ring-green-400/30' : ''
+                      }`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-green-400 text-sm flex items-center">
+                            <span className="mr-2">🎮</span>
+                            <span className="hidden sm:inline">Game Balance</span>
+                            <span className="sm:hidden">Game</span>
+                          </div>
+                          {custodialBalanceLoading && (
+                            <div className="animate-spin h-3 w-3 border border-green-400 border-t-transparent rounded-full"></div>
+                          )}
                         </div>
-                        <div className="text-2xl font-bold text-green-400">
+                        <div className="text-xl sm:text-2xl font-bold text-green-400">
                           {custodialBalanceLoading ? (
-                            <div className="flex items-center">
-                              <div className="animate-spin h-5 w-5 border-2 border-green-400 border-t-transparent rounded-full mr-2"></div>
-                              Loading...
-                            </div>
+                            <span className="text-sm">Loading...</span>
                           ) : (
-                            `${custodialBalance.toFixed(4)} SOL`
+                            `${formatSOL(custodialBalance)} SOL`
                           )}
                         </div>
                         <div className="text-xs text-gray-400 mt-1">
-                          For gaming • Last updated: {custodialLastUpdated ? new Date(custodialLastUpdated).toLocaleTimeString() : 'Never'}
+                          <span className="hidden sm:inline">For gaming • Updated: </span>
+                          <span className="sm:hidden">Updated: </span>
+                          {custodialLastUpdated ? new Date(custodialLastUpdated).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : 'Never'}
                         </div>
                       </div>
                       
-                      <div className="bg-gray-800 rounded-lg p-4">
-                        <div className="text-blue-400 mb-2 flex items-center">
-                          <span className="mr-2">💼</span>
-                          Wallet Balance
+                      <div className={`bg-gray-800/50 rounded-lg p-3 sm:p-4 border-l-4 border-blue-400 transition-all duration-500 ${
+                        isLoadingBalance ? 'ring-2 ring-blue-400/30' : ''
+                      }`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-blue-400 text-sm flex items-center">
+                            <span className="mr-2">💼</span>
+                            <span className="hidden sm:inline">Wallet Balance</span>
+                            <span className="sm:hidden">Wallet</span>
+                          </div>
+                          {isLoadingBalance && (
+                            <div className="animate-spin h-3 w-3 border border-blue-400 border-t-transparent rounded-full"></div>
+                          )}
                         </div>
-                        <div className="text-2xl font-bold text-blue-400">
+                        <div className="text-xl sm:text-2xl font-bold text-blue-400">
                           {isLoadingBalance ? (
-                            <div className="flex items-center">
-                              <div className="animate-spin h-5 w-5 border-2 border-blue-400 border-t-transparent rounded-full mr-2"></div>
-                              Loading...
-                            </div>
+                            <span className="text-sm">Loading...</span>
                           ) : (
-                            `${walletBalance.toFixed(4)} SOL`
+                            `${formatSOL(walletBalance)} SOL`
                           )}
                         </div>
                         <div className="text-xs text-gray-400 mt-1">
-                          For deposits • Embedded wallet
+                          <span className="hidden sm:inline">For deposits • Embedded wallet</span>
+                          <span className="sm:hidden">For deposits</span>
                         </div>
                       </div>
                     </div>
                     
-                    {/* Balance transfer hint */}
+                    {/* Balance transfer hint - mobile optimized */}
                     {walletBalance > 0.001 && (
-                      <div className="bg-yellow-900 bg-opacity-30 border border-yellow-800 rounded-lg p-3">
-                        <div className="text-yellow-400 text-sm flex items-center">
+                      <div className="bg-yellow-900/30 border border-yellow-800/50 rounded-lg p-3">
+                        <div className="text-yellow-400 text-xs sm:text-sm flex items-center">
                           <span className="mr-2">💡</span>
-                          Transfer SOL from wallet to game balance to start playing
+                          <span className="hidden sm:inline">Transfer SOL from wallet to game balance to start playing</span>
+                          <span className="sm:hidden">Transfer SOL to game balance to play</span>
                         </div>
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="text-center py-6">
-                    <p className="text-yellow-400 mb-2">Wallet connection issue</p>
-                    <p className="text-gray-400 text-sm">Please reconnect your wallet</p>
+                  <div className="text-center py-4 sm:py-6">
+                    <p className="text-yellow-400 mb-2 text-sm">Wallet connection issue</p>
+                    <p className="text-gray-400 text-xs">Please reconnect your wallet</p>
                   </div>
                 )}
               </div>
 
-              {/* Referral Section with real-time updates */}
-              {(isValidWallet && userId) && (
-                <ReferralSection 
-                  userId={userId} 
-                  walletAddress={walletAddress} 
-                  isValidWallet={isValidWallet} 
-                />
-              )}
-
-              {/* 🚀 ENHANCED: Game Statistics section with live updates */}
+              {/* 🚀 ENHANCED: Compact Game Statistics with mobile grid */}
               {isValidWallet && (
-                <div className="bg-gray-900 rounded-lg p-6 mb-8">
-                  <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-xl font-bold text-white flex items-center">
-                      <TrendingUp size={20} className="mr-2" />
-                      Game Statistics
-                      {/* 🚀 LIVE: Live update indicator */}
+                <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 sm:p-6 mb-4 sm:mb-6">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 sm:mb-4 gap-2">
+                    <h2 className="text-lg sm:text-xl font-bold text-white flex items-center">
+                      <TrendingUp size={18} className="mr-2" />
+                      <span className="hidden sm:inline">Game Statistics</span>
+                      <span className="sm:hidden">Stats</span>
                       {isStatsUpdating && (
-                        <div className="ml-3 flex items-center text-green-400 text-sm">
-                          <div className="animate-pulse w-2 h-2 bg-green-400 rounded-full mr-2"></div>
-                          Updating...
+                        <div className="ml-2 flex items-center text-green-400 text-xs">
+                          <div className="animate-pulse w-1.5 h-1.5 bg-green-400 rounded-full mr-1"></div>
+                          Live
                         </div>
                       )}
                     </h2>
                     
-                    {/* 🚀 LIVE: Last updated timestamp */}
-                    <div className="text-xs text-gray-500">
+                    <div className="text-xs text-gray-500 self-end sm:self-auto">
                       {statsLastUpdated > 0 && (
-                        <span>Last updated: {new Date(statsLastUpdated).toLocaleTimeString()}</span>
+                        <span>Updated: {new Date(statsLastUpdated).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</span>
                       )}
                     </div>
                   </div>
                   
                   {isLoadingStats ? (
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
                       {[1, 2, 3, 4].map((i) => (
                         <div key={i} className="animate-pulse">
-                          <div className="h-4 bg-gray-700 rounded w-24 mb-2"></div>
-                          <div className="h-8 bg-gray-700 rounded w-20"></div>
+                          <div className="h-3 bg-gray-700 rounded w-16 mb-2"></div>
+                          <div className="h-6 bg-gray-700 rounded w-12"></div>
                         </div>
                       ))}
                     </div>
                   ) : (
                     <>
-                      {/* Primary Stats Row with live update animations */}
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-                        <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-50' : ''}`}>
-                          <div className="text-gray-400 mb-1">Total Wagered</div>
-                          <div className="text-2xl font-bold text-white">
-                            {userStats.totalWagered.toFixed(3)} SOL
+                      {/* Primary Stats - Mobile optimized grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 sm:mb-6">
+                        <div className={`bg-gray-800/50 rounded-lg p-3 transition-all duration-500 ${
+                          isStatsUpdating ? 'ring-2 ring-blue-400/30' : ''
+                        }`}>
+                          <div className="text-gray-400 mb-1 text-xs">Wagered</div>
+                          <div className="text-lg sm:text-xl font-bold text-white">
+                            {formatSOL(userStats.totalWagered)}
                           </div>
-                          <div className="text-xs text-gray-500 mt-1">
-                            All time betting volume
-                          </div>
+                          <div className="text-gray-400 text-xs">SOL</div>
                         </div>
                         
-                        <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-green-400 ring-opacity-50' : ''}`}>
-                          <div className="text-gray-400 mb-1">Total Won</div>
-                          <div className="text-2xl font-bold text-green-400">
-                            {userStats.totalPayouts.toFixed(3)} SOL
+                        <div className={`bg-gray-800/50 rounded-lg p-3 transition-all duration-500 ${
+                          isStatsUpdating ? 'ring-2 ring-green-400/30' : ''
+                        }`}>
+                          <div className="text-gray-400 mb-1 text-xs">Won</div>
+                          <div className="text-lg sm:text-xl font-bold text-green-400">
+                            {formatSOL(userStats.totalPayouts)}
                           </div>
-                          <div className="text-xs text-gray-500 mt-1">
-                            Successful cashouts
-                          </div>
+                          <div className="text-gray-400 text-xs">SOL</div>
                         </div>
                         
-                        <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-purple-400 ring-opacity-50' : ''}`}>
-                          <div className="text-gray-400 mb-1">Games Played</div>
-                          <div className="text-2xl font-bold text-white">
+                        <div className={`bg-gray-800/50 rounded-lg p-3 transition-all duration-500 ${
+                          isStatsUpdating ? 'ring-2 ring-purple-400/30' : ''
+                        }`}>
+                          <div className="text-gray-400 mb-1 text-xs">Games</div>
+                          <div className="text-lg sm:text-xl font-bold text-white">
                             {userStats.gamesPlayed}
                           </div>
-                          <div className="text-xs text-gray-500 mt-1">
-                            Rounds participated
-                          </div>
+                          <div className="text-gray-400 text-xs">Played</div>
                         </div>
                         
-                        <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-yellow-400 ring-opacity-50' : ''}`}>
-                          <div className="text-gray-400 mb-1">Net Profit/Loss</div>
-                          <div className={`text-2xl font-bold ${userStats.profitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {userStats.profitLoss >= 0 ? '+' : ''}{userStats.profitLoss.toFixed(3)} SOL
+                        <div className={`bg-gray-800/50 rounded-lg p-3 transition-all duration-500 ${
+                          isStatsUpdating ? 'ring-2 ring-yellow-400/30' : ''
+                        }`}>
+                          <div className="text-gray-400 mb-1 text-xs">P&L</div>
+                          <div className={`text-lg sm:text-xl font-bold ${userStats.profitLoss >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {userStats.profitLoss >= 0 ? '+' : ''}{formatSOL(Math.abs(userStats.profitLoss))}
                           </div>
-                          <div className="text-xs text-gray-500 mt-1">
-                            {userStats.profitLoss >= 0 ? 'Total profit' : 'Total loss'}
-                          </div>
+                          <div className="text-gray-400 text-xs">SOL</div>
                         </div>
                       </div>
 
-                      {/* Enhanced Additional Stats */}
+                      {/* Enhanced Stats - Compact mobile layout */}
                       {(enhancedUserStats.winRate > 0 || enhancedUserStats.bestMultiplier > 0 || userStats.gamesPlayed > 0) && (
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pt-4 border-t border-gray-700">
-                          <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-blue-400 ring-opacity-30' : ''}`}>
-                            <div className="text-gray-400 mb-1">Win Rate</div>
-                            <div className="text-lg font-bold text-blue-400">
-                            {enhancedUserStats.winRate.toFixed(1)}%
-                            </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              Success percentage
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 pt-3 sm:pt-4 border-t border-gray-700">
+                          <div className={`bg-gray-800/30 rounded-lg p-3 transition-all duration-500 ${
+                            isStatsUpdating ? 'ring-1 ring-blue-400/20' : ''
+                          }`}>
+                            <div className="text-gray-400 mb-1 text-xs">Win Rate</div>
+                            <div className="text-base sm:text-lg font-bold text-blue-400">
+                              {enhancedUserStats.winRate.toFixed(1)}%
                             </div>
                           </div>
                           
-                          <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-purple-400 ring-opacity-30' : ''}`}>
-                          <div className="text-gray-400 mb-1">Best Multiplier</div>
-                            <div className="text-lg font-bold text-purple-400">
+                          <div className={`bg-gray-800/30 rounded-lg p-3 transition-all duration-500 ${
+                            isStatsUpdating ? 'ring-1 ring-purple-400/20' : ''
+                          }`}>
+                            <div className="text-gray-400 mb-1 text-xs">Best Multi</div>
+                            <div className="text-base sm:text-lg font-bold text-purple-400">
                               {enhancedUserStats.bestMultiplier.toFixed(2)}x
                             </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              Highest cashout
+                          </div>
+                          
+                          <div className={`bg-gray-800/30 rounded-lg p-3 transition-all duration-500 ${
+                            isStatsUpdating ? 'ring-1 ring-yellow-400/20' : ''
+                          }`}>
+                            <div className="text-gray-400 mb-1 text-xs">Streak</div>
+                            <div className="text-base sm:text-lg font-bold text-yellow-400">
+                              {enhancedUserStats.currentWinStreak}
                             </div>
                           </div>
                           
-                          <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-yellow-400 ring-opacity-30' : ''}`}>
-                            <div className="text-gray-400 mb-1">Current Streak</div>
-                            <div className="text-lg font-bold text-yellow-400">
-                              {enhancedUserStats.currentWinStreak} wins
-                            </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              Active win streak
-                            </div>
-                          </div>
-                          
-                          <div className={`transition-all duration-500 ${isStatsUpdating ? 'ring-2 ring-orange-400 ring-opacity-30' : ''}`}>
-                            <div className="text-gray-400 mb-1">Best Streak</div>
-                            <div className="text-lg font-bold text-orange-400">
-                              {enhancedUserStats.bestWinStreak} wins
-                            </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              Personal record
+                          <div className={`bg-gray-800/30 rounded-lg p-3 transition-all duration-500 ${
+                            isStatsUpdating ? 'ring-1 ring-orange-400/20' : ''
+                          }`}>
+                            <div className="text-gray-400 mb-1 text-xs">Best</div>
+                            <div className="text-base sm:text-lg font-bold text-orange-400">
+                              {enhancedUserStats.bestWinStreak}
                             </div>
                           </div>
                         </div>
                       )}
 
-                      {/* 🚀 NEW: Live stats help text */}
-                      <div className="mt-4 pt-4 border-t border-gray-700">
+                      {/* Live stats indicator */}
+                      <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-gray-700/50">
                         <div className="flex items-center text-xs text-gray-500">
-                          <div className="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div>
-                          <span>Stats update automatically when you play • Last sync: {statsLastUpdated > 0 ? new Date(statsLastUpdated).toLocaleTimeString() : 'Not yet synced'}</span>
+                          <div className="w-1.5 h-1.5 bg-green-400 rounded-full mr-2 animate-pulse"></div>
+                          <span className="hidden sm:inline">Stats update automatically when you play</span>
+                          <span className="sm:hidden">Live stats • Auto-sync</span>
+                          {statsLastUpdated > 0 && (
+                            <span className="ml-2">• {new Date(statsLastUpdated).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</span>
+                          )}
                         </div>
                       </div>
                     </>
@@ -1279,41 +1473,68 @@ const Dashboard: FC = () => {
                 </div>
               )}
 
-              {/* Quick Actions */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                <div className="bg-gray-900 rounded-lg p-6">
-                  <h3 className="text-lg font-bold text-white mb-4">Quick Actions</h3>
-                  <div className="space-y-3">
+              {/* Referral Section - Compact for mobile */}
+              {(isValidWallet && userId) && (
+                <div className="mb-4 sm:mb-6">
+                  <ReferralSection 
+                    userId={userId} 
+                    walletAddress={walletAddress} 
+                    isValidWallet={isValidWallet} 
+                  />
+                </div>
+              )}
+
+              {/* 🚀 ENHANCED: Compact Quick Actions & Activity */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
+                <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 sm:p-6">
+                  <h3 className="text-base sm:text-lg font-bold text-white mb-3 sm:mb-4 flex items-center">
+                    <Zap size={16} className="mr-2" />
+                    Quick Actions
+                  </h3>
+                  <div className="space-y-2 sm:space-y-3">
                     <Link 
                       href="/" 
-                      className="block w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition-colors text-center"
+                      className="block w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg transition-colors text-center text-sm sm:text-base"
                     >
-                      <GamepadIcon size={20} className="inline mr-2" />
-                      Play RUGGED 
+                      <GamepadIcon size={16} className="inline mr-2" />
+                      <span className="hidden sm:inline">Play RUGGED</span>
+                      <span className="sm:hidden">Play Game</span>
                     </Link>
                     <Link 
                       href="/leaderboard" 
-                      className="block w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors text-center"
+                      className="block w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg transition-colors text-center text-sm sm:text-base"
                     >
-                      View Top Rugger Board
+                      <Trophy size={16} className="inline mr-2" />
+                      <span className="hidden sm:inline">View Leaderboard</span>
+                      <span className="sm:hidden">Leaderboard</span>
                     </Link>
                   </div>
                 </div>
                 
-                <div className="bg-gray-900 rounded-lg p-6">
-                  <h3 className="text-lg font-bold text-white mb-4">Recent Activity</h3>
-                  <div className="text-gray-400 text-center py-6">
+                <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 sm:p-6">
+                  <h3 className="text-base sm:text-lg font-bold text-white mb-3 sm:mb-4 flex items-center">
+                    <Award size={16} className="mr-2" />
+                    Recent Activity
+                  </h3>
+                  <div className="text-gray-400 text-center py-4 sm:py-6">
                     {isValidWallet ? (
-                      <p>No recent activity</p>
+                      <div className="space-y-2">
+                        <AlertCircle size={32} className="mx-auto text-gray-600" />
+                        <p className="text-sm">No recent activity</p>
+                        <p className="text-xs text-gray-500">Start playing to see your activity here</p>
+                      </div>
                     ) : (
-                      <p>Login to view wallet activity</p>
+                      <div className="space-y-2">
+                        <Users size={32} className="mx-auto text-gray-600" />
+                        <p className="text-sm">Login to view activity</p>
+                      </div>
                     )}
                   </div>
                 </div>
               </div>
 
-              {/* Bottom spacing for complete scroll */}
-              <div className="h-16"></div>
+              {/* Bottom spacing for mobile scroll */}
+              <div className="h-8 sm:h-16"></div>
             </div>
           </div>
         </div>

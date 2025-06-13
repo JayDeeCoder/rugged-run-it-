@@ -1,5 +1,6 @@
 // src/components/modals/DepositModal.tsx - STREAMLINED VERSION MATCHING TRADINGCONTROLS
 import { FC, useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { usePrivy, useSolanaWallets } from '@privy-io/react-auth';
 import useOutsideClick from '../../hooks/useOutsideClick';
 import { 
@@ -238,9 +239,16 @@ const DepositModal: FC<DepositModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   
   const modalRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
   
   // Validation state
   const [addressValidated, setAddressValidated] = useState<boolean>(false);
+  
+  // Portal mounting
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
   
   // Validate wallet address on load
   useEffect(() => {
@@ -430,25 +438,66 @@ const DepositModal: FC<DepositModalProps> = ({
       setSuccess(false);
       setSuccessMessage('');
       
+      // Lock body scroll on mobile to prevent layering issues
+      if (isMobile) {
+        document.body.style.overflow = 'hidden';
+        document.body.style.position = 'fixed';
+        document.body.style.top = '0';
+        document.body.style.left = '0';
+        document.body.style.right = '0';
+        document.body.style.bottom = '0';
+      }
+      
       setTimeout(() => {
         refreshAllBalances();
       }, 500);
+    } else {
+      // Restore body scroll
+      if (isMobile) {
+        document.body.style.overflow = '';
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.left = '';
+        document.body.style.right = '';
+        document.body.style.bottom = '';
+      }
     }
-  }, [isOpen, refreshAllBalances]);
+    
+    // Cleanup on unmount
+    return () => {
+      if (isMobile) {
+        document.body.style.overflow = '';
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.left = '';
+        document.body.style.right = '';
+        document.body.style.bottom = '';
+      }
+    };
+  }, [isOpen, refreshAllBalances, isMobile]);
 
   useOutsideClick(modalRef as React.RefObject<HTMLElement>, () => {
     if (isOpen && !transferLoading) onClose();
   });
   
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
   const containerClasses = `
     bg-[#0d0d0f] text-white border border-gray-800 rounded-lg
     ${isMobile 
-      ? 'fixed inset-0 bg-black bg-opacity-70 flex items-end justify-center z-modal' 
-      : 'fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-modal'
+      ? 'fixed inset-0 bg-black bg-opacity-70 flex items-end justify-center' 
+      : 'fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center'
     }
   `;
+
+  const containerStyles = {
+    zIndex: 99999,
+    position: 'fixed' as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0
+  };
 
   const modalClasses = `
     bg-[#0d0d0f] border border-gray-800 text-white
@@ -458,9 +507,15 @@ const DepositModal: FC<DepositModalProps> = ({
     }
   `;
 
-  return (
-    <div className={containerClasses}>
-      <div ref={modalRef} className={modalClasses}>
+  const modalStyles = {
+    zIndex: 100000,
+    position: 'relative' as const,
+    isolation: 'isolate' as const
+  };
+
+  return createPortal(
+    <div className={containerClasses} style={containerStyles}>
+      <div ref={modalRef} className={modalClasses} style={modalStyles}>
         {/* Header */}
         <div className={`flex justify-between items-center ${isMobile ? 'p-3' : 'pb-3'} border-b border-gray-800`}>
           <h2 className="text-base font-bold text-white flex items-center">
@@ -553,16 +608,16 @@ const DepositModal: FC<DepositModalProps> = ({
                 <h3 className="text-sm font-bold text-gray-400 mb-2">INSTANT TRANSFER</h3>
                 
                 {/* Amount Input */}
-                <div className="mb-3">
+                <div className="mb-2">
                   <label className="block text-gray-400 text-xs mb-1">
-                    Transfer Amount (SOL) - Min: 0.005, Max: {embeddedWalletBalance.toFixed(3)}
+                    Transfer Amount (SOL) - Min: 0.005, Max: 1.0
                   </label>
                   <div className="flex">
                     <input
                       type="text"
                       value={amount}
                       onChange={handleAmountChange}
-                      className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-l-md focus:outline-none"
+                      className="flex-1 bg-gray-700 text-white px-2 py-2 rounded-l-md focus:outline-none text-sm"
                       placeholder="0.005"
                       disabled={!addressValidated}
                     />
@@ -577,7 +632,7 @@ const DepositModal: FC<DepositModalProps> = ({
                 </div>
                 
                 {/* Quick Transfer Amounts - Same as TradingControls */}
-                <div className="grid grid-cols-4 gap-2 mb-3">
+                <div className="grid grid-cols-4 gap-1 mb-2">
                   {quickAmounts.map((amt) => (
                     <button
                       key={amt}
@@ -585,7 +640,7 @@ const DepositModal: FC<DepositModalProps> = ({
                       className={`px-2 py-1 text-xs rounded transition-colors ${
                         parseFloat(amount) === amt
                           ? 'bg-green-600 text-white'
-                          : amt > embeddedWalletBalance || !addressValidated
+                          : amt > embeddedWalletBalance || !addressValidated || amt > 1.0
                           ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                           : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                       }`}
@@ -597,14 +652,14 @@ const DepositModal: FC<DepositModalProps> = ({
                 </div>
 
                 {/* Transfer All Button */}
-                {embeddedWalletBalance > 0.001 && (
+                {embeddedWalletBalance > 0.005 && (
                   <button
                     onClick={handleTransferAll}
                     disabled={transferLoading || !addressValidated}
                     className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white py-2 px-3 rounded text-sm mb-2 flex items-center justify-center transition-colors"
                   >
                     <ArrowRightLeft size={14} className="mr-1" />
-                    Transfer All ({(embeddedWalletBalance - 0.001).toFixed(3)} SOL)
+                    Transfer All ({Math.min(Math.max(0, embeddedWalletBalance - 0.005), 1.0).toFixed(3)} SOL)
                   </button>
                 )}
                 
@@ -653,7 +708,8 @@ const DepositModal: FC<DepositModalProps> = ({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 

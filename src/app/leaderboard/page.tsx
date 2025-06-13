@@ -20,6 +20,11 @@ interface LeaderboardStats {
   totalVolume: number;
   averageProfit: number;
   topPlayerProfit: number;
+  // 🚀 NEW: Enhanced stats properties
+  totalWinnings?: number;
+  totalLosses?: number;
+  averageWinRate?: number;
+  totalBetsLost?: number;
 }
 
 // 🚀 IMPROVED: Socket connection with proper subscription management
@@ -91,6 +96,39 @@ const useSocketConnection = () => {
       });
     }
   }, []);
+
+// 🚀 ADD THIS: Enhanced stats calculation with bet loss tracking
+const calculateEnhancedStats = useCallback((data: LeaderboardEntry[]) => {
+  const totalPlayers = data.length;
+  const totalGames = data.reduce((sum, entry) => sum + (entry.games_played || 0), 0);
+  const totalVolume = data.reduce((sum, entry) => sum + Math.abs(entry.total_profit || 0), 0);
+  const totalWinnings = data.reduce((sum, entry) => sum + Math.max(0, entry.total_profit || 0), 0);
+  const totalLosses = data.reduce((sum, entry) => sum + Math.abs(Math.min(0, entry.total_profit || 0)), 0);
+  const averageProfit = totalPlayers > 0 ? totalVolume / totalPlayers : 0;
+  const topPlayerProfit = data.length > 0 ? data[0].total_profit : 0;
+  
+  // 🚀 NEW: Enhanced metrics
+  const averageWinRate = totalPlayers > 0 
+    ? data.reduce((sum, entry) => sum + (entry.win_rate || 0), 0) / totalPlayers 
+    : 0;
+  
+  const totalBetsLost = data.reduce((sum, entry) => {
+    const lossCount = entry.games_played - (entry.games_played * (entry.win_rate / 100));
+    return sum + Math.round(lossCount);
+  }, 0);
+
+  return {
+    totalPlayers,
+    totalGames,
+    totalVolume: Number(totalVolume.toFixed(2)),
+    totalWinnings: Number(totalWinnings.toFixed(2)),
+    totalLosses: Number(totalLosses.toFixed(2)),
+    averageProfit: Number(averageProfit.toFixed(2)),
+    topPlayerProfit: Number(topPlayerProfit.toFixed(2)),
+    averageWinRate: Number(averageWinRate.toFixed(1)),
+    totalBetsLost
+  };
+}, []);
 
   // Initialize socket on mount
   useEffect(() => {
@@ -526,6 +564,38 @@ useEffect(() => {
     };
   }, []);
 
+  const calculateEnhancedStats = useCallback((data: LeaderboardEntry[]) => {
+    const totalPlayers = data.length;
+    const totalGames = data.reduce((sum, entry) => sum + (entry.games_played || 0), 0);
+    const totalVolume = data.reduce((sum, entry) => sum + Math.abs(entry.total_profit || 0), 0);
+    const totalWinnings = data.reduce((sum, entry) => sum + Math.max(0, entry.total_profit || 0), 0);
+    const totalLosses = data.reduce((sum, entry) => sum + Math.abs(Math.min(0, entry.total_profit || 0)), 0);
+    const averageProfit = totalPlayers > 0 ? totalVolume / totalPlayers : 0;
+    const topPlayerProfit = data.length > 0 ? data[0].total_profit : 0;
+    
+    // 🚀 NEW: Enhanced metrics
+    const averageWinRate = totalPlayers > 0 
+      ? data.reduce((sum, entry) => sum + (entry.win_rate || 0), 0) / totalPlayers 
+      : 0;
+    
+    const totalBetsLost = data.reduce((sum, entry) => {
+      const lossCount = entry.games_played - (entry.games_played * (entry.win_rate / 100));
+      return sum + Math.round(lossCount);
+    }, 0);
+  
+    return {
+      totalPlayers,
+      totalGames,
+      totalVolume: Number(totalVolume.toFixed(2)),
+      totalWinnings: Number(totalWinnings.toFixed(2)),
+      totalLosses: Number(totalLosses.toFixed(2)),
+      averageProfit: Number(averageProfit.toFixed(2)),
+      topPlayerProfit: Number(topPlayerProfit.toFixed(2)),
+      averageWinRate: Number(averageWinRate.toFixed(1)),
+      totalBetsLost
+    };
+  }, []);
+
   // Fetch leaderboard data
   const fetchLeaderboardData = async (showRefreshing = false) => {
     try {
@@ -553,20 +623,11 @@ useEffect(() => {
 
       setLeaderboardData(data);
 
-      // Calculate stats
-      const totalPlayers = data.length;
-      const totalGames = data.reduce((sum, entry) => sum + (entry.games_played || 0), 0);
-      const totalVolume = data.reduce((sum, entry) => sum + (entry.total_profit || 0), 0);
-      const averageProfit = totalPlayers > 0 ? totalVolume / totalPlayers : 0;
-      const topPlayerProfit = data.length > 0 ? data[0].total_profit : 0;
+      // 🚀 NEW: Use enhanced stats calculation
+    const enhancedStats = calculateEnhancedStats(data);
+    setStats(enhancedStats);
 
-      setStats({
-        totalPlayers,
-        totalGames,
-        totalVolume: Number(totalVolume.toFixed(2)),
-        averageProfit: Number(averageProfit.toFixed(2)),
-        topPlayerProfit: Number(topPlayerProfit.toFixed(2))
-      });
+    console.log(`✅ Leaderboard: Loaded ${data.length} entries with enhanced stats:`, enhancedStats);
 
       // Get current user's rank
       if (isAuthenticated && currentUserWallet) {
@@ -854,13 +915,13 @@ useEffect(() => {
               )}
 
               {/* Enhanced Stats Overview with real-time indicators */}
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+              <div className="grid grid-cols-2 lg:grid-cols-7 gap-4 mb-8">
                 <div className={`bg-gray-900 rounded-lg p-4 border border-gray-800 transition-all duration-500 ${
                   pendingUpdates > 0 ? 'ring-2 ring-blue-400 ring-opacity-30' : ''
                 }`}>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-gray-400 text-xs">Total Players</p>
+                      <p className="text-gray-400 text-xs">Total Ruggers</p>
                       <p className="text-xl font-bold text-white">{stats.totalPlayers}</p>
                     </div>
                     <Users className="text-blue-400" size={20} />

@@ -164,27 +164,27 @@ const BalanceDisplay: FC<{
   isMobile: boolean;
 }> = ({ custodialBalance, embeddedWalletBalance, isLoading, onRefresh, isMobile }) => {
   return (
-    <div className="bg-gray-800 rounded-lg p-3 mb-3">
-      <div className="mb-3 p-2 bg-gray-900 rounded-md relative">
+    <div className="bg-gray-800 rounded-lg p-2 mb-2">
+      <div className="mb-2 p-2 bg-gray-900 rounded-md relative">
         {/* Refresh button in top right */}
         <button
           onClick={onRefresh}
-          className="absolute top-2 right-2 text-gray-400 hover:text-blue-400 transition-colors p-1 rounded hover:bg-gray-700"
+          className="absolute top-1 right-1 text-gray-400 hover:text-blue-400 transition-colors p-1 rounded hover:bg-gray-700"
           disabled={isLoading}
           title="Refresh all balances"
         >
-          <span className={`text-base ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
+          <span className={`text-sm ${isLoading ? 'animate-spin' : ''}`}>⟳</span>
         </button>
         
-        <div className={`grid ${isMobile ? 'grid-cols-1 gap-2' : 'grid-cols-2 gap-3'} text-sm pr-8`}>
+        <div className={`grid ${isMobile ? 'grid-cols-1 gap-1' : 'grid-cols-2 gap-2'} text-sm pr-6`}>
           <div>
             <div className="text-green-400 text-xs mb-1">🎮 Game Balance</div>
-            <div className="text-white font-bold">{custodialBalance.toFixed(3)} SOL</div>
+            <div className="text-white font-bold text-sm">{custodialBalance.toFixed(3)} SOL</div>
             <div className="text-xs text-gray-500">Ready for gaming</div>
           </div>
           <div>
             <div className="text-blue-400 text-xs mb-1">💼 Wallet Balance</div>
-            <div className="text-white font-bold">{embeddedWalletBalance.toFixed(3)} SOL</div>
+            <div className="text-white font-bold text-sm">{embeddedWalletBalance.toFixed(3)} SOL</div>
             <div className="text-xs text-gray-500">Available for transfer</div>
           </div>
         </div>
@@ -302,8 +302,13 @@ const DepositModal: FC<DepositModalProps> = ({
       return;
     }
 
-    if (amountToTransfer < 0.001) {
-      setError('Minimum transfer amount is 0.001 SOL');
+    if (amountToTransfer < 0.005) {
+      setError('Minimum transfer amount is 0.005 SOL');
+      return;
+    }
+
+    if (amountToTransfer > 1.0) {
+      setError('Maximum transfer amount is 1.0 SOL');
       return;
     }
 
@@ -378,8 +383,8 @@ const DepositModal: FC<DepositModalProps> = ({
 
   // Transfer all available balance (same as TradingControls)
   const handleTransferAll = useCallback(async () => {
-    if (embeddedWalletBalance > 0.001) {
-      const transferableAmount = Math.max(0, embeddedWalletBalance - 0.001); // Reserve for fees
+    if (embeddedWalletBalance > 0.005) {
+      const transferableAmount = Math.min(Math.max(0, embeddedWalletBalance - 0.005), 1.0); // Reserve for fees, cap at 1.0
       await handleInstantTransfer(transferableAmount);
     }
   }, [embeddedWalletBalance, handleInstantTransfer]);
@@ -398,7 +403,7 @@ const DepositModal: FC<DepositModalProps> = ({
   
   const setMaxAmount = () => {
     if (embeddedWalletBalance > 0) {
-      const maxAmount = Math.max(0, embeddedWalletBalance - 0.001); // Reserve for fees
+      const maxAmount = Math.min(Math.max(0, embeddedWalletBalance - 0.005), 1.0); // Reserve for fees, cap at 1.0
       setAmount(maxAmount.toFixed(6));
       setError(null);
     }
@@ -440,16 +445,16 @@ const DepositModal: FC<DepositModalProps> = ({
   const containerClasses = `
     bg-[#0d0d0f] text-white border border-gray-800 rounded-lg
     ${isMobile 
-      ? 'fixed inset-0 bg-black bg-opacity-70 flex items-end justify-center z-50' 
-      : 'fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50'
+      ? 'fixed inset-0 bg-black bg-opacity-70 flex items-end justify-center z-modal' 
+      : 'fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-modal'
     }
   `;
 
   const modalClasses = `
     bg-[#0d0d0f] border border-gray-800 text-white
     ${isMobile 
-      ? 'rounded-t-2xl w-full max-h-[90vh] overflow-y-auto' 
-      : 'rounded-2xl p-4 max-w-md w-full mx-4 shadow-2xl'
+      ? 'rounded-t-2xl w-full max-h-[85vh] overflow-y-auto' 
+      : 'rounded-xl p-3 max-w-sm w-full mx-4 shadow-2xl'
     }
   `;
 
@@ -457,9 +462,9 @@ const DepositModal: FC<DepositModalProps> = ({
     <div className={containerClasses}>
       <div ref={modalRef} className={modalClasses}>
         {/* Header */}
-        <div className={`flex justify-between items-center ${isMobile ? 'p-4' : 'pb-4'} border-b border-gray-800`}>
-          <h2 className="text-lg font-bold text-white flex items-center">
-            <ArrowDownLeft size={18} className="mr-2" />
+        <div className={`flex justify-between items-center ${isMobile ? 'p-3' : 'pb-3'} border-b border-gray-800`}>
+          <h2 className="text-base font-bold text-white flex items-center">
+            <ArrowDownLeft size={16} className="mr-2" />
             Deposit SOL
           </h2>
           <button
@@ -467,23 +472,23 @@ const DepositModal: FC<DepositModalProps> = ({
             disabled={transferLoading}
             className="text-gray-400 hover:text-white transition-colors p-1"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
         
-        <div className={isMobile ? 'p-4' : 'pt-4'}>
+        <div className={isMobile ? 'p-3' : 'pt-3'}>
           {success ? (
-            <div className="text-center py-8">
-              <div className="flex justify-center mb-4">
-                <div className="w-16 h-16 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
-                  <Check size={32} className="text-green-500" />
+            <div className="text-center py-6">
+              <div className="flex justify-center mb-3">
+                <div className="w-12 h-12 bg-green-500 bg-opacity-20 rounded-full flex items-center justify-center">
+                  <Check size={24} className="text-green-500" />
                 </div>
               </div>
-              <h3 className="text-xl font-bold text-white mb-2">Success!</h3>
-              <p className="text-gray-400 mb-6 text-sm">{successMessage}</p>
+              <h3 className="text-lg font-bold text-white mb-2">Success!</h3>
+              <p className="text-gray-400 mb-4 text-sm">{successMessage}</p>
               <button
                 onClick={onClose}
-                className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg transition-colors w-full"
+                className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg transition-colors w-full"
               >
                 Done
               </button>
@@ -492,11 +497,11 @@ const DepositModal: FC<DepositModalProps> = ({
             <>
               {/* Address validation warning */}
               {!addressValidated && (
-                <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-400 p-3 rounded-lg mb-4 text-sm">
+                <div className="bg-red-900 bg-opacity-30 border border-red-800 text-red-400 p-2 rounded-lg mb-2 text-sm">
                   <div className="flex items-center">
-                    <AlertTriangle size={16} className="mr-2 flex-shrink-0" />
+                    <AlertTriangle size={14} className="mr-2 flex-shrink-0" />
                     <div>
-                      <div className="font-medium">Wallet Issue</div>
+                      <div className="font-medium text-xs">Wallet Issue</div>
                       <div className="text-xs mt-1">Invalid wallet address</div>
                     </div>
                   </div>
@@ -513,9 +518,9 @@ const DepositModal: FC<DepositModalProps> = ({
               />
 
               {/* Wallet Address Display */}
-              <div className="bg-gray-800 rounded-lg p-3 mb-3">
-                <div className="text-gray-400 text-xs mb-2 flex items-center">
-                  <Shield size={14} className="mr-1 text-green-400" />
+              <div className="bg-gray-800 rounded-lg p-2 mb-2">
+                <div className="text-gray-400 text-xs mb-1 flex items-center">
+                  <Shield size={12} className="mr-1 text-green-400" />
                   Your Wallet Address
                 </div>
                 <div className="flex items-center justify-between">
@@ -530,12 +535,12 @@ const DepositModal: FC<DepositModalProps> = ({
                   >
                     {copied ? (
                       <>
-                        <Check size={12} className="mr-1" />
+                        <Check size={10} className="mr-1" />
                         Copied
                       </>
                     ) : (
                       <>
-                        <Copy size={12} className="mr-1" />
+                        <Copy size={10} className="mr-1" />
                         Copy
                       </>
                     )}
@@ -544,13 +549,13 @@ const DepositModal: FC<DepositModalProps> = ({
               </div>
 
               {/* Transfer Section - Same styling as TradingControls */}
-              <div className="border-t border-gray-800 pt-3">
-                <h3 className="text-sm font-bold text-gray-400 mb-3">INSTANT TRANSFER</h3>
+              <div className="border-t border-gray-800 pt-2">
+                <h3 className="text-sm font-bold text-gray-400 mb-2">INSTANT TRANSFER</h3>
                 
                 {/* Amount Input */}
                 <div className="mb-3">
                   <label className="block text-gray-400 text-xs mb-1">
-                    Transfer Amount (SOL) - Min: 0.005, Max: {embeddedWalletBalance.toFixed(3)}
+                    Transfer Amount (SOL) - Min: 0.001, Max: {embeddedWalletBalance.toFixed(3)}
                   </label>
                   <div className="flex">
                     <input
@@ -558,7 +563,7 @@ const DepositModal: FC<DepositModalProps> = ({
                       value={amount}
                       onChange={handleAmountChange}
                       className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-l-md focus:outline-none"
-                      placeholder="0.005"
+                      placeholder="0.001"
                       disabled={!addressValidated}
                     />
                     <button
@@ -584,7 +589,7 @@ const DepositModal: FC<DepositModalProps> = ({
                           ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                           : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                       }`}
-                      disabled={amt > embeddedWalletBalance || transferLoading || !addressValidated}
+                      disabled={amt > embeddedWalletBalance || transferLoading || !addressValidated || amt > 1.0}
                     >
                       {amt} SOL
                     </button>
@@ -592,23 +597,23 @@ const DepositModal: FC<DepositModalProps> = ({
                 </div>
 
                 {/* Transfer All Button */}
-                {embeddedWalletBalance > 0.005 && (
+                {embeddedWalletBalance > 0.001 && (
                   <button
                     onClick={handleTransferAll}
                     disabled={transferLoading || !addressValidated}
-                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white py-2 px-3 rounded text-sm mb-3 flex items-center justify-center transition-colors"
+                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white py-2 px-3 rounded text-sm mb-2 flex items-center justify-center transition-colors"
                   >
                     <ArrowRightLeft size={14} className="mr-1" />
-                    Transfer All ({(embeddedWalletBalance - 0.005).toFixed(3)} SOL)
+                    Transfer All ({(embeddedWalletBalance - 0.001).toFixed(3)} SOL)
                   </button>
                 )}
                 
                 {/* Main Transfer Button - Same styling as TradingControls */}
                 <button
                   onClick={() => handleInstantTransfer()}
-                  disabled={transferLoading || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > embeddedWalletBalance || !addressValidated || parseFloat(amount) < 0.001}
+                  disabled={transferLoading || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > embeddedWalletBalance || !addressValidated || parseFloat(amount) < 0.005 || parseFloat(amount) > 1.0}
                   className={`w-full py-3 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
-                    transferLoading || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > embeddedWalletBalance || !addressValidated || parseFloat(amount) < 0.001
+                    transferLoading || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > embeddedWalletBalance || !addressValidated || parseFloat(amount) < 0.005 || parseFloat(amount) > 1.0
                       ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                       : 'bg-green-600 hover:bg-green-700 text-white'
                   }`}
@@ -629,17 +634,17 @@ const DepositModal: FC<DepositModalProps> = ({
               
               {/* Error Message */}
               {error && (
-                <div className="bg-red-900 bg-opacity-30 border border-red-700 text-red-400 p-3 rounded-lg mt-3 text-sm">
+                <div className="bg-red-900 bg-opacity-30 border border-red-700 text-red-400 p-2 rounded-lg mt-2 text-sm">
                   <div className="flex items-center">
-                    <AlertTriangle size={14} className="mr-2 flex-shrink-0" />
+                    <AlertTriangle size={12} className="mr-2 flex-shrink-0" />
                     {error}
                   </div>
                 </div>
               )}
 
               {/* Info Section */}
-              <div className="bg-blue-900 bg-opacity-20 border border-blue-700 rounded-lg p-3 mt-3 text-sm">
-                <div className="text-blue-300 font-medium mb-1">⚡ How it works:</div>
+              <div className="bg-blue-900 bg-opacity-20 border border-blue-700 rounded-lg p-2 mt-2 text-sm">
+                <div className="text-blue-300 font-medium mb-1 text-xs">⚡ How it works:</div>
                 <div className="text-gray-300 text-xs">
                   Moves SOL from your wallet to game balance instantly. Ready to bet immediately!
                 </div>

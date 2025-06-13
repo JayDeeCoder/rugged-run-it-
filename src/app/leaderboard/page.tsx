@@ -357,65 +357,156 @@ const LeaderboardPage: FC = () => {
   }, [period, isAuthenticated, currentUserWallet, userId, autoRefreshEnabled]);
 
   // 🚀 IMPROVED: NON-DESTRUCTIVE socket listeners with new subscription system
-  useEffect(() => {
-    if (!socketConnected || socketListenersSetup.current) return;
+// ADD THESE UPDATES TO YOUR EXISTING LEADERBOARD PAGE
 
-    console.log('🔌 Leaderboard: Setting up NON-DESTRUCTIVE socket listeners...');
-    socketListenersSetup.current = true;
+// 🚀 ADD THIS: Enhanced socket listeners for bet loss resolution
+// Replace your existing socket listeners section with this enhanced version:
 
-    const subscriptionIds: string[] = [];
+// 🚀 IMPROVED: Enhanced socket listeners with bet loss resolution support
+useEffect(() => {
+  if (!socketConnected || socketListenersSetup.current) return;
 
-    // 🚀 NEW: Only listen to completion events, not in-progress game events
-    const handleGameEnd = (data: any) => {
-      console.log('🎮 Leaderboard: Game ended - triggering leaderboard refresh');
+  console.log('🔌 Leaderboard: Setting up ENHANCED socket listeners with bet loss tracking...');
+  socketListenersSetup.current = true;
+
+  const subscriptionIds: string[] = [];
+
+  // 🚀 EXISTING: Game completion events
+  const handleGameEnd = (data: any) => {
+    console.log('🎮 Leaderboard: Game ended - triggering leaderboard refresh');
+    debouncedLeaderboardRefresh();
+  };
+
+  const handleCustodialCashout = (data: any) => {
+    console.log('💸 Leaderboard: Cashout processed - triggering leaderboard refresh');
+    debouncedLeaderboardRefresh();
+  };
+
+  const handleUserStatsUpdate = (data: any) => {
+    console.log('📊 Leaderboard: User stats updated - triggering leaderboard refresh');
+    debouncedLeaderboardRefresh();
+  };
+
+  const handleBetResult = (data: any) => {
+    console.log('🎲 Leaderboard: Bet resolved - triggering leaderboard refresh');
+    debouncedLeaderboardRefresh();
+  };
+
+  const handleLeaderboardUpdate = (data: any) => {
+    console.log('🏆 Leaderboard: Direct leaderboard update received');
+    debouncedLeaderboardRefresh();
+  };
+
+  // 🚀 NEW: Handle automatic bet loss resolution events
+  const handleAutomaticBetLoss = (data: any) => {
+    console.log('💥 Leaderboard: Automatic bet loss resolved:', {
+      userId: data.userId,
+      amount: data.amount,
+      crashMultiplier: data.crashMultiplier,
+      gameId: data.gameId
+    });
+    
+    // Update stats immediately for better UX
+    setStats(prevStats => ({
+      ...prevStats,
+      totalGames: prevStats.totalGames + 1,
+      totalVolume: prevStats.totalVolume - (data.amount || 0)
+    }));
+    
+    // Trigger leaderboard refresh
+    debouncedLeaderboardRefresh();
+    
+    // Show toast notification for current user if it's their bet
+    if (data.userId === userId) {
+      toast.error(`Bet lost: -${data.amount?.toFixed(3)} SOL (Crashed at ${data.crashMultiplier?.toFixed(2)}x)`, {
+        duration: 4000,
+        position: 'top-center'
+      });
+    }
+  };
+
+  // 🚀 NEW: Handle bet placement events for real-time tracking
+  const handleBetPlaced = (data: any) => {
+    console.log('🎯 Leaderboard: Bet placed - updating volume stats');
+    
+    // Update volume stats immediately
+    setStats(prevStats => ({
+      ...prevStats,
+      totalVolume: prevStats.totalVolume + (data.amount || 0)
+    }));
+  };
+
+  // 🚀 NEW: Handle game crash events specifically
+  const handleGameCrashed = (data: any) => {
+    console.log('💥 Leaderboard: Game crashed - checking for unresolved bets', {
+      crashMultiplier: data.multiplier,
+      gameId: data.gameId,
+      playersAffected: data.playersWithActiveBets
+    });
+    
+    // Refresh leaderboard after crash to catch any automatic bet resolutions
+    setTimeout(() => {
+      console.log('🔄 Leaderboard: Post-crash refresh for bet loss resolution');
       debouncedLeaderboardRefresh();
-    };
+    }, 2000); // Delay to allow bet loss resolution to complete
+  };
 
-    const handleCustodialCashout = (data: any) => {
-      console.log('💸 Leaderboard: Cashout processed - triggering leaderboard refresh');
+  // 🚀 NEW: Handle enhanced stats updates with detailed tracking
+  const handleEnhancedStatsUpdate = (data: any) => {
+    console.log('📊 Leaderboard: Enhanced stats update received:', {
+      userId: data.userId,
+      gamesPlayed: data.gamesPlayed,
+      netProfit: data.netProfit,
+      winRate: data.winRate,
+      eventType: data.eventType // 'bet_placed', 'cashout', 'bet_lost'
+    });
+    
+    // Update current user data if it matches
+    if (data.userId === userId && currentUserData) {
+      setCurrentUserData(prevData => prevData ? {
+        ...prevData,
+        games_played: data.gamesPlayed || prevData.games_played,
+        total_profit: data.netProfit || prevData.total_profit,
+        win_rate: data.winRate || prevData.win_rate,
+        experience_points: data.experience || prevData.experience_points
+      } : null);
+    }
+    
+    // Trigger leaderboard refresh for significant changes
+    if (data.eventType === 'cashout' || data.eventType === 'bet_lost') {
       debouncedLeaderboardRefresh();
-    };
+    }
+  };
 
-    const handleUserStatsUpdate = (data: any) => {
-      console.log('📊 Leaderboard: User stats updated - triggering leaderboard refresh');
-      debouncedLeaderboardRefresh();
-    };
+  // 🚀 NEW: Use improved subscription system with new events
+  subscriptionIds.push(
+    // Existing events
+    sharedSocket.subscribe('gameEnd', handleGameEnd, 'leaderboard'),
+    sharedSocket.subscribe('custodialCashout', handleCustodialCashout, 'leaderboard'),
+    sharedSocket.subscribe('userStatsUpdate', handleUserStatsUpdate, 'leaderboard'),
+    sharedSocket.subscribe('betResult', handleBetResult, 'leaderboard'),
+    sharedSocket.subscribe('leaderboardUpdate', handleLeaderboardUpdate, 'leaderboard'),
+    
+    // 🚀 NEW: Enhanced events for bet loss resolution
+    sharedSocket.subscribe('automaticBetLoss', handleAutomaticBetLoss, 'leaderboard'),
+    sharedSocket.subscribe('betPlaced', handleBetPlaced, 'leaderboard'),
+    sharedSocket.subscribe('gameCrashed', handleGameCrashed, 'leaderboard'),
+    sharedSocket.subscribe('enhancedStatsUpdate', handleEnhancedStatsUpdate, 'leaderboard')
+  );
 
-    const handleBetResult = (data: any) => {
-      console.log('🎲 Leaderboard: Bet resolved - triggering leaderboard refresh');
-      debouncedLeaderboardRefresh();
-    };
-
-    const handleLeaderboardUpdate = (data: any) => {
-      console.log('🏆 Leaderboard: Direct leaderboard update received');
-      debouncedLeaderboardRefresh();
-    };
-
-    // 🚀 NEW: DO NOT listen to multiplierUpdate, gameState, gameStarted, gameCrashed
-    // These are handled by the main component and listening here causes conflicts
-
-    // 🚀 NEW: Use improved subscription system
-    subscriptionIds.push(
-      sharedSocket.subscribe('gameEnd', handleGameEnd, 'leaderboard'),
-      sharedSocket.subscribe('custodialCashout', handleCustodialCashout, 'leaderboard'),
-      sharedSocket.subscribe('userStatsUpdate', handleUserStatsUpdate, 'leaderboard'),
-      sharedSocket.subscribe('betResult', handleBetResult, 'leaderboard'),
-      sharedSocket.subscribe('leaderboardUpdate', handleLeaderboardUpdate, 'leaderboard')
-    );
-
-    return () => {
-      console.log('🔌 Leaderboard: Cleaning up NON-DESTRUCTIVE socket listeners');
-      
-      // 🚀 NEW: Clean up using subscription IDs
-      subscriptionIds.forEach(id => sharedSocket.unsubscribe(id));
-      
-      if (realTimeUpdateRef.current) {
-        clearTimeout(realTimeUpdateRef.current);
-      }
-      
-      socketListenersSetup.current = false;
-    };
-  }, [socketConnected, debouncedLeaderboardRefresh]);
+  return () => {
+    console.log('🔌 Leaderboard: Cleaning up ENHANCED socket listeners');
+    
+    // Clean up using subscription IDs
+    subscriptionIds.forEach(id => sharedSocket.unsubscribe(id));
+    
+    if (realTimeUpdateRef.current) {
+      clearTimeout(realTimeUpdateRef.current);
+    }
+    
+    socketListenersSetup.current = false;
+  };
+}, [socketConnected, debouncedLeaderboardRefresh, userId, currentUserData]);
 
   // 🚀 NEW: Component cleanup to unsubscribe all leaderboard events
   useEffect(() => {

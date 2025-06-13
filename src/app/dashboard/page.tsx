@@ -488,7 +488,87 @@ const Dashboard: FC = () => {
     };
   }, [isValidWallet, walletAddress]);
 
-  // 🚀 FIXED: Use exact same XP system as leaderboard
+  // 🚀 FIXED: Implement exact XP calculation locally to ensure it works
+  const calculateLevelProgressLocal = useCallback((userData: {
+    level?: number;
+    experience_points?: number;
+    total_games_played?: number;
+    win_rate?: number;
+  }) => {
+    const {
+      level = 1,
+      experience_points = 0,
+      total_games_played = 0,
+      win_rate = 0
+    } = userData;
+
+    // 🎯 EXACT same XP requirements as your API
+    const getXPRequirement = (level: number): number => {
+      const easyLevels: Record<number, number> = {
+        1: 0,
+        2: 25,      // SUPER EASY
+        3: 75,      // STILL EASY 
+        4: 150,     // Start ramping up
+        5: 250,
+        6: 400,
+        7: 600,
+        8: 900,
+        9: 1350,
+        10: 2000
+      };
+
+      if (easyLevels[level] !== undefined) {
+        return easyLevels[level];
+      }
+
+      // For levels 11+, use exponential growth
+      if (level > 10) {
+        let xp = easyLevels[10];
+        for (let i = 11; i <= level; i++) {
+          xp = Math.floor(xp * 1.5);
+        }
+        return xp;
+      }
+
+      return 0;
+    };
+
+    const currentLevelXP = getXPRequirement(level);
+    const nextLevelXP = getXPRequirement(level + 1);
+    const xpNeededThisLevel = nextLevelXP - currentLevelXP;
+    const xpProgressThisLevel = Math.max(0, experience_points - currentLevelXP);
+    
+    let progressPercentage = Math.min(100, (xpProgressThisLevel / xpNeededThisLevel) * 100);
+
+    // 🎯 EXACT same bonus progress for early levels as your API
+    if (level <= 3) {
+      // Game participation bonus (up to 25%)
+      const gameBonus = Math.min(25, total_games_played * 2);
+      
+      // Learning bonus (up to 15%)  
+      const winBonus = Math.min(15, win_rate * 0.3);
+      
+      progressPercentage += gameBonus + winBonus;
+      progressPercentage = Math.min(100, progressPercentage);
+    }
+
+    const readyToLevelUp = progressPercentage >= 100;
+
+    return {
+      currentLevel: level,
+      currentXP: experience_points,
+      progressPercentage: Math.max(0, progressPercentage),
+      xpForNextLevel: nextLevelXP,
+      xpNeeded: Math.max(0, nextLevelXP - experience_points),
+      xpThisLevel: xpProgressThisLevel,
+      xpNeededThisLevel,
+      readyToLevelUp,
+      isEarlyLevel: level <= 3,
+      canLevelUp: readyToLevelUp
+    };
+  }, []);
+
+  // 🚀 FIXED: Use exact same XP system as leaderboard with local calculation
   const fetchLevelData = useCallback(async () => {
     if (!userId) {
       setLevelData({
@@ -532,15 +612,27 @@ const Dashboard: FC = () => {
         winRate: winRate
       });
       
-      // 🚀 FIXED: Use exact UserAPI method with same parameters as leaderboard
-      const levelProgress = UserAPI.calculateLevelProgress({
-        level: currentLevel,
-        experience_points: currentXP,
-        total_games_played: gamesPlayed,
-        win_rate: winRate
-      });
-
-      console.log(`🎯 Dashboard: Calculated level progress:`, levelProgress);
+      // 🚀 TRY UserAPI first, fallback to local calculation
+      let levelProgress;
+      try {
+        console.log('🔄 Trying UserAPI.calculateLevelProgress...');
+        levelProgress = UserAPI.calculateLevelProgress({
+          level: currentLevel,
+          experience_points: currentXP,
+          total_games_played: gamesPlayed,
+          win_rate: winRate
+        });
+        console.log('✅ UserAPI method worked:', levelProgress);
+      } catch (apiError) {
+        console.warn('⚠️ UserAPI method failed, using local calculation:', apiError);
+        levelProgress = calculateLevelProgressLocal({
+          level: currentLevel,
+          experience_points: currentXP,
+          total_games_played: gamesPlayed,
+          win_rate: winRate
+        });
+        console.log('✅ Local calculation result:', levelProgress);
+      }
 
       // 🚀 FIXED: Use the exact same properties that UserAPI returns
       const newLevelData = {
@@ -549,22 +641,34 @@ const Dashboard: FC = () => {
         experiencePoints: currentXP,
         experienceToNextLevel: levelProgress.xpNeeded || 0,
         progressPercentage: levelProgress.progressPercentage || 0,
-        // Use the exact properties from UserAPI.calculateLevelProgress
+        // Use the exact properties from calculation result
         isEarlyLevel: levelProgress.isEarlyLevel || false,
         readyToLevelUp: levelProgress.readyToLevelUp || false,
         xpThisLevel: levelProgress.xpThisLevel || 0,
-        xpNeededThisLevel: levelProgress.xpNeededThisLevel || 100
+        xpNeededThisLevel: levelProgress.xpNeededThisLevel || 25
       };
 
-      console.log(`🎯 Dashboard: Setting level data:`, newLevelData);
+      console.log(`🎯 Dashboard: Final level data being set:`, newLevelData);
+      
+      // Force a visual update
       setLevelData(newLevelData);
+
+      // 🚀 EXTRA DEBUG: Log the specific progress calculation
+      console.log(`📊 Progress Bar Debug:`, {
+        'Progress Percentage': newLevelData.progressPercentage,
+        'CSS Width': `${Math.max(5, newLevelData.progressPercentage)}%`,
+        'XP This Level': newLevelData.xpThisLevel,
+        'XP Needed This Level': newLevelData.xpNeededThisLevel,
+        'Is Early Level': newLevelData.isEarlyLevel,
+        'Ready to Level Up': newLevelData.readyToLevelUp
+      });
 
     } catch (error) {
       console.error('❌ Error fetching enhanced level data:', error);
     } finally {
       setIsLoadingLevel(false);
     }
-  }, [userId, supabase]);
+  }, [userId, supabase, calculateLevelProgressLocal]);
 
   useEffect(() => {
     if (userId) {

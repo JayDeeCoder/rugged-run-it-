@@ -1,4 +1,4 @@
-// src/components/layout/Navbar.tsx - Enhanced with better level display and responsiveness
+// src/components/layout/Navbar.tsx - Enhanced with NEW XP SYSTEM
 import { FC, useState, useEffect, useRef, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
@@ -10,6 +10,7 @@ import useOutsideClick from '../../hooks/useOutsideClick';
 import { Menu, User, ChevronDown, LogOut, Wallet, BarChart2, Trophy, Settings, Edit } from 'lucide-react';
 import UsernameModal from '../auth/UsernameModal';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../../utils/walletUtils';
+import { UserAPI } from '../../services/api';
 
 const Navbar: FC = () => {
   const { authenticated, login, logout, user, ready } = usePrivy();
@@ -49,6 +50,83 @@ const Navbar: FC = () => {
       setDropdownPosition(null);
     }
   }, [showUserMenu, isMounted]);
+
+  // 🚀 ENHANCED: Use exact same XP calculation as dashboard and leaderboard
+  const calculateEnhancedXP = (userData: {
+    level?: number;
+    experience_points?: number;
+    total_games_played?: number;
+    win_rate?: number;
+  }) => {
+    const {
+      level = 1,
+      experience_points = 0,
+      total_games_played = 0,
+      win_rate = 0
+    } = userData;
+
+    // 🎯 EXACT same XP requirements as API
+    const getXPRequirement = (level: number): number => {
+      const easyLevels: Record<number, number> = {
+        1: 0,
+        2: 25,      // SUPER EASY
+        3: 75,      // STILL EASY 
+        4: 150,     // Start ramping up
+        5: 250,
+        6: 400,
+        7: 600,
+        8: 900,
+        9: 1350,
+        10: 2000
+      };
+
+      if (easyLevels[level] !== undefined) {
+        return easyLevels[level];
+      }
+
+      // For levels 11+, use exponential growth
+      if (level > 10) {
+        let xp = easyLevels[10];
+        for (let i = 11; i <= level; i++) {
+          xp = Math.floor(xp * 1.5);
+        }
+        return xp;
+      }
+
+      return 0;
+    };
+
+    const currentLevelXP = getXPRequirement(level);
+    const nextLevelXP = getXPRequirement(level + 1);
+    const xpNeededThisLevel = nextLevelXP - currentLevelXP;
+    const xpProgressThisLevel = Math.max(0, experience_points - currentLevelXP);
+    
+    let progressPercentage = Math.min(100, (xpProgressThisLevel / xpNeededThisLevel) * 100);
+
+    // 🎯 EXACT same bonus progress for early levels
+    if (level <= 3) {
+      // Game participation bonus (up to 25%)
+      const gameBonus = Math.min(25, total_games_played * 2);
+      
+      // Learning bonus (up to 15%)  
+      const winBonus = Math.min(15, win_rate * 0.3);
+      
+      progressPercentage += gameBonus + winBonus;
+      progressPercentage = Math.min(100, progressPercentage);
+    }
+
+    const readyToLevelUp = progressPercentage >= 100;
+
+    return {
+      progressPercentage: Math.max(0, progressPercentage),
+      xpThisLevel: xpProgressThisLevel,
+      xpNeededThisLevel,
+      isEarlyLevel: level <= 3,
+      readyToLevelUp,
+      current: xpProgressThisLevel,
+      needed: xpNeededThisLevel
+    };
+  };
 
   // Fetch real balance from Solana blockchain
   useEffect(() => {
@@ -164,25 +242,58 @@ const Navbar: FC = () => {
     return currentUser?.level || userLevel || 1;
   };
 
-  // Calculate experience progress for current level
+  // 🚀 ENHANCED: Calculate experience progress using new XP system
   const getExperienceProgress = () => {
     const currentLevel = getUserLevel();
     const currentXP = currentUser?.experience_points || experience || 0;
+    const gamesPlayed = currentUser?.total_games_played || 0;
+    const winRate = currentUser?.win_rate || 0;
     
-    const experienceNeeded = 100;
-    const experienceInLevel = currentXP % 100;
-    const progressPercentage = (experienceInLevel / experienceNeeded) * 100;
-    
-    return {
-      progress: Math.min(progressPercentage, 100),
-      current: experienceInLevel,
-      needed: experienceNeeded
-    };
+    // Try UserAPI first, fallback to local calculation
+    try {
+      const levelProgress = UserAPI.calculateLevelProgress({
+        level: currentLevel,
+        experience_points: currentXP,
+        total_games_played: gamesPlayed,
+        win_rate: winRate
+      });
+      
+      return {
+        progress: levelProgress.progressPercentage || 0,
+        current: levelProgress.xpThisLevel || 0,
+        needed: levelProgress.xpNeededThisLevel || 25,
+        isEarlyLevel: levelProgress.isEarlyLevel || false,
+        readyToLevelUp: levelProgress.readyToLevelUp || false
+      };
+    } catch (error) {
+      console.warn('⚠️ Navbar: UserAPI failed, using local calculation');
+      const result = calculateEnhancedXP({
+        level: currentLevel,
+        experience_points: currentXP,
+        total_games_played: gamesPlayed,
+        win_rate: winRate
+      });
+      
+      return {
+        progress: result.progressPercentage,
+        current: result.current,
+        needed: result.needed,
+        isEarlyLevel: result.isEarlyLevel,
+        readyToLevelUp: result.readyToLevelUp
+      };
+    }
   };
 
-  // Get level color and styling based on level value
+  // 🚀 ENHANCED: Get level color with early level boost indication
   const getLevelColor = () => {
     const level = getUserLevel();
+    const xpData = getExperienceProgress();
+    
+    // Special styling for early levels with boost
+    if (xpData.isEarlyLevel) {
+      return 'bg-gradient-to-r from-green-600/90 to-yellow-600/90 text-white border-yellow-400 shadow-lg';
+    }
+    
     if (level >= 20) return 'bg-purple-600/90 text-purple-200 border-purple-400';
     if (level >= 15) return 'bg-red-600/90 text-red-200 border-red-400';
     if (level >= 10) return 'bg-green-600/90 text-green-200 border-green-400';
@@ -194,18 +305,26 @@ const Navbar: FC = () => {
   const displayLevel = getUserLevel();
   const levelColorClass = getLevelColor();
 
+  // 🚀 ENHANCED: Format XP numbers for display
+  const formatXP = (xp: number) => {
+    if (xp >= 10000) return `${(xp / 1000).toFixed(1)}k`;
+    return xp.toString();
+  };
+
   // Debug logging in development
   useEffect(() => {
     if (process.env.NODE_ENV === 'development' && currentUser) {
-      console.log('🔍 Navbar User Data (Real from DB):', {
+      console.log('🔍 Navbar User Data (Enhanced XP):', {
         level: currentUser.level,
         experience_points: currentUser.experience_points,
+        total_games_played: currentUser.total_games_played,
+        win_rate: currentUser.win_rate,
         username: currentUser.username,
         avatar: currentUser.avatar,
-        id: currentUser.id
+        xpProgress: xpData
       });
     }
-  }, [currentUser]);
+  }, [currentUser, xpData]);
 
   // Dropdown component that renders using portal
   const DropdownMenu = () => {
@@ -244,20 +363,42 @@ const Navbar: FC = () => {
               <div className="text-sm text-gray-400 truncate">
                 {user?.email?.address || user?.phone?.number || 'No contact info'}
               </div>
-              {/* Level and XP in dropdown */}
+              
+              {/* 🚀 ENHANCED: Level and XP in dropdown with new system */}
               <div className="flex items-center space-x-2 mt-2">
-                <span className={`text-xs rounded px-2 py-1 font-medium border ${levelColorClass}`}>
+                <span className={`text-xs rounded px-2 py-1 font-medium border ${levelColorClass} relative`}>
                   Lv.{displayLevel}
+                  {xpData.isEarlyLevel && (
+                    <span className="absolute -top-1 -right-1 text-xs">🚀</span>
+                  )}
+                  {xpData.readyToLevelUp && (
+                    <span className="absolute -top-1 -right-1 text-xs animate-bounce">🎉</span>
+                  )}
                 </span>
                 <div className="flex-1">
-                  <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div className={`h-1.5 bg-gray-700 rounded-full overflow-hidden ${
+                    xpData.readyToLevelUp ? 'animate-pulse' : ''
+                  }`}>
                     <div 
-                      className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500" 
-                      style={{ width: `${xpData.progress}%` }}
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        xpData.isEarlyLevel 
+                          ? 'bg-gradient-to-r from-green-400 via-yellow-400 to-orange-400' 
+                          : xpData.readyToLevelUp
+                            ? 'bg-gradient-to-r from-yellow-400 to-green-400'
+                            : 'bg-gradient-to-r from-blue-500 to-purple-500'
+                      }`}
+                      style={{ width: `${Math.max(5, xpData.progress)}%` }}
                     ></div>
                   </div>
                   <div className="text-xs text-gray-400 mt-0.5">
-                    {xpData.current}/{xpData.needed} XP
+                    {xpData.readyToLevelUp ? (
+                      <span className="text-green-400 font-medium">Ready to level up!</span>
+                    ) : (
+                      `${formatXP(xpData.current)}/${formatXP(xpData.needed)} XP`
+                    )}
+                    {xpData.isEarlyLevel && (
+                      <span className="text-yellow-400 ml-1 font-medium">• 3x Boost!</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -406,7 +547,7 @@ const Navbar: FC = () => {
           <div className="flex items-center">
             {authenticated ? (
               <>
-                {/* User Stats - Enhanced for all screen sizes */}
+                {/* 🚀 ENHANCED: User Stats with new XP system */}
                 <div className="flex items-center mr-3 space-x-2">
                   {/* User Avatar - Always visible */}
                   <div className="flex items-center">
@@ -415,22 +556,40 @@ const Navbar: FC = () => {
                     </span>
                   </div>
 
-                  {/* Level Display - ALWAYS show on all screens with enhanced styling */}
-                  <div className={`flex items-center rounded-full px-2 py-1 border ${levelColorClass}`}>
+                  {/* 🚀 ENHANCED: Level Display with early level boost indicator */}
+                  <div className={`flex items-center rounded-full px-2 py-1 border relative ${levelColorClass}`}>
                     <span className="text-xs font-medium mr-1">Lv.</span>
                     <span className="text-sm font-bold">{displayLevel}</span>
+                    {xpData.isEarlyLevel && (
+                      <span className="absolute -top-1 -right-1 text-xs" title="Early Level Boost Active">🚀</span>
+                    )}
+                    {xpData.readyToLevelUp && (
+                      <span className="absolute -top-1 -right-1 text-xs animate-bounce" title="Ready to Level Up!">🎉</span>
+                    )}
                   </div>
 
-                  {/* Experience Progress Bar - Responsive sizing, hidden on extra small screens */}
+                  {/* 🚀 ENHANCED: Experience Progress Bar with new styling */}
                   <div className="hidden xs:flex flex-col items-center">
-                    <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden w-10 sm:w-12 md:w-14 lg:w-16">
+                    <div className={`h-1.5 bg-gray-700 rounded-full overflow-hidden w-10 sm:w-12 md:w-14 lg:w-16 ${
+                      xpData.readyToLevelUp ? 'animate-pulse' : ''
+                    }`}>
                       <div 
-                        className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500 ease-out" 
-                        style={{ width: `${xpData.progress}%` }}
+                        className={`h-full rounded-full transition-all duration-500 ease-out ${
+                          xpData.isEarlyLevel 
+                            ? 'bg-gradient-to-r from-green-400 via-yellow-400 to-orange-400' 
+                            : xpData.readyToLevelUp
+                              ? 'bg-gradient-to-r from-yellow-400 to-green-400'
+                              : 'bg-gradient-to-r from-blue-500 to-purple-500'
+                        }`}
+                        style={{ width: `${Math.max(5, xpData.progress)}%` }}
                       ></div>
                     </div>
                     <div className="text-xs text-gray-400 mt-0.5 hidden sm:block">
-                      {xpData.current}/{xpData.needed}
+                      {xpData.readyToLevelUp ? (
+                        <span className="text-green-400 font-medium">Ready!</span>
+                      ) : (
+                        `${formatXP(xpData.current)}/${formatXP(xpData.needed)}`
+                      )}
                     </div>
                   </div>
                 </div>
@@ -503,7 +662,7 @@ const Navbar: FC = () => {
           </div>
         </div>
 
-        {/* Mobile Menu - Enhanced for iPad */}
+        {/* 🚀 ENHANCED: Mobile Menu with new XP system */}
         {showMobileMenu && (
           <div className="lg:hidden bg-gray-800 mt-3 rounded-md p-2">
             <nav className="flex flex-col">
@@ -525,23 +684,46 @@ const Navbar: FC = () => {
                 RUGGER Board
               </Link>
               
-              {/* Show XP progress in mobile menu for authenticated users */}
+              {/* 🚀 ENHANCED: Show XP progress in mobile menu with new system */}
               {authenticated && (
                 <div className="px-4 py-3 border-t border-gray-700 mt-2">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm text-gray-400">Your Progress</span>
-                    <span className={`text-xs rounded px-2 py-1 font-medium border ${levelColorClass}`}>
+                    <span className={`text-xs rounded px-2 py-1 font-medium border relative ${levelColorClass}`}>
                       Lv.{displayLevel}
+                      {xpData.isEarlyLevel && (
+                        <span className="absolute -top-1 -right-1 text-xs">🚀</span>
+                      )}
+                      {xpData.readyToLevelUp && (
+                        <span className="absolute -top-1 -right-1 text-xs animate-bounce">🎉</span>
+                      )}
                     </span>
                   </div>
-                  <div className="w-full bg-gray-700 rounded-full h-2 mb-1">
+                  <div className={`w-full bg-gray-700 rounded-full h-2 mb-1 ${
+                    xpData.readyToLevelUp ? 'animate-pulse' : ''
+                  }`}>
                     <div 
-                      className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full transition-all duration-500" 
-                      style={{ width: `${xpData.progress}%` }}
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        xpData.isEarlyLevel 
+                          ? 'bg-gradient-to-r from-green-400 via-yellow-400 to-orange-400' 
+                          : xpData.readyToLevelUp
+                            ? 'bg-gradient-to-r from-yellow-400 to-green-400'
+                            : 'bg-gradient-to-r from-blue-500 to-purple-500'
+                      }`}
+                      style={{ width: `${Math.max(5, xpData.progress)}%` }}
                     ></div>
                   </div>
                   <div className="text-xs text-gray-400 text-center">
-                    {xpData.current}/{xpData.needed} XP to next level
+                    {xpData.readyToLevelUp ? (
+                      <span className="text-green-400 font-medium">🎉 Ready to level up!</span>
+                    ) : (
+                      <>
+                        {formatXP(xpData.current)}/{formatXP(xpData.needed)} XP to next level
+                        {xpData.isEarlyLevel && (
+                          <div className="text-yellow-400 font-medium mt-1">🚀 Early Level Boost Active!</div>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -549,9 +731,6 @@ const Navbar: FC = () => {
           </div>
         )}
       </header>
-
-      {/* Portal-rendered dropdown */}
-      <DropdownMenu />
 
       {/* Username Modal */}
       <UsernameModal 

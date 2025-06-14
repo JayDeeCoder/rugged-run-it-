@@ -732,6 +732,9 @@ const Navbar: FC = () => {
         )}
       </header>
 
+      {/* Portal-rendered dropdown */}
+      <DropdownMenu />
+
       {/* Username Modal */}
       <UsernameModal 
         isOpen={showUsernameModal}

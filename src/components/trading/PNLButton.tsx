@@ -1,4 +1,4 @@
-// src/components/trading/PNLButton.tsx - COMPLETE FILE
+// src/components/trading/PNLButton.tsx - UPDATED VERSION WITH FIXED DOWNLOAD & USERNAME
 import React, { useState, useCallback, useRef, createContext, useContext } from 'react';
 import { TrendingUp, TrendingDown, Sparkles, Crown, Share2, Copy, Download, X } from 'lucide-react';
 
@@ -157,7 +157,7 @@ export const PNLButton: React.FC<PNLButtonProps> = ({
   );
 };
 
-// P&L Modal Component
+// P&L Modal Component with Fixed Download and Username Logic
 const PNLModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose }) => {
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -167,7 +167,7 @@ const PNLModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
   // Generate unique ID for this modal instance to avoid gradient ID conflicts
   const modalId = useRef(Math.random().toString(36).substr(2, 9)).current;
 
-  // Get username using same logic as UserContext
+  // 🚀 UPDATED: Use same username logic as TradingControls
   const getDisplayUsername = (user: any) => {
     if (!user) return 'Anonymous';
     
@@ -186,7 +186,7 @@ const PNLModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
   const profitDisplay = Math.abs(data.profit || 0).toFixed(3);
   const roi = (data.betAmount || 0) > 0 ? ((Math.abs(data.profit || 0) / data.betAmount) * 100).toFixed(1) : '0.0';
 
-  // Fixed Solana logo component with proper sizing for INVESTED section
+  // 🚀 FIXED: Improved Solana logo components with explicit sizing for download
   const SolanaLogoSmall = ({ className = "" }) => (
     <svg 
       width="12" 
@@ -196,7 +196,8 @@ const PNLModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
       style={{ 
         flexShrink: 0, 
         marginLeft: '6px',
-        display: 'block'
+        display: 'inline-block',
+        verticalAlign: 'middle'
       }}
     >
       <defs>
@@ -211,7 +212,7 @@ const PNLModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
     </svg>
   );
 
-  // Fixed main Solana logo for profit display with proper alignment
+  // 🚀 FIXED: Main Solana logo with explicit positioning for download
   const SolanaLogoMain = ({ className = "" }) => (
     <svg 
       width="28" 
@@ -220,7 +221,9 @@ const PNLModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
       className={className} 
       style={{ 
         flexShrink: 0,
-        display: 'block'
+        display: 'inline-block',
+        verticalAlign: 'middle',
+        marginRight: '8px'
       }}
     >
       <defs>
@@ -292,7 +295,7 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
     }
   };
 
-  // Download image function with improved rendering
+  // 🚀 COMPLETELY REWRITTEN: Download function with fixed alignment
   const downloadImage = async () => {
     if (!cardRef.current) return;
     
@@ -300,41 +303,82 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
     try {
       const html2canvas = (await import('html2canvas')).default;
       
-      // Hide the close button before capturing
-      const closeButton = cardRef.current.querySelector('.close-button') as HTMLElement;
+      // 🚀 FIXED: Better preparation for html2canvas
+      const originalCard = cardRef.current;
+      const closeButton = originalCard.querySelector('.close-button') as HTMLElement;
+      
+      // Hide close button before capture
       if (closeButton) {
         closeButton.style.display = 'none';
       }
       
-      // Wait for fonts and images to load
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // 🚀 FIXED: Apply download-specific styles
+      originalCard.style.position = 'relative';
+      originalCard.style.transform = 'none';
+      originalCard.style.width = '400px';
+      originalCard.style.height = '420px';
       
-      const canvas = await html2canvas(cardRef.current, {
+      // 🚀 FIXED: Force layout recalculation
+      originalCard.offsetHeight; // Force reflow
+      
+      await new Promise(resolve => setTimeout(resolve, 300)); // Wait for layout
+      
+      // 🚀 IMPROVED: Better html2canvas options for alignment
+      const canvas = await html2canvas(originalCard, {
         backgroundColor: '#0a0a0a',
-        scale: 2, // Reduced from 3 for better performance
+        scale: 2,
         width: 400,
         height: 420,
         useCORS: true,
-        allowTaint: true,
+        allowTaint: false,
         logging: false,
+        foreignObjectRendering: false,
         ignoreElements: (element) => {
           return element.classList?.contains('close-button');
         },
-        onclone: (clonedDoc) => {
-          // Ensure proper styling in cloned document
-          const clonedCard = clonedDoc.querySelector('[data-pnl-card]') as HTMLElement;
-          if (clonedCard) {
-            clonedCard.style.transform = 'none';
-            clonedCard.style.position = 'relative';
+        onclone: (clonedDoc, element) => {
+          // 🚀 FIXED: Apply explicit styles in cloned document
+          const clonedCard = element;
+          clonedCard.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+          clonedCard.style.position = 'relative';
+          clonedCard.style.transform = 'none';
+          clonedCard.style.width = '400px';
+          clonedCard.style.height = '420px';
+          clonedCard.style.margin = '0';
+          clonedCard.style.padding = '0';
+          
+          // 🚀 FIXED: Fix all text and logo alignments in clone
+          const profitContainer = clonedCard.querySelector('[data-profit-container]') as HTMLElement;
+          if (profitContainer) {
+            profitContainer.style.display = 'flex';
+            profitContainer.style.alignItems = 'center';
+            profitContainer.style.justifyContent = 'center';
+            profitContainer.style.gap = '8px';
           }
+          
+          // Fix Solana logos alignment
+          const logos = clonedCard.querySelectorAll('svg');
+          logos.forEach((logo) => {
+            logo.style.display = 'inline-block';
+            logo.style.verticalAlign = 'middle';
+          });
+          
+          // Fix text alignment
+          const textElements = clonedCard.querySelectorAll('div');
+          textElements.forEach((el) => {
+            if (el.style.textAlign === 'center') {
+              el.style.textAlign = 'center';
+            }
+          });
         }
       });
       
-      // Show the close button again
+      // Restore original styles
       if (closeButton) {
         closeButton.style.display = 'flex';
       }
       
+      // Download the image
       const link = document.createElement('a');
       link.download = `irugged-pnl-${getDisplayUsername(data.user)}-${Date.now()}.png`;
       link.href = canvas.toDataURL('image/png', 1.0);
@@ -380,9 +424,9 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
       <div className="relative max-w-sm w-full">
-        {/* The PNL Card */}
+        {/* 🚀 UPDATED: The PNL Card with better download-friendly structure */}
         <div 
           ref={cardRef}
           data-pnl-card
@@ -396,7 +440,7 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
           {/* Close button - with class for hiding during download */}
           <button
             onClick={onClose}
-            className="close-button absolute top-4 right-4 z-10 w-8 h-8 bg-zinc-800/80 hover:bg-zinc-700/80 rounded-full flex items-center justify-center text-zinc-400 hover:text-white transition-colors backdrop-blur-sm border border-zinc-600/50"
+            className="close-button absolute top-4 right-4 z-[10001] w-8 h-8 bg-zinc-800/80 hover:bg-zinc-700/80 rounded-full flex items-center justify-center text-zinc-400 hover:text-white transition-colors backdrop-blur-sm border border-zinc-600/50"
           >
             ✕
           </button>
@@ -410,12 +454,12 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
           <div className="relative px-6 pt-5 pb-3">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center space-x-3">
-                {/* Fixed avatar positioning - always use rocket emoji, properly centered */}
+                {/* Fixed avatar positioning */}
                 <div className="w-9 h-9 bg-gradient-to-br from-zinc-700 via-zinc-800 to-zinc-900 rounded-lg flex items-center justify-center border border-zinc-600/50 shadow-lg">
                   <span className="text-lg leading-none" style={{ lineHeight: 1 }}>🚀</span>
                 </div>
                 <div>
-                  {/* Fixed username - ensure actual username is displayed */}
+                  {/* 🚀 UPDATED: Use proper username logic */}
                   <div className="text-sm font-bold text-white tracking-tight">
                     {getDisplayUsername(data.user)}
                   </div>
@@ -432,21 +476,23 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
               </div>
             </div>
 
-            {/* Main P&L display - Fixed profit figure alignment */}
+            {/* 🚀 FIXED: Main P&L display with better alignment for download */}
             <div className="text-center space-y-3">
               <div className="space-y-1.5">
-                {/* Fixed Solana logo and profit alignment - perfectly centered */}
+                {/* 🚀 FIXED: Profit display with explicit alignment */}
                 <div 
-                  className="flex items-center justify-center" 
+                  data-profit-container
+                  className="flex items-center justify-center"
                   style={{ 
-                    gap: '8px',
+                    display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    display: 'flex'
+                    gap: '8px',
+                    textAlign: 'center'
                   }}
                 >
                   <SolanaLogoMain className={`${isProfit ? 'opacity-100' : 'opacity-60'}`} />
-                  <div 
+                  <span 
                     className={`text-4xl font-black tracking-tight ${
                       isProfit 
                         ? 'text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.4)]' 
@@ -456,11 +502,13 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
                       lineHeight: '1', 
                       marginTop: '0px',
                       fontSize: '2.25rem',
-                      fontWeight: '900'
+                      fontWeight: '900',
+                      display: 'inline-block',
+                      verticalAlign: 'middle'
                     }}
                   >
                     {isProfit ? '+' : '−'}{profitDisplay}
-                  </div>
+                  </span>
                 </div>
               </div>
               
@@ -485,7 +533,7 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
           {/* Details - Fixed multiplier display and Solana logo positioning */}
           <div className="px-6 py-3 space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              {/* Left card - Always show MULTIPLIER for both individual trades and portfolio */}
+              {/* Left card - Always show MULTIPLIER */}
               <div className="bg-zinc-900/60 backdrop-blur-sm rounded-lg p-3 border border-zinc-800/50 shadow-inner">
                 <div className="text-xs font-bold text-zinc-500 tracking-wider mb-1.5">
                   MULTIPLIER
@@ -495,10 +543,10 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
                 </div>
               </div>
               
-              {/* Right card - Fixed Solana logo positioning and size */}
+              {/* 🚀 FIXED: Right card with better Solana logo alignment */}
               <div className="bg-zinc-900/60 backdrop-blur-sm rounded-lg p-3 border border-zinc-800/50 shadow-inner">
                 <div 
-                  className="text-xs font-bold text-zinc-500 tracking-wider mb-1.5 flex items-center"
+                  className="text-xs font-bold text-zinc-500 tracking-wider mb-1.5"
                   style={{ display: 'flex', alignItems: 'center' }}
                 >
                   <span>INVESTED</span>
@@ -577,7 +625,7 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
               </button>
               
               {showShareMenu && (
-                <div className="absolute right-0 top-14 bg-zinc-900/96 backdrop-blur-2xl border border-zinc-700/60 rounded-xl shadow-2xl z-20 w-64 overflow-hidden">
+                <div className="absolute right-0 top-14 bg-zinc-900/96 backdrop-blur-2xl border border-zinc-700/60 rounded-xl shadow-2xl z-[10000] w-64 overflow-hidden">
                   <div className="p-1">
                     <button
                       onClick={downloadImage}

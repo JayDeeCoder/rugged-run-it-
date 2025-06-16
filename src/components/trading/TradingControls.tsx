@@ -8,6 +8,7 @@ import { useGameSocket, initializeUser } from '../../hooks/useGameSocket';
 import { usePrivyAutoTransfer } from '../../hooks/usePrivyAutoTransfer';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
+import { PNLButton } from './PNLButton';
 import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 // 🚀 NEW: Import shared state hooks
 import { 
@@ -2368,6 +2369,25 @@ useEffect(() => {
           onRefresh={refreshAllBalances}
         />
 
+ {/* 🚀 ADD P&L SECTION HERE - AFTER BALANCE DISPLAY */}
+ <div className="bg-gradient-to-r from-violet-900/30 to-purple-900/30 border border-violet-800/50 rounded-lg p-3 mb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-violet-400 text-sm font-medium">📊 Performance</div>
+              <div className="text-xs text-gray-400">Share your trading results</div>
+            </div>
+            <PNLButton
+  userId={userId || undefined}  // ✅ Fixed: converts null to undefined
+  UserAPI={UserAPI}
+  variant="auto"
+  size="sm"
+              className="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
+            >
+              Share P&L
+            </PNLButton>
+          </div>
+        </div>
+
         {/* Quick Transfer Section */}
         {currentToken === TokenType.SOL && embeddedWalletBalance > 0.001 && (
           <div className="bg-purple-900 bg-opacity-30 border border-purple-800 rounded-lg p-3 mb-3">
@@ -2434,6 +2454,7 @@ useEffect(() => {
           walletAddress={walletAddress}
           userId={userId}
         />
+        
       </div>
     );
   }
@@ -2448,6 +2469,7 @@ useEffect(() => {
   isConnected={isConnected}
   isMobile={isMobile}
 />
+
 
       <BalanceDisplay
         currentToken={currentToken}
@@ -2464,6 +2486,36 @@ useEffect(() => {
         isLoading={custodialBalanceLoading || embeddedWalletLoading || ruggedBalanceLoading}
         onRefresh={refreshAllBalances}
       />
+      
+       {/* 🚀 ADD P&L SECTION HERE - AFTER BALANCE DISPLAY */}
+       <div className="bg-gradient-to-r from-violet-900/30 to-purple-900/30 border border-violet-800/50 rounded-lg p-4 mb-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-violet-400 text-base font-semibold">📊 Share Performance</div>
+            <div className="text-xs text-gray-400">Generate shareable P&L cards</div>
+          </div>
+          <div className="flex gap-2">
+          <PNLButton
+  userId={userId || undefined}  // ✅ Fixed: converts null to undefined
+  UserAPI={UserAPI}
+  variant="auto"
+  size="sm"
+              className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
+            >
+              💼 Portfolio
+            </PNLButton>
+            <PNLButton
+  userId={userId || undefined}  // ✅ Fixed: converts null to undefined
+  UserAPI={UserAPI}
+  variant="auto"
+  size="sm"
+              className="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
+            >
+              🎯 Last Trade
+            </PNLButton>
+          </div>
+        </div>
+      </div>
 
 <BettingSection
   activeBet={activeBet}

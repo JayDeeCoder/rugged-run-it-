@@ -164,12 +164,23 @@ const PNLModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
   const [isGenerating, setIsGenerating] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // Debug user data
-  console.log('PNL Modal User Data:', {
-    id: data.user?.id,
-    username: data.user?.username,
-    fullUser: data.user
-  });
+  // Generate unique ID for this modal instance to avoid gradient ID conflicts
+  const modalId = useRef(Math.random().toString(36).substr(2, 9)).current;
+
+  // Get username using same logic as UserContext
+  const getDisplayUsername = (user: any) => {
+    if (!user) return 'Anonymous';
+    
+    // Check if user has custom username (not the default generated one)
+    const hasCustomUsername = user.username && user.username !== `user_${user.id?.slice(-8)}`;
+    
+    if (hasCustomUsername) {
+      return user.username;
+    } else {
+      // Return the default format
+      return `user_${user.id?.slice(-8) || 'unknown'}`;
+    }
+  };
 
   const isProfit = (data.profit || 0) > 0;
   const profitDisplay = Math.abs(data.profit || 0).toFixed(3);
@@ -177,31 +188,50 @@ const PNLModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
 
   // Fixed Solana logo component with proper sizing for INVESTED section
   const SolanaLogoSmall = ({ className = "" }) => (
-    <svg width="12" height="12" viewBox="0 0 397.7 311.7" className={className} style={{ flexShrink: 0, marginLeft: '6px' }}>
+    <svg 
+      width="12" 
+      height="12" 
+      viewBox="0 0 397.7 311.7" 
+      className={className} 
+      style={{ 
+        flexShrink: 0, 
+        marginLeft: '6px',
+        display: 'block'
+      }}
+    >
       <defs>
-        <linearGradient id="solanaSmallGradient" x1="360.8" y1="351.4" x2="141.7" y2="132.3" gradientUnits="userSpaceOnUse">
+        <linearGradient id={`solanaSmallGradient_${modalId}`} x1="360.8" y1="351.4" x2="141.7" y2="132.3" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="#00d4ff"/>
           <stop offset="1" stopColor="#a259ff"/>
         </linearGradient>
       </defs>
-      <path d="m64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8h-317.4c-5.8 0-8.7-7-4.6-11.1z" fill="url(#solanaSmallGradient)"/>
-      <path d="m64.6 3.8c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8h-317.4c-5.8 0-8.7-7-4.6-11.1z" fill="url(#solanaSmallGradient)"/>
-      <path d="m333.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8h-317.4c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1z" fill="url(#solanaSmallGradient)"/>
+      <path d="m64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8h-317.4c-5.8 0-8.7-7-4.6-11.1z" fill={`url(#solanaSmallGradient_${modalId})`}/>
+      <path d="m64.6 3.8c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8h-317.4c-5.8 0-8.7-7-4.6-11.1z" fill={`url(#solanaSmallGradient_${modalId})`}/>
+      <path d="m333.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8h-317.4c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1z" fill={`url(#solanaSmallGradient_${modalId})`}/>
     </svg>
   );
 
   // Fixed main Solana logo for profit display with proper alignment
   const SolanaLogoMain = ({ className = "" }) => (
-    <svg width="28" height="28" viewBox="0 0 397.7 311.7" className={className} style={{ flexShrink: 0 }}>
+    <svg 
+      width="28" 
+      height="28" 
+      viewBox="0 0 397.7 311.7" 
+      className={className} 
+      style={{ 
+        flexShrink: 0,
+        display: 'block'
+      }}
+    >
       <defs>
-        <linearGradient id="solanaMainGradient" x1="360.8" y1="351.4" x2="141.7" y2="132.3" gradientUnits="userSpaceOnUse">
+        <linearGradient id={`solanaMainGradient_${modalId}`} x1="360.8" y1="351.4" x2="141.7" y2="132.3" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="#00d4ff"/>
           <stop offset="1" stopColor="#a259ff"/>
         </linearGradient>
       </defs>
-      <path d="m64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8h-317.4c-5.8 0-8.7-7-4.6-11.1z" fill="url(#solanaMainGradient)"/>
-      <path d="m64.6 3.8c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8h-317.4c-5.8 0-8.7-7-4.6-11.1z" fill="url(#solanaMainGradient)"/>
-      <path d="m333.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8h-317.4c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1z" fill="url(#solanaMainGradient)"/>
+      <path d="m64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8h-317.4c-5.8 0-8.7-7-4.6-11.1z" fill={`url(#solanaMainGradient_${modalId})`}/>
+      <path d="m64.6 3.8c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8h-317.4c-5.8 0-8.7-7-4.6-11.1z" fill={`url(#solanaMainGradient_${modalId})`}/>
+      <path d="m333.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8h-317.4c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1z" fill={`url(#solanaMainGradient_${modalId})`}/>
     </svg>
   );
 
@@ -262,7 +292,7 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
     }
   };
 
-  // Download image function
+  // Download image function with improved rendering
   const downloadImage = async () => {
     if (!cardRef.current) return;
     
@@ -276,14 +306,28 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
         closeButton.style.display = 'none';
       }
       
+      // Wait for fonts and images to load
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
       const canvas = await html2canvas(cardRef.current, {
         backgroundColor: '#0a0a0a',
-        scale: 3,
+        scale: 2, // Reduced from 3 for better performance
         width: 400,
         height: 420,
         useCORS: true,
         allowTaint: true,
-        logging: false
+        logging: false,
+        ignoreElements: (element) => {
+          return element.classList?.contains('close-button');
+        },
+        onclone: (clonedDoc) => {
+          // Ensure proper styling in cloned document
+          const clonedCard = clonedDoc.querySelector('[data-pnl-card]') as HTMLElement;
+          if (clonedCard) {
+            clonedCard.style.transform = 'none';
+            clonedCard.style.position = 'relative';
+          }
+        }
       });
       
       // Show the close button again
@@ -292,7 +336,7 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
       }
       
       const link = document.createElement('a');
-      link.download = `irugged-pnl-${data.user?.username || 'user'}-${Date.now()}.png`;
+      link.download = `irugged-pnl-${getDisplayUsername(data.user)}-${Date.now()}.png`;
       link.href = canvas.toDataURL('image/png', 1.0);
       link.click();
       
@@ -341,8 +385,13 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
         {/* The PNL Card */}
         <div 
           ref={cardRef}
+          data-pnl-card
           className="relative bg-gradient-to-br from-zinc-900 via-black to-zinc-950 rounded-2xl overflow-hidden shadow-2xl border border-zinc-800/50"
-          style={{ width: '400px', height: '420px' }}
+          style={{ 
+            width: '400px', 
+            height: '420px',
+            fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+          }}
         >
           {/* Close button - with class for hiding during download */}
           <button
@@ -368,7 +417,7 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
                 <div>
                   {/* Fixed username - ensure actual username is displayed */}
                   <div className="text-sm font-bold text-white tracking-tight">
-                    {data.user?.username || `user_${data.user?.id?.slice(-8)}` || 'Anonymous'}
+                    {getDisplayUsername(data.user)}
                   </div>
                   {/* Fixed level and crown positioning */}
                   <div className="flex items-center space-x-1 text-xs text-zinc-400">
@@ -387,13 +436,29 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
             <div className="text-center space-y-3">
               <div className="space-y-1.5">
                 {/* Fixed Solana logo and profit alignment - perfectly centered */}
-                <div className="flex items-center justify-center" style={{ gap: '8px' }}>
+                <div 
+                  className="flex items-center justify-center" 
+                  style={{ 
+                    gap: '8px',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    display: 'flex'
+                  }}
+                >
                   <SolanaLogoMain className={`${isProfit ? 'opacity-100' : 'opacity-60'}`} />
-                  <div className={`text-4xl font-black tracking-tight ${
-                    isProfit 
-                      ? 'text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.4)]' 
-                      : 'text-red-400 drop-shadow-[0_0_20px_rgba(248,113,113,0.4)]'
-                  }`} style={{ lineHeight: '1', marginTop: '2px' }}>
+                  <div 
+                    className={`text-4xl font-black tracking-tight ${
+                      isProfit 
+                        ? 'text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.4)]' 
+                        : 'text-red-400 drop-shadow-[0_0_20px_rgba(248,113,113,0.4)]'
+                    }`} 
+                    style={{ 
+                      lineHeight: '1', 
+                      marginTop: '0px',
+                      fontSize: '2.25rem',
+                      fontWeight: '900'
+                    }}
+                  >
                     {isProfit ? '+' : '−'}{profitDisplay}
                   </div>
                 </div>
@@ -432,11 +497,17 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
               
               {/* Right card - Fixed Solana logo positioning and size */}
               <div className="bg-zinc-900/60 backdrop-blur-sm rounded-lg p-3 border border-zinc-800/50 shadow-inner">
-                <div className="text-xs font-bold text-zinc-500 tracking-wider mb-1.5 flex items-center">
+                <div 
+                  className="text-xs font-bold text-zinc-500 tracking-wider mb-1.5 flex items-center"
+                  style={{ display: 'flex', alignItems: 'center' }}
+                >
                   <span>INVESTED</span>
                   <SolanaLogoSmall className="opacity-60" />
                 </div>
-                <div className="text-lg font-black text-blue-400">
+                <div 
+                  className="text-lg font-black text-blue-400"
+                  style={{ fontSize: '1.125rem', fontWeight: '900' }}
+                >
                   {data.betAmount ? data.betAmount.toFixed(3) : '0.000'}
                 </div>
               </div>

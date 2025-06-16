@@ -162,14 +162,15 @@ const PNLModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const cardRef = useRef(null);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   const isProfit = data.profit > 0;
   const profitDisplay = Math.abs(data.profit).toFixed(3);
   const roi = data.betAmount > 0 ? ((Math.abs(data.profit) / data.betAmount) * 100).toFixed(1) : '0.0';
 
+  // Fixed Solana logo component with proper sizing for INVESTED section
   const SolanaLogoSmall = ({ className = "" }) => (
-    <svg width="20" height="20" viewBox="0 0 397.7 311.7" className={className}>
+    <svg width="14" height="14" viewBox="0 0 397.7 311.7" className={className} style={{ flexShrink: 0, marginLeft: '4px' }}>
       <defs>
         <linearGradient id="solanaSmallGradient" x1="360.8" y1="351.4" x2="141.7" y2="132.3" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="#00d4ff"/>
@@ -182,8 +183,23 @@ const PNLModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
     </svg>
   );
 
+  // Fixed main Solana logo for profit display with proper alignment
+  const SolanaLogoMain = ({ className = "" }) => (
+    <svg width="28" height="28" viewBox="0 0 397.7 311.7" className={className} style={{ flexShrink: 0 }}>
+      <defs>
+        <linearGradient id="solanaMainGradient" x1="360.8" y1="351.4" x2="141.7" y2="132.3" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stopColor="#00d4ff"/>
+          <stop offset="1" stopColor="#a259ff"/>
+        </linearGradient>
+      </defs>
+      <path d="m64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8h-317.4c-5.8 0-8.7-7-4.6-11.1z" fill="url(#solanaMainGradient)"/>
+      <path d="m64.6 3.8c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8h-317.4c-5.8 0-8.7-7-4.6-11.1z" fill="url(#solanaMainGradient)"/>
+      <path d="m333.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8h-317.4c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1z" fill="url(#solanaMainGradient)"/>
+    </svg>
+  );
+
   const generateShareMessage = () => {
-    const badge = data.user.avatar || '🚀';
+    const badge = '🚀'; // Always use rocket for consistency
     const winRate = data.user.win_rate ? data.user.win_rate.toFixed(1) : 'N/A';
     const streak = data.user.current_win_streak || 0;
     
@@ -238,12 +254,19 @@ LVL ${data.user.level} | Part of the process. Next setup loading 🎯
     }
   };
 
+  // Download image function
   const downloadImage = async () => {
     if (!cardRef.current) return;
     
     setIsGenerating(true);
     try {
       const html2canvas = (await import('html2canvas')).default;
+      
+      // Hide the close button before capturing
+      const closeButton = cardRef.current.querySelector('.close-button') as HTMLElement;
+      if (closeButton) {
+        closeButton.style.display = 'none';
+      }
       
       const canvas = await html2canvas(cardRef.current, {
         backgroundColor: '#0a0a0a',
@@ -255,14 +278,25 @@ LVL ${data.user.level} | Part of the process. Next setup loading 🎯
         logging: false
       });
       
+      // Show the close button again
+      if (closeButton) {
+        closeButton.style.display = 'flex';
+      }
+      
       const link = document.createElement('a');
-      link.download = `irugged-pnl-${data.user.username}-${Date.now()}.png`;
+      link.download = `irugged-pnl-${data.user.username || 'user'}-${Date.now()}.png`;
       link.href = canvas.toDataURL('image/png', 1.0);
       link.click();
       
     } catch (error) {
       console.error('Failed to generate image:', error);
       alert('Failed to generate image. Please try again.');
+      
+      // Make sure close button is visible again
+      const closeButton = cardRef.current?.querySelector('.close-button') as HTMLElement;
+      if (closeButton) {
+        closeButton.style.display = 'flex';
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -296,33 +330,42 @@ LVL ${data.user.level} | Part of the process. Next setup loading 🎯
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="relative max-w-sm w-full">
+        {/* The PNL Card */}
         <div 
           ref={cardRef}
           className="relative bg-gradient-to-br from-zinc-900 via-black to-zinc-950 rounded-2xl overflow-hidden shadow-2xl border border-zinc-800/50"
           style={{ width: '400px', height: '420px' }}
         >
+          {/* Close button - with class for hiding during download */}
           <button
             onClick={onClose}
-            className="absolute top-4 right-4 z-10 w-8 h-8 bg-zinc-800/80 hover:bg-zinc-700/80 rounded-full flex items-center justify-center text-zinc-400 hover:text-white transition-colors backdrop-blur-sm border border-zinc-600/50"
+            className="close-button absolute top-4 right-4 z-10 w-8 h-8 bg-zinc-800/80 hover:bg-zinc-700/80 rounded-full flex items-center justify-center text-zinc-400 hover:text-white transition-colors backdrop-blur-sm border border-zinc-600/50"
           >
             ✕
           </button>
 
+          {/* Glow effects */}
           <div className="absolute inset-0 bg-gradient-to-br from-violet-500/8 via-transparent to-blue-500/8"></div>
           <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent"></div>
           <div className="absolute top-0 left-1/4 right-1/4 h-px bg-gradient-to-r from-transparent via-zinc-600/50 to-transparent"></div>
 
+          {/* Header - Fixed positioning and alignment */}
           <div className="relative px-6 pt-5 pb-3">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center space-x-3">
-                <div className="w-9 h-9 bg-gradient-to-br from-zinc-700 via-zinc-800 to-zinc-900 rounded-lg flex items-center justify-center text-base border border-zinc-600/50 shadow-lg">
-                  {data.user.avatar || '👤'}
+                {/* Fixed avatar positioning - always use rocket emoji, properly centered */}
+                <div className="w-9 h-9 bg-gradient-to-br from-zinc-700 via-zinc-800 to-zinc-900 rounded-lg flex items-center justify-center border border-zinc-600/50 shadow-lg">
+                  <span className="text-lg leading-none" style={{ lineHeight: 1 }}>🚀</span>
                 </div>
                 <div>
-                  <div className="text-sm font-bold text-white tracking-tight">{data.user.username}</div>
-                  <div className="flex items-center space-x-1.5 text-xs text-zinc-400">
-                    <Crown size={9} className="text-amber-400" />
-                    <span className="font-medium">LVL {data.user.level}</span>
+                  {/* Fixed username - ensure actual username is displayed */}
+                  <div className="text-sm font-bold text-white tracking-tight">
+                    {data.user.username || data.user.display_name || 'Anonymous'}
+                  </div>
+                  {/* Fixed level and crown positioning */}
+                  <div className="flex items-center space-x-1 text-xs text-zinc-400">
+                    <Crown size={10} className="text-amber-400" style={{ marginTop: '-1px' }} />
+                    <span className="font-medium">LVL {data.user.level || 1}</span>
                   </div>
                 </div>
               </div>
@@ -332,25 +375,17 @@ LVL ${data.user.level} | Part of the process. Next setup loading 🎯
               </div>
             </div>
 
+            {/* Main P&L display - Fixed profit figure alignment */}
             <div className="text-center space-y-3">
               <div className="space-y-1.5">
+                {/* Fixed Solana logo and profit alignment - perfectly centered */}
                 <div className="flex items-center justify-center space-x-2.5">
-                  <svg width="28" height="28" viewBox="0 0 397.7 311.7" className={`${isProfit ? 'opacity-100' : 'opacity-60'}`}>
-                    <defs>
-                      <linearGradient id="solanaGradient" x1="360.8" y1="351.4" x2="141.7" y2="132.3" gradientUnits="userSpaceOnUse">
-                        <stop offset="0" stopColor="#00d4ff"/>
-                        <stop offset="1" stopColor="#a259ff"/>
-                      </linearGradient>
-                    </defs>
-                    <path d="m64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8h-317.4c-5.8 0-8.7-7-4.6-11.1z" fill="url(#solanaGradient)"/>
-                    <path d="m64.6 3.8c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8h-317.4c-5.8 0-8.7-7-4.6-11.1z" fill="url(#solanaGradient)"/>
-                    <path d="m333.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8h-317.4c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1z" fill="url(#solanaGradient)"/>
-                  </svg>
+                  <SolanaLogoMain className={`${isProfit ? 'opacity-100' : 'opacity-60'}`} />
                   <div className={`text-4xl font-black tracking-tight ${
                     isProfit 
                       ? 'text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.4)]' 
                       : 'text-red-400 drop-shadow-[0_0_20px_rgba(248,113,113,0.4)]'
-                  }`}>
+                  }`} style={{ lineHeight: 1 }}>
                     {isProfit ? '+' : '−'}{profitDisplay}
                   </div>
                 </div>
@@ -374,28 +409,32 @@ LVL ${data.user.level} | Part of the process. Next setup loading 🎯
             </div>
           </div>
 
+          {/* Details - Fixed multiplier display and Solana logo positioning */}
           <div className="px-6 py-3 space-y-3">
             <div className="grid grid-cols-2 gap-3">
+              {/* Left card - Always show MULTIPLIER for both individual trades and portfolio */}
               <div className="bg-zinc-900/60 backdrop-blur-sm rounded-lg p-3 border border-zinc-800/50 shadow-inner">
                 <div className="text-xs font-bold text-zinc-500 tracking-wider mb-1.5">
-                  {data.isPortfolio ? 'WIN RATE' : 'MULTIPLIER'}
+                  MULTIPLIER
                 </div>
                 <div className="text-lg font-black text-violet-400">
-                  {data.isPortfolio 
-                    ? `${data.user.win_rate?.toFixed(1) || '0.0'}%`
-                    : `${data.multiplier || 0}×`
-                  }
+                  {data.multiplier ? `${data.multiplier.toFixed(2)}×` : '1.00×'}
                 </div>
               </div>
+              
+              {/* Right card - Fixed Solana logo positioning and size */}
               <div className="bg-zinc-900/60 backdrop-blur-sm rounded-lg p-3 border border-zinc-800/50 shadow-inner">
                 <div className="text-xs font-bold text-zinc-500 tracking-wider mb-1.5 flex items-center">
-                  INVESTED
-                  <SolanaLogoSmall className="ml-1.5 opacity-60" />
+                  <span>INVESTED</span>
+                  <SolanaLogoSmall className="opacity-60" />
                 </div>
-                <div className="text-lg font-black text-blue-400">{data.betAmount}</div>
+                <div className="text-lg font-black text-blue-400">
+                  {data.betAmount ? data.betAmount.toFixed(3) : '0.000'}
+                </div>
               </div>
             </div>
 
+            {/* Status badge */}
             <div className="flex justify-center pt-1">
               <div className={`inline-flex items-center px-5 py-2.5 rounded-lg font-black text-sm tracking-wide backdrop-blur-sm border-2 ${
                 isProfit 
@@ -431,6 +470,7 @@ LVL ${data.user.level} | Part of the process. Next setup loading 🎯
             </div>
           </div>
 
+          {/* Footer */}
           <div className="absolute bottom-0 left-0 right-0 px-6 py-3 bg-gradient-to-r from-zinc-900/90 to-black/90 backdrop-blur-xl border-t border-zinc-800/50">
             <div className="flex items-center justify-center space-x-2.5">
               <div className="w-1.5 h-1.5 bg-gradient-to-r from-violet-400 to-blue-400 rounded-full animate-pulse"></div>
@@ -442,6 +482,7 @@ LVL ${data.user.level} | Part of the process. Next setup loading 🎯
           </div>
         </div>
 
+        {/* Share Controls - unchanged */}
         <div className="mt-6 bg-gradient-to-br from-zinc-900/90 to-black/90 backdrop-blur-xl rounded-2xl p-6 border border-zinc-800/60 shadow-2xl">
           <div className="flex items-center justify-between mb-5">
             <h3 className="text-white font-black text-lg tracking-tight flex items-center">
@@ -525,6 +566,7 @@ LVL ${data.user.level} | Part of the process. Next setup loading 🎯
             </div>
           </div>
 
+          {/* Message Preview */}
           <div className="bg-black/50 backdrop-blur-sm rounded-xl p-5 border border-zinc-800/40 shadow-inner">
             <div className="text-xs font-black text-zinc-500 tracking-wider mb-3 flex items-center">
               <div className="w-1 h-1 bg-violet-400 rounded-full mr-2"></div>

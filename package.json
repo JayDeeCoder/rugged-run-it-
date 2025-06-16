@@ -36,6 +36,7 @@
     "cors": "^2.8.5",
     "eslint-plugin-react-hooks": "^6.1.0-canary-4a45ba92-20250515",
     "express": "^5.1.0",
+    "html2canvas": "^1.4.1",
     "js-cookie": "^3.0.5",
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^3.2.0",

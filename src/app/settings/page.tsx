@@ -755,7 +755,7 @@ const SettingsPage: FC = () => {
                         Twitter
                       </a>
                       <a 
-                        href="https://telegram.org/" 
+                        href="https://t.me/+rqS5cuN9qKdmZTIx" 
                         target="_blank" 
                         rel="noopener noreferrer"
                         className="px-3 py-1 bg-blue-600/20 hover:bg-blue-600/30 rounded text-sm transition-colors"

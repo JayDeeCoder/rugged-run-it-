@@ -136,7 +136,7 @@ const ChatBox: FC = () => {
                   alt="X"
                 />
               </a>
-              <a href="https://telegram.org/" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300 p-1 hover:bg-gray-700 rounded transition-colors">
+              <a href="https://t.me/+rqS5cuN9qKdmZTIx" target="_blank" rel="noopener noreferrer" className="text-white hover:text-gray-300 p-1 hover:bg-gray-700 rounded transition-colors">
                 <Image
                   src="/images/telegram-plane-svgrepo-com.svg"
                   width={16}

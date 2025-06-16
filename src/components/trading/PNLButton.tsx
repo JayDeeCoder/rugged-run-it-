@@ -1,4 +1,4 @@
-// src/components/trading/PNLButton.tsx - UPDATED VERSION WITH FIXED DOWNLOAD & USERNAME
+// src/components/trading/PNLButton.tsx - COMPLETE FIXED VERSION
 import React, { useState, useCallback, useRef, createContext, useContext } from 'react';
 import { TrendingUp, TrendingDown, Sparkles, Crown, Share2, Copy, Download, X } from 'lucide-react';
 
@@ -7,6 +7,7 @@ interface PNLButtonProps {
   userId?: string;
   userData?: any;
   UserAPI?: any;
+  walletAddress?: string; // 🚀 NEW: Add wallet address for proper user fetching
   variant?: 'portfolio' | 'lastTrade' | 'auto';
   size?: 'sm' | 'md' | 'lg';
   className?: string;
@@ -17,6 +18,7 @@ export const PNLButton: React.FC<PNLButtonProps> = ({
   userId, 
   userData, 
   UserAPI,
+  walletAddress, // 🚀 NEW: Add wallet address
   variant = 'auto',
   size = 'md',
   className = "",
@@ -33,8 +35,9 @@ export const PNLButton: React.FC<PNLButtonProps> = ({
   };
 
   const handlePNLClick = async () => {
-    if (!userData && !userId) {
-      console.warn('PNL Button: No user data or ID provided');
+    // 🚀 FIXED: Better validation
+    if (!userData && !userId && !walletAddress) {
+      console.warn('PNL Button: No user data, userId, or wallet address provided');
       return;
     }
 
@@ -43,15 +46,47 @@ export const PNLButton: React.FC<PNLButtonProps> = ({
     try {
       let finalUserData = userData;
       
-      // Get user data if not provided
-      if (!finalUserData && userId && UserAPI) {
-        finalUserData = await UserAPI.getUserOrCreate(userId);
+      // 🚀 FIXED: Proper user data fetching using wallet address
+      if (!finalUserData && UserAPI) {
+        if (walletAddress) {
+          console.log('🔍 PNL Button: Fetching user data by wallet address:', walletAddress);
+          finalUserData = await UserAPI.getUserOrCreate(walletAddress);
+        } else if (userId) {
+          console.log('🔍 PNL Button: Using provided userId:', userId);
+          // Try to get user data directly from database if we only have userId
+          try {
+            // 🚀 FIXED: Use proper supabase client access
+            const { createClient } = await import('@supabase/supabase-js');
+            const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ineaxxqjkryoobobxrsw.supabase.co';
+            const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImluZWF4eHFqa3J5b29ib2J4cnN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc3NzMxMzIsImV4cCI6MjA2MzM0OTEzMn0.DiFLCCe5-UnzsGpG7dsqJWoUbxmaJxc_v89pxxsa1aA';
+            const supabase = createClient(supabaseUrl, supabaseKey);
+            
+            const { data: user, error } = await supabase
+              .from('users_unified')
+              .select('*')
+              .eq('id', userId)
+              .single();
+            
+            if (!error && user) {
+              finalUserData = user;
+              console.log('✅ PNL Button: Got user data from database:', user.username);
+            }
+          } catch (dbError) {
+            console.warn('🔍 PNL Button: Failed to fetch user by userId:', dbError);
+          }
+        }
       }
       
       if (!finalUserData) {
-        console.error('PNL Button: Could not get user data');
+        console.error('PNL Button: Could not get user data with any method');
         return;
       }
+
+      console.log('✅ PNL Button: Got user data:', {
+        id: finalUserData.id,
+        username: finalUserData.username,
+        wallet: finalUserData.wallet_address || finalUserData.external_wallet_address
+      });
 
       // Determine what type of PNL to show
       let displayData = null;
@@ -66,29 +101,13 @@ export const PNLButton: React.FC<PNLButtonProps> = ({
           user: finalUserData
         };
       } else if (variant === 'lastTrade') {
-        if (UserAPI) {
+        if (UserAPI && finalUserData.id) {
+          console.log('📊 PNL Button: Fetching bet history for user:', finalUserData.id);
           const betHistory = await UserAPI.getUserBetHistory(finalUserData.id, 1);
           const lastTrade = betHistory?.[0];
           
           if (lastTrade) {
-            displayData = {
-              profit: lastTrade.profit_loss || 0,
-              betAmount: lastTrade.bet_amount,
-              multiplier: lastTrade.cashout_multiplier || 0,
-              isWin: (lastTrade.profit_loss || 0) > 0,
-              timestamp: new Date(lastTrade.created_at),
-              isPortfolio: false,
-              user: finalUserData,
-              gameId: lastTrade.game_id
-            };
-          }
-        }
-      } else {
-        if (UserAPI) {
-          const betHistory = await UserAPI.getUserBetHistory(finalUserData.id, 1);
-          const lastTrade = betHistory?.[0];
-          
-          if (lastTrade) {
+            console.log('📊 PNL Button: Found last trade:', lastTrade);
             displayData = {
               profit: lastTrade.profit_loss || 0,
               betAmount: lastTrade.bet_amount,
@@ -100,6 +119,39 @@ export const PNLButton: React.FC<PNLButtonProps> = ({
               gameId: lastTrade.game_id
             };
           } else {
+            console.log('📊 PNL Button: No trades found, showing portfolio instead');
+            // Fallback to portfolio view
+            displayData = {
+              profit: finalUserData.net_profit || 0,
+              betAmount: finalUserData.total_wagered || 0,
+              isWin: (finalUserData.net_profit || 0) > 0,
+              timestamp: new Date(),
+              isPortfolio: true,
+              user: finalUserData
+            };
+          }
+        }
+      } else {
+        // Auto mode - try last trade first, fallback to portfolio
+        if (UserAPI && finalUserData.id) {
+          console.log('📊 PNL Button: Auto mode - checking for recent trades');
+          const betHistory = await UserAPI.getUserBetHistory(finalUserData.id, 1);
+          const lastTrade = betHistory?.[0];
+          
+          if (lastTrade) {
+            console.log('📊 PNL Button: Using last trade data');
+            displayData = {
+              profit: lastTrade.profit_loss || 0,
+              betAmount: lastTrade.bet_amount,
+              multiplier: lastTrade.cashout_multiplier || 0,
+              isWin: (lastTrade.profit_loss || 0) > 0,
+              timestamp: new Date(lastTrade.created_at),
+              isPortfolio: false,
+              user: finalUserData,
+              gameId: lastTrade.game_id
+            };
+          } else {
+            console.log('📊 PNL Button: No trades found, using portfolio data');
             displayData = {
               profit: finalUserData.net_profit || 0,
               betAmount: finalUserData.total_wagered || 0,
@@ -112,6 +164,7 @@ export const PNLButton: React.FC<PNLButtonProps> = ({
         }
       }
 
+      console.log('📊 PNL Button: Final display data:', displayData);
       setPnlData(displayData);
       setShowPNLModal(true);
       
@@ -303,28 +356,69 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
     try {
       const html2canvas = (await import('html2canvas')).default;
       
-      // 🚀 FIXED: Better preparation for html2canvas
+      // 🚀 FIXED: Create a temporary clone for rendering
       const originalCard = cardRef.current;
-      const closeButton = originalCard.querySelector('.close-button') as HTMLElement;
+      const tempContainer = document.createElement('div');
+      tempContainer.style.position = 'fixed';
+      tempContainer.style.top = '-9999px';
+      tempContainer.style.left = '-9999px';
+      tempContainer.style.width = '400px';
+      tempContainer.style.height = '420px';
+      tempContainer.style.backgroundColor = '#0a0a0a';
+      tempContainer.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
       
-      // Hide close button before capture
+      // Clone the card content
+      const cardClone = originalCard.cloneNode(true) as HTMLElement;
+      
+      // Remove close button from clone
+      const closeButton = cardClone.querySelector('.close-button');
       if (closeButton) {
-        closeButton.style.display = 'none';
+        closeButton.remove();
       }
       
-      // 🚀 FIXED: Apply download-specific styles
-      originalCard.style.position = 'relative';
-      originalCard.style.transform = 'none';
-      originalCard.style.width = '400px';
-      originalCard.style.height = '420px';
+      // 🚀 FIXED: Apply explicit styles to clone for perfect alignment
+      cardClone.style.position = 'relative';
+      cardClone.style.width = '400px';
+      cardClone.style.height = '420px';
+      cardClone.style.transform = 'none';
+      cardClone.style.margin = '0';
+      cardClone.style.padding = '0';
       
-      // 🚀 FIXED: Force layout recalculation
-      originalCard.offsetHeight; // Force reflow
+      // Fix profit container alignment specifically
+      const profitContainer = cardClone.querySelector('[data-profit-container]') as HTMLElement;
+      if (profitContainer) {
+        profitContainer.style.display = 'flex';
+        profitContainer.style.alignItems = 'center';
+        profitContainer.style.justifyContent = 'center';
+        profitContainer.style.gap = '8px';
+        profitContainer.style.textAlign = 'center';
+      }
       
-      await new Promise(resolve => setTimeout(resolve, 300)); // Wait for layout
+      // Fix all SVG logos
+      const svgs = cardClone.querySelectorAll('svg');
+      svgs.forEach(svg => {
+        svg.style.display = 'inline-block';
+        svg.style.verticalAlign = 'middle';
+      });
       
-      // 🚀 IMPROVED: Better html2canvas options for alignment
-      const canvas = await html2canvas(originalCard, {
+      // Fix text elements alignment
+      const textElements = cardClone.querySelectorAll('div, span');
+      textElements.forEach(el => {
+        const element = el as HTMLElement;
+        if (element.style.textAlign === 'center' || element.className.includes('text-center')) {
+          element.style.textAlign = 'center';
+          element.style.display = 'block';
+        }
+      });
+      
+      tempContainer.appendChild(cardClone);
+      document.body.appendChild(tempContainer);
+      
+      // Wait for layout
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // 🚀 IMPROVED: Better canvas options
+      const canvas = await html2canvas(tempContainer, {
         backgroundColor: '#0a0a0a',
         scale: 2,
         width: 400,
@@ -333,50 +427,12 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
         allowTaint: false,
         logging: false,
         foreignObjectRendering: false,
-        ignoreElements: (element) => {
-          return element.classList?.contains('close-button');
-        },
-        onclone: (clonedDoc, element) => {
-          // 🚀 FIXED: Apply explicit styles in cloned document
-          const clonedCard = element;
-          clonedCard.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-          clonedCard.style.position = 'relative';
-          clonedCard.style.transform = 'none';
-          clonedCard.style.width = '400px';
-          clonedCard.style.height = '420px';
-          clonedCard.style.margin = '0';
-          clonedCard.style.padding = '0';
-          
-          // 🚀 FIXED: Fix all text and logo alignments in clone
-          const profitContainer = clonedCard.querySelector('[data-profit-container]') as HTMLElement;
-          if (profitContainer) {
-            profitContainer.style.display = 'flex';
-            profitContainer.style.alignItems = 'center';
-            profitContainer.style.justifyContent = 'center';
-            profitContainer.style.gap = '8px';
-          }
-          
-          // Fix Solana logos alignment
-          const logos = clonedCard.querySelectorAll('svg');
-          logos.forEach((logo) => {
-            logo.style.display = 'inline-block';
-            logo.style.verticalAlign = 'middle';
-          });
-          
-          // Fix text alignment
-          const textElements = clonedCard.querySelectorAll('div');
-          textElements.forEach((el) => {
-            if (el.style.textAlign === 'center') {
-              el.style.textAlign = 'center';
-            }
-          });
-        }
+        imageTimeout: 15000,
+        removeContainer: true
       });
       
-      // Restore original styles
-      if (closeButton) {
-        closeButton.style.display = 'flex';
-      }
+      // Clean up
+      document.body.removeChild(tempContainer);
       
       // Download the image
       const link = document.createElement('a');
@@ -387,12 +443,6 @@ LVL ${userLevel} | Part of the process. Next setup loading 🎯
     } catch (error) {
       console.error('Failed to generate image:', error);
       alert('Failed to generate image. Please try again.');
-      
-      // Make sure close button is visible again
-      const closeButton = cardRef.current?.querySelector('.close-button') as HTMLElement;
-      if (closeButton) {
-        closeButton.style.display = 'flex';
-      }
     } finally {
       setIsGenerating(false);
     }
@@ -760,7 +810,7 @@ export const GlobalPNLModal: React.FC = () => {
 };
 
 // Working integration hook
-export const usePNLIntegration = (userId?: string, userData?: any, UserAPI?: any) => {
+export const usePNLIntegration = (userId?: string, userData?: any, UserAPI?: any, walletAddress?: string) => {
   const { triggerPNL } = useContext(PNLContext) || {};
 
   const showLastTradePNL = useCallback(async (tradeData: {
@@ -774,8 +824,41 @@ export const usePNLIntegration = (userId?: string, userData?: any, UserAPI?: any
     
     try {
       let finalUserData = userData;
-      if (!finalUserData && userId && UserAPI) {
-        finalUserData = await UserAPI.getUserOrCreate(userId);
+      
+      // 🚀 FIXED: Proper user data fetching
+      if (!finalUserData && UserAPI) {
+        if (walletAddress) {
+          console.log('🔍 PNL Integration: Fetching user by wallet address:', walletAddress);
+          finalUserData = await UserAPI.getUserOrCreate(walletAddress);
+        } else if (userId) {
+          console.log('🔍 PNL Integration: Fetching user by userId:', userId);
+          // Try to get user data from database if we only have userId
+          try {
+            // 🚀 FIXED: Use proper supabase client access
+            const { createClient } = await import('@supabase/supabase-js');
+            const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ineaxxqjkryoobobxrsw.supabase.co';
+            const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImluZWF4eHFqa3J5b29ib2J4cnN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc3NzMxMzIsImV4cCI6MjA2MzM0OTEzMn0.DiFLCCe5-UnzsGpG7dsqJWoUbxmaJxc_v89pxxsa1aA';
+            const supabase = createClient(supabaseUrl, supabaseKey);
+            
+            const { data: user, error } = await supabase
+              .from('users_unified')
+              .select('*')
+              .eq('id', userId)
+              .single();
+            
+            if (!error && user) {
+              finalUserData = user;
+              console.log('✅ PNL Integration: Got user data from database:', user.username);
+            }
+          } catch (dbError) {
+            console.warn('🔍 PNL Integration: Failed to fetch user by userId:', dbError);
+          }
+        }
+      }
+      
+      if (!finalUserData) {
+        console.error('PNL Integration: Could not get user data');
+        return;
       }
       
       const displayData = {
@@ -789,11 +872,12 @@ export const usePNLIntegration = (userId?: string, userData?: any, UserAPI?: any
         gameId: tradeData.gameId
       };
 
+      console.log('📊 PNL Integration: Triggering PNL with data:', displayData);
       triggerPNL(displayData);
     } catch (error) {
-      console.error('PNL Error:', error);
+      console.error('PNL Integration Error:', error);
     }
-  }, [userId, userData, UserAPI, triggerPNL]);
+  }, [userId, userData, UserAPI, walletAddress, triggerPNL]);
 
   return { showLastTradePNL };
 };

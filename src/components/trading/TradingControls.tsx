@@ -2377,7 +2377,8 @@ useEffect(() => {
               <div className="text-xs text-gray-400">Share your trading results</div>
             </div>
             <PNLButton
-  userId={userId || undefined}  // ✅ Fixed: converts null to undefined
+  userId={userId || undefined}
+  walletAddress={walletAddress || undefined}  // 🚀 ADD THIS
   UserAPI={UserAPI}
   variant="auto"
   size="sm"
@@ -2496,7 +2497,8 @@ useEffect(() => {
           </div>
           <div className="flex gap-2">
           <PNLButton
-  userId={userId || undefined}  // ✅ Fixed: converts null to undefined
+  userId={userId || undefined}
+  walletAddress={walletAddress || undefined}  // 🚀 ADD THIS
   UserAPI={UserAPI}
   variant="auto"
   size="sm"
@@ -2505,7 +2507,8 @@ useEffect(() => {
               💼 Portfolio
             </PNLButton>
             <PNLButton
-  userId={userId || undefined}  // ✅ Fixed: converts null to undefined
+  userId={userId || undefined}
+  walletAddress={walletAddress || undefined}  // 🚀 ADD THIS
   UserAPI={UserAPI}
   variant="auto"
   size="sm"

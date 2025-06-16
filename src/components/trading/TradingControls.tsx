@@ -2500,7 +2500,7 @@ useEffect(() => {
   userId={userId || undefined}
   walletAddress={walletAddress || undefined}  // 🚀 ADD THIS
   UserAPI={UserAPI}
-  variant="auto"
+  variant="portfolio"
   size="sm"
               className="bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
             >
@@ -2510,7 +2510,7 @@ useEffect(() => {
   userId={userId || undefined}
   walletAddress={walletAddress || undefined}  // 🚀 ADD THIS
   UserAPI={UserAPI}
-  variant="auto"
+  variant="lastTrade"
   size="sm"
               className="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
             >

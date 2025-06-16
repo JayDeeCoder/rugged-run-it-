@@ -164,13 +164,20 @@ const PNLModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
   const [isGenerating, setIsGenerating] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  const isProfit = data.profit > 0;
-  const profitDisplay = Math.abs(data.profit).toFixed(3);
-  const roi = data.betAmount > 0 ? ((Math.abs(data.profit) / data.betAmount) * 100).toFixed(1) : '0.0';
+  // Debug user data
+  console.log('PNL Modal User Data:', {
+    id: data.user?.id,
+    username: data.user?.username,
+    fullUser: data.user
+  });
+
+  const isProfit = (data.profit || 0) > 0;
+  const profitDisplay = Math.abs(data.profit || 0).toFixed(3);
+  const roi = (data.betAmount || 0) > 0 ? ((Math.abs(data.profit || 0) / data.betAmount) * 100).toFixed(1) : '0.0';
 
   // Fixed Solana logo component with proper sizing for INVESTED section
   const SolanaLogoSmall = ({ className = "" }) => (
-    <svg width="14" height="14" viewBox="0 0 397.7 311.7" className={className} style={{ flexShrink: 0, marginLeft: '4px' }}>
+    <svg width="12" height="12" viewBox="0 0 397.7 311.7" className={className} style={{ flexShrink: 0, marginLeft: '6px' }}>
       <defs>
         <linearGradient id="solanaSmallGradient" x1="360.8" y1="351.4" x2="141.7" y2="132.3" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="#00d4ff"/>
@@ -200,17 +207,18 @@ const PNLModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose 
 
   const generateShareMessage = () => {
     const badge = '🚀'; // Always use rocket for consistency
-    const winRate = data.user.win_rate ? data.user.win_rate.toFixed(1) : 'N/A';
-    const streak = data.user.current_win_streak || 0;
+    const winRate = data.user?.win_rate ? data.user.win_rate.toFixed(1) : 'N/A';
+    const streak = data.user?.current_win_streak || 0;
+    const userLevel = data.user?.level || 1;
     
     if (data.isPortfolio) {
       if (isProfit) {
         return `${badge} PORTFOLIO UPDATE: +${profitDisplay} SOL
 
 📈 Total Profit: +${profitDisplay} SOL
-💰 Total Invested: ${data.betAmount.toFixed(2)} SOL
+💰 Total Invested: ${(data.betAmount || 0).toFixed(2)} SOL
 📊 Win Rate: ${winRate}%${streak > 0 ? ` | ${streak} streak` : ''}
-🎯 Level ${data.user.level} grinding on @ruggeddotfun
+🎯 Level ${userLevel} grinding on @ruggeddotfun
 
 Building alpha stack 📈
 
@@ -218,10 +226,10 @@ Building alpha stack 📈
       } else {
         return `📊 PORTFOLIO REPORT: ${data.profit.toFixed(3)} SOL
 
-📉 Total P&L: ${data.profit.toFixed(3)} SOL 
-💰 Total Invested: ${data.betAmount.toFixed(2)} SOL
+📉 Total P&L: ${(data.profit || 0).toFixed(3)} SOL 
+💰 Total Invested: ${(data.betAmount || 0).toFixed(2)} SOL
 📊 Win Rate: ${winRate}%
-🎯 Level ${data.user.level} | Learning the game
+🎯 Level ${userLevel} | Learning the game
 
 Still early. Building position 🎯
 
@@ -233,10 +241,10 @@ Still early. Building position 🎯
 
 📈 ${data.multiplier}x cashout on @ruggeddotfun
 💰 P&L: +${roi}% ROI
-🎯 Capital: ${data.betAmount} SOL
+🎯 Capital: ${data.betAmount || 0} SOL
 📊 Win Rate: ${winRate}%${streak > 0 ? ` | ${streak} streak` : ''}
 
-LVL ${data.user.level} execution 📊
+LVL ${userLevel} execution 📊
 
 #RUGGED #TradingAlpha #Solana`;
       } else {
@@ -244,10 +252,10 @@ LVL ${data.user.level} execution 📊
 
 ⚔️ Stopped out at ${data.multiplier || 0}x on @ruggeddotfun
 📉 Drawdown: -${roi}%
-🎯 Risk capital: ${data.betAmount} SOL
+🎯 Risk capital: ${data.betAmount || 0} SOL
 📊 Win Rate: ${winRate}%
 
-LVL ${data.user.level} | Part of the process. Next setup loading 🎯
+LVL ${userLevel} | Part of the process. Next setup loading 🎯
 
 #RUGGED #RiskManagement #Solana`;
       }
@@ -284,7 +292,7 @@ LVL ${data.user.level} | Part of the process. Next setup loading 🎯
       }
       
       const link = document.createElement('a');
-      link.download = `irugged-pnl-${data.user.username || 'user'}-${Date.now()}.png`;
+      link.download = `irugged-pnl-${data.user?.username || 'user'}-${Date.now()}.png`;
       link.href = canvas.toDataURL('image/png', 1.0);
       link.click();
       
@@ -360,12 +368,12 @@ LVL ${data.user.level} | Part of the process. Next setup loading 🎯
                 <div>
                   {/* Fixed username - ensure actual username is displayed */}
                   <div className="text-sm font-bold text-white tracking-tight">
-                    {data.user.username || data.user.display_name || 'Anonymous'}
+                    {data.user?.username || `user_${data.user?.id?.slice(-8)}` || 'Anonymous'}
                   </div>
                   {/* Fixed level and crown positioning */}
                   <div className="flex items-center space-x-1 text-xs text-zinc-400">
-                    <Crown size={10} className="text-amber-400" style={{ marginTop: '-1px' }} />
-                    <span className="font-medium">LVL {data.user.level || 1}</span>
+                    <Crown size={10} className="text-amber-400" style={{ marginTop: '0px' }} />
+                    <span className="font-medium">LVL {data.user?.level || 1}</span>
                   </div>
                 </div>
               </div>
@@ -379,13 +387,13 @@ LVL ${data.user.level} | Part of the process. Next setup loading 🎯
             <div className="text-center space-y-3">
               <div className="space-y-1.5">
                 {/* Fixed Solana logo and profit alignment - perfectly centered */}
-                <div className="flex items-center justify-center space-x-2.5">
+                <div className="flex items-center justify-center" style={{ gap: '8px' }}>
                   <SolanaLogoMain className={`${isProfit ? 'opacity-100' : 'opacity-60'}`} />
                   <div className={`text-4xl font-black tracking-tight ${
                     isProfit 
                       ? 'text-emerald-400 drop-shadow-[0_0_20px_rgba(52,211,153,0.4)]' 
                       : 'text-red-400 drop-shadow-[0_0_20px_rgba(248,113,113,0.4)]'
-                  }`} style={{ lineHeight: 1 }}>
+                  }`} style={{ lineHeight: '1', marginTop: '2px' }}>
                     {isProfit ? '+' : '−'}{profitDisplay}
                   </div>
                 </div>
@@ -452,7 +460,7 @@ LVL ${data.user.level} | Part of the process. Next setup loading 🎯
                       <>
                         <Sparkles size={14} className="mr-2" />
                         ALPHA
-                        {data.user.current_win_streak && data.user.current_win_streak > 1 && (
+                        {data.user?.current_win_streak && data.user.current_win_streak > 1 && (
                           <span className="ml-2 text-xs opacity-80">
                             {data.user.current_win_streak}🔥
                           </span>

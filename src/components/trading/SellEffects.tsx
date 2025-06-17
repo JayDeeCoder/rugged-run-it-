@@ -1,4 +1,4 @@
-import { FC, useEffect, useState } from 'react';
+import { FC, useEffect, useState, useCallback, useRef } from 'react';
 
 interface SellEffectsProps {
   isWin: boolean | null;
@@ -7,7 +7,6 @@ interface SellEffectsProps {
   multiplier?: number;
 }
 
-// Define particle type
 interface Particle {
   id: number;
   x: number;
@@ -18,22 +17,67 @@ interface Particle {
   rotation: number;
   rotationSpeed: number;
   shape: string;
+  opacity: number;
 }
 
 const SellEffects: FC<SellEffectsProps> = ({ isWin, show, onAnimationComplete, multiplier = 0 }) => {
   const [particles, setParticles] = useState<Particle[]>([]);
+  const animationRef = useRef<number | null>(null);
+  const frameCountRef = useRef<number>(0);
+  const isAnimatingRef = useRef<boolean>(false);
+  const hasCompletedRef = useRef<boolean>(false);
   
   // Enhanced visual effects based on multiplier
-  const getMultiplierTier = (multiplier: number) => {
+  const getMultiplierTier = useCallback((multiplier: number) => {
     if (multiplier >= 20) return 'mega';
     if (multiplier >= 10) return 'super';
     if (multiplier >= 5) return 'high';
     if (multiplier >= 2) return 'medium';
     return 'low';
-  };
+  }, []);
+  
+  // Cleanup function to stop animation and clear state
+  const cleanup = useCallback(() => {
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+    isAnimatingRef.current = false;
+    frameCountRef.current = 0;
+    setParticles([]);
+  }, []);
+
+  // Complete animation and trigger callback
+  const completeAnimation = useCallback(() => {
+    if (hasCompletedRef.current) return; // Prevent multiple completions
+    
+    hasCompletedRef.current = true;
+    cleanup();
+    
+    // Small delay to ensure cleanup is complete
+    setTimeout(() => {
+      onAnimationComplete();
+      hasCompletedRef.current = false; // Reset for next animation
+    }, 50);
+  }, [cleanup, onAnimationComplete]);
   
   useEffect(() => {
-    if (!show) return;
+    // Reset completion flag when show changes
+    if (show) {
+      hasCompletedRef.current = false;
+    }
+    
+    // Don't start if already animating or if not showing
+    if (!show || isAnimatingRef.current) {
+      if (!show) {
+        cleanup(); // Clean up if hiding
+      }
+      return;
+    }
+    
+    // Mark as animating
+    isAnimatingRef.current = true;
+    frameCountRef.current = 0;
     
     // Create particles
     const newParticles: Particle[] = [];
@@ -81,7 +125,6 @@ const SellEffects: FC<SellEffectsProps> = ({ isWin, show, onAnimationComplete, m
         y: (Math.random() - 0.5) * velocityFactor - (isWin ? velocityFactor / 2 : 2)
       };
       
-      // Randomly select shape
       const shape = shapes[Math.floor(Math.random() * shapes.length)];
       
       newParticles.push({
@@ -93,31 +136,32 @@ const SellEffects: FC<SellEffectsProps> = ({ isWin, show, onAnimationComplete, m
         velocity,
         rotation: Math.random() * 360,
         rotationSpeed: (Math.random() - 0.5) * 15,
-        shape
+        shape,
+        opacity: isWin ? 0.9 : 0.7
       });
     }
     
     setParticles(newParticles);
     
     // Animation frames
-    let animationId: number;
-    let frameCount = 0;
-    // Longer animation for higher multipliers
     const maxFrames = isWin && tier === 'mega' ? 180 : isWin && tier === 'super' ? 150 : 120;
     
     const animate = () => {
-      if (frameCount >= maxFrames) {
-        cancelAnimationFrame(animationId);
-        onAnimationComplete();
+      // Check if we should stop animating
+      if (!isAnimatingRef.current || frameCountRef.current >= maxFrames) {
+        completeAnimation();
         return;
       }
       
-      frameCount++;
+      frameCountRef.current++;
       
-      setParticles(prevParticles => 
-        prevParticles.map(particle => {
+      setParticles(prevParticles => {
+        if (!isAnimatingRef.current) return []; // Stop updating if not animating
+        
+        return prevParticles.map(particle => {
           // Apply gravity for win effect (particles fall down)
           const gravity = isWin ? 0.2 : 0.3;
+          const fadeRate = 1 / maxFrames; // Gradual fade out
           
           return {
             ...particle,
@@ -127,21 +171,31 @@ const SellEffects: FC<SellEffectsProps> = ({ isWin, show, onAnimationComplete, m
               x: particle.velocity.x * 0.98, // Friction
               y: particle.velocity.y + gravity
             },
-            rotation: particle.rotation + particle.rotationSpeed
+            rotation: particle.rotation + particle.rotationSpeed,
+            opacity: Math.max(0, particle.opacity - fadeRate) // Fade out over time
           };
-        })
-      );
+        }).filter(particle => 
+          // Remove particles that are too far off screen or completely faded
+          particle.x > -20 && particle.x < 120 && 
+          particle.y > -20 && particle.y < 120 && 
+          particle.opacity > 0.01
+        );
+      });
       
-      animationId = requestAnimationFrame(animate);
+      animationRef.current = requestAnimationFrame(animate);
     };
     
-    animationId = requestAnimationFrame(animate);
+    // Start animation
+    animationRef.current = requestAnimationFrame(animate);
     
-    return () => {
-      cancelAnimationFrame(animationId);
-      setParticles([]);
-    };
-  }, [show, isWin, multiplier, onAnimationComplete]);
+    // Cleanup function for effect
+    return cleanup;
+  }, [show, isWin, multiplier, getMultiplierTier, cleanup, completeAnimation]);
+  
+  // Cleanup on unmount
+  useEffect(() => {
+    return cleanup;
+  }, [cleanup]);
   
   if (!show) return null;
   
@@ -154,8 +208,9 @@ const SellEffects: FC<SellEffectsProps> = ({ isWin, show, onAnimationComplete, m
       height: `${particle.size}px`,
       backgroundColor: particle.color,
       transform: `rotate(${particle.rotation}deg) translate(-50%, -50%)`,
-      opacity: isWin ? 0.9 : 0.7,
-      position: 'absolute' as const
+      opacity: particle.opacity,
+      position: 'absolute' as const,
+      pointerEvents: 'none' as const
     };
 
     switch (particle.shape) {
@@ -206,7 +261,6 @@ const SellEffects: FC<SellEffectsProps> = ({ isWin, show, onAnimationComplete, m
           />
         );
       case 'star':
-        // Use a div with a radial gradient for star effect
         return (
           <div
             key={particle.id}
@@ -220,7 +274,6 @@ const SellEffects: FC<SellEffectsProps> = ({ isWin, show, onAnimationComplete, m
           />
         );
       case 'x':
-        // Use two rotated rectangles to create an X
         return (
           <div key={particle.id} className="absolute" style={{ ...style, backgroundColor: 'transparent' }}>
             <div style={{ 
@@ -230,7 +283,8 @@ const SellEffects: FC<SellEffectsProps> = ({ isWin, show, onAnimationComplete, m
               backgroundColor: particle.color,
               top: '50%',
               left: '50%',
-              transform: 'translate(-50%, -50%) rotate(45deg)'
+              transform: 'translate(-50%, -50%) rotate(45deg)',
+              opacity: particle.opacity
             }} />
             <div style={{ 
               position: 'absolute',
@@ -239,7 +293,8 @@ const SellEffects: FC<SellEffectsProps> = ({ isWin, show, onAnimationComplete, m
               backgroundColor: particle.color,
               top: '50%',
               left: '50%',
-              transform: 'translate(-50%, -50%) rotate(-45deg)'
+              transform: 'translate(-50%, -50%) rotate(-45deg)',
+              opacity: particle.opacity
             }} />
           </div>
         );
@@ -296,7 +351,8 @@ const SellEffects: FC<SellEffectsProps> = ({ isWin, show, onAnimationComplete, m
               ? '0 0 20px rgba(255, 215, 0, 0.8), 0 0 40px rgba(255, 215, 0, 0.4)' 
               : '0 0 10px rgba(255, 215, 0, 0.8)', 
             animation: multiplier >= 10 ? 'mega-scale-up 0.7s ease-out' : 'scale-up 0.5s ease-out',
-            fontSize: multiplier >= 20 ? '6rem' : multiplier >= 10 ? '5rem' : '4rem'
+            fontSize: multiplier >= 20 ? '6rem' : multiplier >= 10 ? '5rem' : '4rem',
+            pointerEvents: 'none'
           }}
         >
           {getWinMessage(multiplier)}
@@ -316,7 +372,8 @@ const SellEffects: FC<SellEffectsProps> = ({ isWin, show, onAnimationComplete, m
           className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-6xl font-dynapuff font-bold text-red-600"
           style={{ 
             textShadow: '0 0 10px rgba(255, 0, 0, 0.8), 0 0 20px rgba(255, 0, 0, 0.4)',
-            animation: 'shake 0.5s ease-in-out'
+            animation: 'shake 0.5s ease-in-out',
+            pointerEvents: 'none'
           }}
         >
           {getLossMessage()}

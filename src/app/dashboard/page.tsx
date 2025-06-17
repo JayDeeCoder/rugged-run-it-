@@ -13,6 +13,7 @@ import { Wallet, TrendingUp, GamepadIcon, RefreshCw, Star, Crown, Medal, Trophy,
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import ReferralSection from '../../components/ReferralSection';
+import TransactionHistory from '../../components/trading/TransactionHistory';
 
 // 🚀 FIX: Hardcoded Supabase config with environment variable fallback
 const FALLBACK_SUPABASE_URL = 'https://ineaxxqjkryoobobxrsw.supabase.co';
@@ -1728,96 +1729,24 @@ const Dashboard: FC = () => {
                   </div>
                 </div>
                 
-                {/* 🚀 NEW: Enhanced Recent Activity with Trade History */}
-                <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 sm:p-6">
-                  <h3 className="text-base sm:text-lg font-bold text-white mb-3 sm:mb-4 flex items-center">
-                    <Award size={16} className="mr-2" />
-                    Recent Activity
-                    {isLoadingActivity && (
-                      <div className="ml-2 animate-spin h-3 w-3 border border-blue-400 border-t-transparent rounded-full"></div>
-                    )}
-                  </h3>
-                  
-                  {isLoadingActivity ? (
-                    <div className="space-y-2">
-                      {[1, 2, 3].map((i) => (
-                        <div key={i} className="animate-pulse flex items-center space-x-3 p-2">
-                          <div className="h-3 w-3 bg-gray-700 rounded-full"></div>
-                          <div className="flex-1 space-y-1">
-                            <div className="h-3 bg-gray-700 rounded w-3/4"></div>
-                            <div className="h-2 bg-gray-700 rounded w-1/2"></div>
-                          </div>
-                          <div className="h-3 w-12 bg-gray-700 rounded"></div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : recentActivity.length > 0 ? (
-                    <div className="space-y-3">
-                      {recentActivity.slice(0, 5).map((trade: any, index: number) => (
-                        <div 
-                          key={trade.id || index}
-                          className={`flex items-center justify-between p-3 rounded-lg border ${
-                            trade.was_winner
-                              ? 'border-green-600/30 bg-green-600/10'
-                              : 'border-red-600/30 bg-red-600/10'
-                          }`}
-                        >
-                          <div className="flex items-center space-x-3">
-                            {trade.was_winner ? (
-                              <TrendingUp className="text-green-400" size={16} />
-                            ) : (
-                              <TrendingDown className="text-red-400" size={16} />
-                            )}
-                            <div>
-                              <div className="text-white text-sm font-medium flex items-center">
-                                {trade.bet_amount.toFixed(3)}
-                                <SolanaLogo size={12} className="ml-1" />
-                                {trade.cashout_multiplier && (
-                                  <span className="text-gray-400 ml-2 text-xs">
-                                    @ {trade.cashout_multiplier.toFixed(2)}x
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-gray-400 text-xs">
-                                {new Date(trade.created_at).toLocaleDateString()}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className={`font-bold text-sm ${trade.was_winner ? 'text-green-400' : 'text-red-400'}`}>
-                              {trade.return_percentage > 0 ? '+' : ''}{trade.return_percentage.toFixed(1)}%
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                      
-                      {activityLastUpdated > 0 && (
-                        <div className="text-center pt-2 border-t border-gray-700">
-                          <div className="text-xs text-gray-500">
-                            Updated: {new Date(activityLastUpdated).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-gray-400 text-center py-4 sm:py-6">
-                      {isValidWallet ? (
-                        <div className="space-y-2">
-                          <AlertCircle size={32} className="mx-auto text-gray-600" />
-                          <p className="text-sm">No recent activity</p>
-                          <p className="text-xs text-gray-500">Start playing to see your trades here</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <Users size={32} className="mx-auto text-gray-600" />
-                          <p className="text-sm">Login to view activity</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
+                {/* 🚀 ENHANCED: Transaction History (replaces Recent Activity) */}
+<div className="bg-gray-900 rounded-lg border border-gray-800 p-4 sm:p-6">
+  <TransactionHistory 
+    userId={userId || undefined}
+    gameHistory={recentActivity.map((trade: any) => ({
+      id: trade.id,
+      gameId: trade.game_id?.slice(-6) || 'N/A',
+      timestamp: new Date(trade.created_at),
+      betAmount: trade.bet_amount,
+      cashoutMultiplier: trade.cashout_multiplier,
+      result: trade.was_winner ? 'win' : 'loss',
+      profit: trade.profit_loss?.toString() || '0'
+    }))}
+    maxItems={8} // Smaller for dashboard
+    showFilters={false} // Simplified for dashboard
+  />
+</div>
+  </div>
               {/* Bottom spacing for mobile scroll */}
               <div className="h-8 sm:h-16"></div>
             </div>

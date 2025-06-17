@@ -303,7 +303,7 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
     return (
       <div className="text-center py-8 text-gray-400">
         <Trophy size={48} className="mx-auto mb-4 text-gray-600" />
-        <p>No leaderboard entries found</p>
+        <p>No ruggerboard entries found</p>
       </div>
     );
   }

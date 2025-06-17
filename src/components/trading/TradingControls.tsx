@@ -2526,7 +2526,6 @@ const getActiveBetDisplay = () => {
           <div className="flex items-center justify-between">
             <div>
               <div className="text-violet-400 text-sm font-medium">📊 Performance</div>
-              <div className="text-xs text-gray-400">Share your trading results</div>
             </div>
             <PNLButton
   userId={userId || undefined}
@@ -2536,7 +2535,7 @@ const getActiveBetDisplay = () => {
   size="sm"
               className="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
             >
-              Share P&L
+             P&L
             </PNLButton>
           </div>
         </div>

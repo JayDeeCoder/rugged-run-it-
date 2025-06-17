@@ -102,16 +102,16 @@ const MiniCharts: FC<MiniChartProps> = ({ data = [], maxCharts = 10, onNewGame }
           </div>
         ) : (
           gameResults.slice(0, dynamicMaxCharts).map((item, index) => {
-            // Color coding based on multiplier
+            // Color coding based on multiplier - Only red for actual rugs (< 1.0x)
             let textColor = 'text-gray-400';
-            if (item.value < 1.2) {
-              textColor = 'text-red-500'; // Bad (rug)
-            } else if (item.value >= 1.2 && item.value < 2.0) {
-              textColor = 'text-yellow-400'; // Mediocre
+            if (item.value < 1.0) {
+              textColor = 'text-red-500'; // Rugged (< 1.0x)
+            } else if (item.value >= 1.0 && item.value < 2.0) {
+              textColor = 'text-yellow-400'; // Low gains
             } else if (item.value >= 2.0 && item.value < 5.0) {
-              textColor = 'text-green-500'; // Good
+              textColor = 'text-green-500'; // Good gains
             } else if (item.value >= 5.0) {
-              textColor = 'text-blue-400'; // Excellent
+              textColor = 'text-blue-400'; // Excellent gains
             }
             
             // Get timestamp string
@@ -169,13 +169,13 @@ const MiniCandlestickChart: FC<MiniCandlestickChartProps> = ({ multiplier, candl
     return chartHeight - ((value - min) / range) * chartHeight;
   };
   
-  // Determine if this was a crash (multiplier < 1.5)
-  const isCrash = multiplier < 1.2;
+  // Only consider it rugged if multiplier is under 1.0x
+  const isRugged = multiplier < 1.0;
   
   return (
     <svg width="100%" height="100%" viewBox="0 0 40 40">
-      {/* Background tint for crashes */}
-      {isCrash && (
+      {/* Background tint only for actual rugs */}
+      {isRugged && (
         <rect x="0" y="0" width="40" height="40" fill="rgba(220, 38, 38, 0.1)" />
       )}
       
@@ -189,8 +189,8 @@ const MiniCandlestickChart: FC<MiniCandlestickChartProps> = ({ multiplier, candl
         const bodyHeight = Math.max(1, bodyBottom - bodyTop); // Ensure min height of 1px
         const isUp = candle.close > candle.open;
         
-        // Red candles for crashes, normal coloring otherwise
-        const candleColor = isCrash ? "#ef4444" : (isUp ? "#22c55e" : "#ef4444");
+        // Normal candle coloring - red only for rugs or down candles
+        const candleColor = isRugged ? "#ef4444" : (isUp ? "#22c55e" : "#ef4444");
         
         return (
           <g key={i}>
@@ -222,13 +222,13 @@ const MiniCandlestickChart: FC<MiniCandlestickChartProps> = ({ multiplier, candl
         y1={scaleY(candlesticks[candlesticks.length - 1].close)} 
         x2="40" 
         y2={scaleY(candlesticks[candlesticks.length - 1].close)}
-        stroke={isCrash ? "#ef4444" : "#22c55e"}
+        stroke={isRugged ? "#ef4444" : "#22c55e"}
         strokeWidth="0.5"
         strokeDasharray="1,1"
       />
       
-      {/* Crash marker */}
-      {isCrash && (
+      {/* Rug marker - only for actual rugs */}
+      {isRugged && (
         <text x="20" y="20" textAnchor="middle" fontSize="8" fill="#ef4444" fontWeight="bold">
           RUGGED
         </text>

@@ -582,8 +582,7 @@ const [loadingTradeHistory, setLoadingTradeHistory] = useState<{[key: string]: b
                     </div>
                   </div>
                 )}
-                {/* 👇 ADD THIS ONE LINE HERE 👇 */}
-<TradeHistorySection userId={entry.id} />
+               
               </div>
             )}
           </div>

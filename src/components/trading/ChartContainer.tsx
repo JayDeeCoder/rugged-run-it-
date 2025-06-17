@@ -21,11 +21,18 @@ import {
   ActiveBet 
 } from '../../hooks/useSharedState';
 
+// 🚀 UPDATE: Replace the existing interface with this:
 interface ChartContainerProps {
   useMobileHeight?: boolean;
+  onInfoToggle?: (showInfo: boolean) => void; // 🚀 NEW: Callback for info visibility changes
 }
 
-const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) => {
+// 🚀 UPDATE: Update the component function signature:
+const ChartContainer: FC<ChartContainerProps> = ({ 
+  useMobileHeight = false, 
+  onInfoToggle // 🚀 NEW: Add this parameter
+}) => {
+  
   const { width } = useWindowSize();
   const [holdings, setHoldings] = useState<number>(0);
   const [triggerSellEffect, setTriggerSellEffect] = useState<boolean>(false);
@@ -83,6 +90,17 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
   const gameDisplayInfo = useSharedGameState(currentGame, currentUser?.id || '');
 
   const isMobile = width ? width < 768 : false;
+
+  // 🚀 ADD: Add this new handler (replace any existing handleInfoToggle):
+  const handleInfoToggle = useCallback(() => {
+    const newShowTopInfo = !showTopInfo;
+    setShowTopInfo(newShowTopInfo);
+    
+    // 🚀 NEW: Notify parent component about info visibility change
+    if (onInfoToggle) {
+      onInfoToggle(newShowTopInfo);
+    }
+  }, [showTopInfo, onInfoToggle]);
 
   // 🚀 FIXED: Correct position calculation with proper profit/loss logic
   const calculateCurrentPositionValue = useCallback(() => {
@@ -404,10 +422,10 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
 
   return (
     <div className="p-2 flex flex-col">
-      {/* Info Toggle */}
+      {/* 🚀 UPDATE: Find this Info Toggle button and update the onClick: */}
       <div className={`bg-[#0d0d0f] p-2 mb-2 rounded-lg flex items-center justify-between border border-gray-800 ${isMobile ? 'text-xs' : 'text-sm'}`}>
         <button
-          onClick={() => setShowTopInfo(!showTopInfo)}
+          onClick={handleInfoToggle} // 🚀 CHANGE: Use new handler instead of () => setShowTopInfo(!showTopInfo)
           className={`px-3 py-1 rounded-md font-medium transition-colors ${
             showTopInfo 
               ? 'bg-blue-600 text-white' 
@@ -417,7 +435,7 @@ const ChartContainer: FC<ChartContainerProps> = ({ useMobileHeight = false }) =>
           {showTopInfo ? 'Hide Info' : 'Show Info'}
         </button>
         
-        {/* Always show basic game info */}
+        {/* Keep the rest of your existing button content exactly the same */}
         <div className="flex items-center">
           <span className="text-gray-400 mr-1">Round #</span>
           <span className="font-bold text-white">{gameId}</span>

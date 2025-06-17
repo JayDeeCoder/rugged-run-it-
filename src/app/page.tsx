@@ -1,4 +1,4 @@
-// src/app/page.tsx - Complete Fix with proper responsive design
+// src/app/page.tsx - Complete Fix with chart info toggle detection
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -16,6 +16,7 @@ const LeaderboardContainer = dynamic(() => import('../components/leaderboard/Lea
 export default function Home() {
   const [isLeaderboardVisible, setIsLeaderboardVisible] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [chartInfoVisible, setChartInfoVisible] = useState(true); // 🚀 Track chart info visibility
   
   const { authenticated, login, user } = usePrivy();
   const { width, height } = useWindowSize();
@@ -44,7 +45,7 @@ export default function Home() {
     }
   }, [isMobileOrTablet]);
 
-  // Simplified scroll handler for main content area
+  // 🚀 ENHANCED: Dynamic scroll threshold based on chart info visibility
   const handleMainContentScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     if (!isMounted || isMobileOrTablet) return;
     
@@ -53,10 +54,14 @@ export default function Home() {
     const scrollHeight = element.scrollHeight;
     const clientHeight = element.clientHeight;
     
-    // Show leaderboard when scrolled past 30% of content
+    // 🚀 DYNAMIC: Adjust threshold based on chart info visibility
+    // When chart info is minimized, content is shorter, so show leaderboard sooner
+    const threshold = chartInfoVisible ? 0.3 : 0.15;
+    
+    // Show leaderboard when scrolled past dynamic threshold
     const scrollPercentage = scrollTop / (scrollHeight - clientHeight);
-    setIsLeaderboardVisible(scrollPercentage > 0.3);
-  }, [isMounted, isMobileOrTablet]);
+    setIsLeaderboardVisible(scrollPercentage > threshold);
+  }, [isMounted, isMobileOrTablet, chartInfoVisible]);
 
   const handleLoginClick = () => {
     login();
@@ -167,7 +172,7 @@ export default function Home() {
               </div>
             )}
             
-            {/* 🚀 FIXED: Main Chart Container with size-specific constraints */}
+            {/* 🚀 FIXED: Main Chart Container with info toggle callback */}
             <div className={`
               w-full relative
               ${authenticated ? '' : 'opacity-50 pointer-events-none'}
@@ -186,12 +191,21 @@ export default function Home() {
               <div className="w-full h-full">
                 <ChartContainer 
                   useMobileHeight={isMobile}
+                  onInfoToggle={(showInfo) => {
+                    // 🚀 NEW: Track chart info visibility changes
+                    setChartInfoVisible(showInfo);
+                    
+                    // Force immediate leaderboard visibility on large screens when info is hidden
+                    if (!isMobileOrTablet && !showInfo) {
+                      setTimeout(() => setIsLeaderboardVisible(true), 100);
+                    }
+                  }}
                 />
               </div>
             </div>
             
             {/* Scroll Indicator - only show on larger screens when leaderboard is hidden */}
-            {(isLargeLaptop || isDesktop) && !isLeaderboardVisible && (
+            {(isLargeLaptop || isDesktop) && !isLeaderboardVisible && chartInfoVisible && (
               <div className="text-center py-4 text-gray-400 transition-opacity duration-300 animate-bounce flex-shrink-0">
                 <div className="flex flex-col items-center">
                   <span className="text-sm">Scroll Down To See TOP RUGGERS</span>
@@ -200,7 +214,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* 🚀 FIXED: Leaderboard Section with size-specific behavior */}
+            {/* 🚀 FIXED: Leaderboard Section with chart info awareness */}
             <div className={`
               w-full
               ${isIntermediateSize 
@@ -212,8 +226,8 @@ export default function Home() {
                 isMobile ? 'mt-4 mb-6 px-4' :
                 isTablet ? 'mt-3 mb-4 px-3' :
                 isSmallLaptop ? 'mt-4 mb-5 px-4' :
-                isLargeLaptop ? 'mt-6 mb-6 px-6' :
-                'mt-8 mb-8 px-8'}
+                isLargeLaptop ? (chartInfoVisible ? 'mt-6 mb-6 px-6' : 'mt-4 mb-6 px-6') :
+                (chartInfoVisible ? 'mt-8 mb-8 px-8' : 'mt-6 mb-8 px-8')}
               transition-all duration-500 ease-in-out
               ${(isLeaderboardVisible || isMobileOrTablet) ? 
                 'opacity-100 translate-y-0 pointer-events-auto' : 

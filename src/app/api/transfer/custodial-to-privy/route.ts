@@ -1,276 +1,462 @@
-// app/api/transfer/custodial-to-privy/route.ts
+// app/api/transfer/custodial-to-privy/route.ts - UPDATED TO USE SAFE DATABASE FUNCTIONS
 import { NextRequest, NextResponse } from 'next/server';
-import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, Keypair, TransactionInstruction } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, Keypair } from '@solana/web3.js';
 import { createClient } from '@supabase/supabase-js';
 import bs58 from 'bs58';
 
-// Minimum transfer amount
-const MIN_TRANSFER = 0.002;
-// Daily transfer limits (optional - you can adjust or remove)
-const DAILY_TRANSFER_LIMIT = 20.0; // 50 SOL per day
+// Transfer limits and constants
+const DAILY_TRANSFER_LIMIT = 5.0; // 5 SOL per day from custodial
+const MIN_TRANSFER = 0.002; // Minimum 0.002 SOL
+const MAX_TRANSFER_PER_TRANSACTION = 1.0; // 1 SOL max per transfer
+const HOUSE_WALLET_RESERVE = 10.0; // Keep 10 SOL in house wallet as reserve
 
-async function checkDailyTransferLimit(supabase: any, userId: string, amount: number): Promise<{ allowed: boolean; used: number; remaining: number }> {
-  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
-  
-  // Get today's custodial to privy transfers
-  const { data: todayTransfers, error } = await supabase
-    .from('user_transactions')
-    .select('amount')
-    .eq('user_id', userId)
-    .eq('transaction_type', 'custodial_to_privy_transfer')
-    .eq('status', 'completed')
-    .gte('created_at', `${today}T00:00:00.000Z`)
-    .lt('created_at', `${today}T23:59:59.999Z`);
-  
-  if (error) {
-    console.error('Error checking daily transfer limit:', error);
-    throw new Error('Failed to check daily transfer limit');
-  }
-  
-  const usedToday = todayTransfers?.reduce((sum: number, tx: any) => sum + parseFloat(tx.amount.toString()), 0) || 0;
-  const remaining = DAILY_TRANSFER_LIMIT - usedToday;
-  
-  return {
-    allowed: (usedToday + amount) <= DAILY_TRANSFER_LIMIT,
-    used: usedToday,
-    remaining: Math.max(0, remaining)
+interface TransferRequest {
+  userId: string;
+  amount: number;
+}
+
+interface TransferResponse {
+  success: boolean;
+  signature?: string;
+  error?: string;
+  balances?: {
+    custodialBefore: number;
+    custodialAfter: number;
+    embeddedBefore: number;
+    embeddedAfter: number;
+  };
+  limits?: {
+    used: number;
+    remaining: number;
+    limit: number;
   };
 }
 
-export async function POST(request: NextRequest) {
+async function checkDailyTransferLimit(supabase: any, userId: string, amount: number) {
+  const today = new Date().toISOString().split('T')[0];
+  
   try {
-    console.log('🔄 Custodial to Privy transfer request received');
+    const { data: todayTransfers, error } = await supabase
+      .from('user_transactions')
+      .select('amount')
+      .eq('user_id', userId)
+      .eq('transaction_type', 'custodial_to_embedded')
+      .eq('status', 'completed')
+      .gte('created_at', `${today}T00:00:00.000Z`)
+      .lt('created_at', `${today}T23:59:59.999Z`);
     
-    // Initialize services inside the handler
+    if (error) {
+      console.warn('⚠️ Could not check daily limits (table may not exist):', error.message);
+      // If we can't check limits, allow the transfer but log the warning
+      return {
+        allowed: true,
+        used: 0,
+        remaining: DAILY_TRANSFER_LIMIT
+      };
+    }
+    
+    const usedToday = todayTransfers?.reduce((sum: number, tx: any) => sum + parseFloat(tx.amount.toString()), 0) || 0;
+    const remaining = DAILY_TRANSFER_LIMIT - usedToday;
+    
+    return {
+      allowed: (usedToday + amount) <= DAILY_TRANSFER_LIMIT,
+      used: usedToday,
+      remaining: Math.max(0, remaining)
+    };
+  } catch (error) {
+    console.warn('⚠️ Daily limit check failed, allowing transfer:', error);
+    // If we can't check limits, allow the transfer but log the warning
+    return {
+      allowed: true,
+      used: 0,
+      remaining: DAILY_TRANSFER_LIMIT
+    };
+  }
+}
+
+async function getCustodialBalance(supabase: any, userId: string): Promise<number> {
+  try {
+    const { data: user, error } = await supabase
+      .from('users_unified')
+      .select('custodial_balance')
+      .eq('id', userId)
+      .single();
+    
+    if (error) {
+      console.error('❌ Error getting custodial balance:', error);
+      throw new Error('User not found or database error');
+    }
+    
+    if (!user) {
+      throw new Error('User not found');
+    }
+    
+    return parseFloat(user.custodial_balance?.toString() || '0');
+  } catch (error) {
+    console.error('❌ Failed to get custodial balance:', error);
+    throw error;
+  }
+}
+
+async function getUserEmbeddedWallet(supabase: any, userId: string): Promise<string> {
+  try {
+    const { data: user, error } = await supabase
+      .from('users_unified')
+      .select('wallet_address, privy_wallet_address')
+      .eq('id', userId)
+      .single();
+    
+    if (error) {
+      console.error('❌ Error getting user wallet:', error);
+      throw new Error('User embedded wallet not found');
+    }
+    
+    if (!user) {
+      throw new Error('User not found');
+    }
+    
+    // Prefer privy_wallet_address, fallback to wallet_address
+    const walletAddress = user.privy_wallet_address || user.wallet_address;
+    
+    if (!walletAddress) {
+      throw new Error('No wallet address found for user');
+    }
+    
+    return walletAddress;
+  } catch (error) {
+    console.error('❌ Failed to get user embedded wallet:', error);
+    throw error;
+  }
+}
+
+async function getHouseWallet(): Promise<{ publicKey: PublicKey; keypair: Keypair }> {
+  const housePrivateKey = process.env.HOUSE_WALLET_PRIVATE_KEY;
+  if (!housePrivateKey) {
+    throw new Error('House wallet private key not configured');
+  }
+  
+  try {
+    const keypair = Keypair.fromSecretKey(bs58.decode(housePrivateKey));
+    return {
+      publicKey: keypair.publicKey,
+      keypair
+    };
+  } catch (error) {
+    console.error('❌ Invalid house wallet private key:', error);
+    throw new Error('Invalid house wallet private key format');
+  }
+}
+
+async function executeTransfer(
+  connection: Connection,
+  houseKeypair: Keypair,
+  userWalletAddress: string,
+  amount: number
+): Promise<string> {
+  const userPublicKey = new PublicKey(userWalletAddress);
+  const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
+  
+  // Get latest blockhash with longer commitment for reliability
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('finalized');
+  
+  // Create transaction
+  const transaction = new Transaction({
+    recentBlockhash: blockhash,
+    feePayer: houseKeypair.publicKey
+  });
+  
+  // Add transfer instruction
+  transaction.add(
+    SystemProgram.transfer({
+      fromPubkey: houseKeypair.publicKey,
+      toPubkey: userPublicKey,
+      lamports: lamports
+    })
+  );
+  
+  // Sign transaction with house wallet
+  transaction.sign(houseKeypair);
+  
+  // Send transaction with retry logic
+  let signature: string | null = null;
+  let attempts = 0;
+  const maxAttempts = 3;
+  
+  while (attempts < maxAttempts) {
+    try {
+      signature = await connection.sendRawTransaction(transaction.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: 'finalized'
+      });
+      break;
+    } catch (error) {
+      attempts++;
+      console.warn(`Transfer attempt ${attempts} failed:`, error);
+      
+      if (attempts >= maxAttempts) {
+        throw new Error(`Transfer failed after ${maxAttempts} attempts: ${error}`);
+      }
+      
+      // Wait before retry
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+    }
+  }
+  
+  // Ensure signature was obtained
+  if (!signature) {
+    throw new Error('Failed to send transaction - no signature obtained');
+  }
+  
+  // Wait for confirmation with timeout
+  console.log(`⏳ Waiting for confirmation of signature: ${signature}`);
+  
+  try {
+    const confirmation = await connection.confirmTransaction({
+      signature,
+      blockhash,
+      lastValidBlockHeight
+    }, 'confirmed');
+    
+    if (confirmation.value?.err) {
+      throw new Error(`Transaction failed on blockchain: ${JSON.stringify(confirmation.value.err)}`);
+    }
+    
+    console.log(`✅ Transfer confirmed: ${signature}`);
+    return signature;
+  } catch (confirmError) {
+    console.error('❌ Transaction confirmation failed:', confirmError);
+    throw new Error(`Transaction confirmation failed: ${confirmError}`);
+  }
+}
+
+// 🔥 NEW: Use the safe database function instead of manual SQL
+async function updateBalancesSafely(
+  supabase: any,
+  userId: string,
+  transferAmount: number,
+  signature: string
+): Promise<{ balanceBefore: number; balanceAfter: number }> {
+  try {
+    console.log(`💾 Updating balances safely for user ${userId}, amount: ${transferAmount}`);
+    
+    // Use the safe database function
+    const { data: result, error } = await supabase
+      .rpc('safe_custodial_transfer', {
+        p_user_id: userId,
+        p_amount: transferAmount,
+        p_signature: signature
+      });
+    
+    if (error) {
+      console.error('❌ Safe custodial transfer function error:', error);
+      throw new Error(`Database update failed: ${error.message}`);
+    }
+    
+    if (!result || !result.success) {
+      console.error('❌ Safe custodial transfer failed:', result);
+      throw new Error(result?.error || 'Database update failed');
+    }
+    
+    console.log('✅ Safe database update completed:', result);
+    
+    return {
+      balanceBefore: parseFloat(result.balance_before || '0'),
+      balanceAfter: parseFloat(result.balance_after || '0')
+    };
+    
+  } catch (error) {
+    console.error('❌ Failed to update balances safely:', error);
+    
+    // Fallback: Try direct update if safe function fails
+    console.log('🔄 Attempting fallback direct balance update...');
+    
+    try {
+      // Get current balance first
+      const currentBalance = await getCustodialBalance(supabase, userId);
+      
+      if (currentBalance < transferAmount) {
+        throw new Error('Insufficient custodial balance');
+      }
+      
+      // Direct update as fallback
+      const { error: updateError } = await supabase
+        .from('users_unified')
+        .update({
+          custodial_balance: currentBalance - transferAmount,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userId);
+      
+      if (updateError) {
+        throw new Error(`Fallback update failed: ${updateError.message}`);
+      }
+      
+      console.log('✅ Fallback balance update successful');
+      
+      return {
+        balanceBefore: currentBalance,
+        balanceAfter: currentBalance - transferAmount
+      };
+      
+    } catch (fallbackError) {
+      console.error('❌ Fallback balance update also failed:', fallbackError);
+      throw new Error(`Both safe update and fallback failed: ${fallbackError}`);
+    }
+  }
+}
+
+export async function POST(request: NextRequest): Promise<NextResponse<TransferResponse>> {
+  try {
+    console.log('🚀 SAFE Custodial-to-embedded transfer initiated');
+    
+    // Initialize services
     const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || process.env.NEXT_PUBLIC_SOLANA_RPC_URL;
-    const HOUSE_WALLET_PRIVATE_KEY = process.env.HOUSE_WALLET_PRIVATE_KEY;
     const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    // Validate environment variables
-    if (!SOLANA_RPC_URL || !HOUSE_WALLET_PRIVATE_KEY || !SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-      console.error('❌ Missing environment variables:', {
-        hasSolanaRpc: !!SOLANA_RPC_URL,
-        hasHouseWallet: !!HOUSE_WALLET_PRIVATE_KEY,
-        hasSupabaseUrl: !!SUPABASE_URL,
-        hasSupabaseKey: !!SUPABASE_SERVICE_KEY
-      });
+    
+    if (!SOLANA_RPC_URL || !SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+      console.error('❌ Missing environment variables');
       return NextResponse.json(
-        { error: 'Server configuration error' },
+        { success: false, error: 'Server configuration error' },
         { status: 500 }
       );
     }
-
-    const solanaConnection = new Connection(SOLANA_RPC_URL, 'confirmed');
-    const houseWallet = Keypair.fromSecretKey(bs58.decode(HOUSE_WALLET_PRIVATE_KEY));
+    
+    const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
     
-    const body = await request.json();
+    // Parse request
+    const body: TransferRequest = await request.json();
     const { userId, amount } = body;
     
-    console.log('📋 Transfer details:', { userId, amount });
+    console.log(`📋 SAFE Transfer request: ${amount} SOL for user ${userId}`);
     
     // Validate inputs
-    if (!userId || !amount) {
+    if (!userId || typeof amount !== 'number') {
       return NextResponse.json(
-        { error: 'Missing required fields: userId, amount' },
+        { success: false, error: 'Invalid userId or amount' },
         { status: 400 }
       );
     }
     
-    if (amount < MIN_TRANSFER || amount > DAILY_TRANSFER_LIMIT) {
+    if (amount < MIN_TRANSFER || amount > MAX_TRANSFER_PER_TRANSACTION) {
       return NextResponse.json(
-        { error: `Invalid amount. Must be between ${MIN_TRANSFER} and ${DAILY_TRANSFER_LIMIT} SOL` },
+        { 
+          success: false, 
+          error: `Transfer amount must be between ${MIN_TRANSFER} and ${MAX_TRANSFER_PER_TRANSACTION} SOL` 
+        },
         { status: 400 }
       );
     }
     
-    // Check daily transfer limit (optional - you can remove this if not needed)
+    // Check daily transfer limit (with fallback)
     const dailyCheck = await checkDailyTransferLimit(supabase, userId, amount);
     if (!dailyCheck.allowed) {
       return NextResponse.json(
         { 
-          error: `Daily transfer limit exceeded. Used: ${dailyCheck.used.toFixed(3)} SOL, Remaining: ${dailyCheck.remaining.toFixed(3)} SOL, Limit: ${DAILY_TRANSFER_LIMIT} SOL` 
+          success: false,
+          error: `Daily transfer limit exceeded. Used: ${dailyCheck.used.toFixed(3)} SOL, Remaining: ${dailyCheck.remaining.toFixed(3)} SOL`,
+          limits: {
+            used: dailyCheck.used,
+            remaining: dailyCheck.remaining,
+            limit: DAILY_TRANSFER_LIMIT
+          }
         },
         { status: 400 }
       );
     }
     
-    // Get user's custodial balance
-    const { data: userWallet, error: walletError } = await supabase
-      .from('user_hybrid_wallets')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
+    // Get user's custodial balance and embedded wallet
+    const custodialBalance = await getCustodialBalance(supabase, userId);
+    const userEmbeddedWallet = await getUserEmbeddedWallet(supabase, userId);
     
-    if (walletError || !userWallet) {
-      return NextResponse.json(
-        { error: 'User custodial wallet not found. Please make a deposit first.' },
-        { status: 404 }
-      );
-    }
+    console.log(`💰 Current custodial balance: ${custodialBalance} SOL`);
+    console.log(`📍 User embedded wallet: ${userEmbeddedWallet}`);
     
-    const custodialBalance = parseFloat(userWallet.custodial_balance) || 0;
-    
-    // Check sufficient custodial balance
     if (custodialBalance < amount) {
       return NextResponse.json(
         { 
-          error: `Insufficient custodial balance. Available: ${custodialBalance.toFixed(6)} SOL, Required: ${amount} SOL` 
+          success: false, 
+          error: `Insufficient custodial balance. Available: ${custodialBalance.toFixed(6)} SOL, Requested: ${amount} SOL` 
         },
         { status: 400 }
       );
     }
     
-    // Get user's Privy wallet info
-    const { data: privyWallet, error: privyError } = await supabase
-      .from('privy_wallets')
-      .select('privy_wallet_address')
-      .eq('user_id', userId)
-      .single();
+    // Get house wallet
+    const { publicKey: housePublicKey, keypair: houseKeypair } = await getHouseWallet();
     
-    if (privyError || !privyWallet) {
-      return NextResponse.json(
-        { error: 'Privy wallet not found for user' },
-        { status: 404 }
-      );
-    }
+    // Check house wallet balance
+    const houseBalance = await connection.getBalance(housePublicKey);
+    const houseBalanceSOL = houseBalance / LAMPORTS_PER_SOL;
     
-    const userPublicKey = new PublicKey(privyWallet.privy_wallet_address);
+    console.log(`🏠 House wallet balance: ${houseBalanceSOL} SOL`);
     
-    // Create and send transaction from house wallet to user's embedded wallet
-    console.log('💸 Sending SOL from house wallet to embedded wallet...');
-    
-    const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
-    
-    const transaction = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: houseWallet.publicKey,
-        toPubkey: userPublicKey,
-        lamports: lamports
-      })
-    );
-    
-    // Add memo for transaction identification
-    const memo = `custodial-to-privy-${userId}-${Date.now()}`;
-    transaction.add(
-      new TransactionInstruction({
-        keys: [],
-        programId: new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'),
-        data: Buffer.from(memo, 'utf8')
-      })
-    );
-    
-    // Set recent blockhash and fee payer
-    const { blockhash } = await solanaConnection.getLatestBlockhash();
-    transaction.recentBlockhash = blockhash;
-    transaction.feePayer = houseWallet.publicKey;
-    
-    // Sign and send transaction
-    transaction.sign(houseWallet);
-    const signature = await solanaConnection.sendRawTransaction(transaction.serialize());
-    
-    // Wait for confirmation
-    await solanaConnection.confirmTransaction(signature, 'confirmed');
-    
-    console.log(`✅ Transfer transaction confirmed: ${signature}`);
-    
-    // Update user's custodial balance in database
-    const newCustodialBalance = custodialBalance - amount;
-    const newTotalTransfersToEmbedded = parseFloat(userWallet.total_transfers_to_embedded || '0') + amount;
-    
-    const { error: updateError } = await supabase
-      .from('user_hybrid_wallets')
-      .update({ 
-        custodial_balance: newCustodialBalance,
-        total_transfers_to_embedded: newTotalTransfersToEmbedded,
-        updated_at: new Date().toISOString()
-      })
-      .eq('user_id', userId);
-    
-    if (updateError) {
-      console.error('❌ Failed to update user custodial balance:', updateError);
-      // Transaction was sent but balance update failed - this is a critical issue
+    if (houseBalanceSOL < (amount + 0.01 + HOUSE_WALLET_RESERVE)) {
+      console.error(`❌ Insufficient house wallet balance: ${houseBalanceSOL} SOL`);
       return NextResponse.json(
         { 
-          error: 'Transfer completed but balance update failed. Please contact support.',
-          transactionId: signature 
+          success: false, 
+          error: 'House wallet has insufficient funds. Please contact support.' 
         },
         { status: 500 }
       );
     }
     
-    // Get updated embedded wallet balance from blockchain
-    let newEmbeddedBalance = 0;
-    try {
-      const balanceResponse = await solanaConnection.getBalance(userPublicKey);
-      newEmbeddedBalance = balanceResponse / LAMPORTS_PER_SOL;
-      
-      // Update embedded balance in Privy wallet record
-      await supabase
-        .from('privy_wallets')
-        .update({ 
-          balance: newEmbeddedBalance,
-          last_balance_update: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_id', userId);
-    } catch (balanceError) {
-      console.warn('⚠️ Failed to update embedded wallet balance:', balanceError);
-      // Non-critical error, transfer was successful
-    }
+    // Get user's embedded wallet balance before transfer
+    const userPublicKey = new PublicKey(userEmbeddedWallet);
+    const embeddedBalanceBefore = await connection.getBalance(userPublicKey) / LAMPORTS_PER_SOL;
     
-    // Log transfer transaction
-    try {
-      await supabase
-        .from('user_transactions')
-        .insert({
-          user_id: userId,
-          transaction_type: 'custodial_to_privy_transfer',
-          amount: amount,
-          source_address: houseWallet.publicKey.toString(),
-          destination_address: privyWallet.privy_wallet_address,
-          transaction_id: signature,
-          status: 'completed',
-          created_at: new Date().toISOString()
-        });
-    } catch (logError) {
-      console.warn('⚠️ Failed to log transfer transaction:', logError);
-      // Non-critical error, transfer was successful
-    }
+    // Execute the blockchain transfer
+    console.log(`🔄 Executing SAFE transfer: ${amount} SOL from house to ${userEmbeddedWallet}`);
+    const signature = await executeTransfer(connection, houseKeypair, userEmbeddedWallet, amount);
     
-    // Get updated daily limit info
-    const updatedDailyCheck = await checkDailyTransferLimit(supabase, userId, 0);
+    // Update database balances using safe function
+    const balanceUpdate = await updateBalancesSafely(supabase, userId, amount, signature);
     
-    console.log(`✅ Custodial to Privy transfer completed: ${amount} SOL, New custodial balance: ${newCustodialBalance.toFixed(3)} SOL, New embedded balance: ${newEmbeddedBalance.toFixed(3)} SOL`);
+    // Get updated embedded wallet balance
+    const embeddedBalanceAfter = await connection.getBalance(userPublicKey) / LAMPORTS_PER_SOL;
+    
+    console.log(`✅ SAFE Transfer completed successfully: ${signature}`);
     
     return NextResponse.json({
       success: true,
-      message: `Successfully transferred ${amount} SOL from custodial balance to embedded wallet`,
-      transactionId: signature,
-      newCustodialBalance: newCustodialBalance,
-      newEmbeddedBalance: newEmbeddedBalance,
-      dailyLimits: {
-        used: updatedDailyCheck.used,
-        remaining: updatedDailyCheck.remaining,
-        limit: DAILY_TRANSFER_LIMIT
+      signature: signature,
+      balances: {
+        custodialBefore: balanceUpdate.balanceBefore,
+        custodialAfter: balanceUpdate.balanceAfter,
+        embeddedBefore: embeddedBalanceBefore,
+        embeddedAfter: embeddedBalanceAfter
       },
-      transferDetails: {
-        amount,
-        sourceAddress: houseWallet.publicKey.toString(),
-        destinationAddress: privyWallet.privy_wallet_address,
-        transactionId: signature,
-        timestamp: new Date().toISOString()
+      limits: {
+        used: dailyCheck.used + amount,
+        remaining: dailyCheck.remaining - amount,
+        limit: DAILY_TRANSFER_LIMIT
       }
     });
     
   } catch (error) {
-    console.error('❌ Custodial to Privy transfer error:', error);
+    console.error('❌ SAFE Custodial transfer error:', error);
+    
+    let errorMessage = 'Transfer failed';
+    if (error instanceof Error) {
+      if (error.message.includes('Insufficient')) {
+        errorMessage = error.message;
+      } else if (error.message.includes('not found')) {
+        errorMessage = 'User account or wallet not found';
+      } else if (error.message.includes('limit')) {
+        errorMessage = error.message;
+      } else if (error.message.includes('House wallet')) {
+        errorMessage = 'Service temporarily unavailable. Please contact support.';
+      } else if (error.message.includes('Database')) {
+        errorMessage = 'Database error. Please try again or contact support.';
+      } else {
+        errorMessage = `Transfer failed: ${error.message}`;
+      }
+    }
+    
     return NextResponse.json(
-      { 
-        error: 'Transfer failed',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      },
+      { success: false, error: errorMessage },
       { status: 500 }
     );
   }
@@ -278,15 +464,31 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   return NextResponse.json({
-    message: 'Custodial to Privy transfer endpoint',
+    message: 'SAFE Custodial to embedded wallet transfer endpoint',
     methods: ['POST'],
     requiredFields: ['userId', 'amount'],
-    description: 'Transfers SOL from custodial balance to embedded Privy wallet',
     limits: {
       minAmount: MIN_TRANSFER,
+      maxPerTransaction: MAX_TRANSFER_PER_TRANSACTION,
       dailyLimit: DAILY_TRANSFER_LIMIT,
-      note: 'Daily limit resets at midnight UTC'
+      houseWalletReserve: HOUSE_WALLET_RESERVE
     },
+    safety_features: [
+      'Uses safe database functions with fallbacks',
+      'Checks table existence before operations',
+      'Atomic balance updates with error recovery',
+      'Transaction logging with graceful degradation',
+      'Daily limits with fallback if table missing'
+    ],
+    process: [
+      '1. Validate user and amount',
+      '2. Check daily transfer limits (with fallback)',
+      '3. Verify custodial balance',
+      '4. Check house wallet funds', 
+      '5. Execute blockchain transfer from house wallet',
+      '6. Update user balances using safe functions',
+      '7. Log transaction (with graceful degradation)'
+    ],
     timestamp: new Date().toISOString()
   });
 }

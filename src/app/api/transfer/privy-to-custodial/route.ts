@@ -8,7 +8,7 @@ import logger from '../../../../utils/logger';
 
 // Constants
 const DAILY_WITHDRAWAL_LIMIT = 20.0;
-const MIN_WITHDRAWAL = 0.001;
+const MIN_WITHDRAWAL = 0.05;
 
 // Helper function to create transfer transactions
 async function createTransferTransaction(

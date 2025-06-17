@@ -4,8 +4,8 @@ import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL, Tr
 import { createClient } from '@supabase/supabase-js';
 
 // Daily withdrawal limits (shared with custodial and privy withdrawals)
-const DAILY_WITHDRAWAL_LIMIT = 20.0; // 20 SOL per day
-const MIN_WITHDRAWAL = 0.001;
+const DAILY_WITHDRAWAL_LIMIT = 10.0; // 10 SOL per day
+const MIN_WITHDRAWAL = 0.05;
 const MAX_WITHDRAWAL_PER_TRANSACTION = 5.0; // 5 SOL max per single transaction
 
 async function checkDailyWithdrawalLimit(supabase: any, userId: string, amount: number): Promise<{ allowed: boolean; used: number; remaining: number }> {

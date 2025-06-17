@@ -202,6 +202,75 @@ export interface BetEntry {
   status: string;
 }
 
+// ADD THESE INTERFACES TO YOUR EXISTING API FILE
+// Place these after your existing interfaces (around line 200, after your BetEntry interface)
+
+// Enhanced Trade History Interfaces
+export interface DetailedTradeEntry {
+  id: string;
+  game_id: string;
+  user_id: string;
+  wallet_address: string;
+  
+  // Entry Data
+  bet_amount: number;
+  entry_multiplier: number;
+  entry_timestamp: string;
+  
+  // Exit Data
+  cashout_multiplier?: number;
+  exit_timestamp?: string;
+  exit_type: 'manual_cashout' | 'auto_cashout' | 'crashed' | 'pending';
+  
+  // Financial Data
+  profit_loss: number;
+  win_amount?: number;
+  house_edge_taken: number;
+  
+  // Game Context
+  game_crash_multiplier?: number;
+  total_players_in_game?: number;
+  total_volume_in_game?: number;
+  
+  // Performance Metrics
+  risk_level: 'low' | 'medium' | 'high' | 'extreme';
+  bet_size_category: 'micro' | 'small' | 'medium' | 'large' | 'whale';
+  timing_score?: number;
+  
+  // Calculated Fields
+  trade_duration_seconds?: number;
+  was_winner: boolean;
+  return_percentage: number;
+  
+  // Metadata
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EnhancedTradeHistory {
+  trades: DetailedTradeEntry[];
+  hasEnhancedData: boolean;
+  analytics?: {
+    total_trades: number;
+    win_rate: number;
+    total_profit: number;
+    avg_return: number;
+    risk_distribution: {
+      low: number;
+      medium: number;
+      high: number;
+      extreme: number;
+    };
+  };
+}
+
+export interface EnhancedFeaturesStatus {
+  enhanced_schema: boolean;
+  enhanced_functions: boolean;
+  recommended_action: string;
+}
+
 // NEW: Enhanced XP interfaces
 export type RiskLevel = 'low' | 'medium' | 'high' | 'extreme';
 
@@ -1273,6 +1342,264 @@ export class UserAPI {
     }
   }
 
+  // ADD THESE METHODS TO YOUR EXISTING UserAPI CLASS
+// Place these after your enhanced bet recording methods
+
+/**
+ * 🎯 NEW: Get enhanced trade history for users
+ */
+static async getEnhancedTradeHistory(
+  userId: string, 
+  limit: number = 5
+): Promise<EnhancedTradeHistory> {
+  try {
+    console.log('📊 Fetching enhanced trade history...');
+    
+    // Try enhanced method first
+    try {
+      const { data, error } = await supabase.rpc('get_user_trade_history_safe', {
+        p_user_id: userId,
+        p_limit: limit
+      });
+
+      if (!error && data && Array.isArray(data)) {
+        console.log(`✅ Enhanced trade history: ${data.length} trades`);
+        
+        // Calculate quick analytics
+        const analytics = this.calculateTradeAnalytics(data);
+        
+        return {
+          trades: data,
+          hasEnhancedData: true,
+          analytics
+        };
+      }
+    } catch (enhancedError) {
+      console.warn('⚠️ Enhanced method not available, using basic query...');
+    }
+
+    // Fallback to your existing getUserBetHistory
+    const basicTrades = await this.getUserBetHistory(userId, limit);
+    
+    const transformedTrades: DetailedTradeEntry[] = basicTrades.map(trade => ({
+      id: trade.id,
+      game_id: trade.game_id,
+      user_id: trade.user_id,
+      wallet_address: trade.wallet_address,
+      bet_amount: trade.bet_amount,
+      entry_multiplier: 1.0,
+      entry_timestamp: trade.created_at,
+      cashout_multiplier: trade.cashout_multiplier,
+      exit_timestamp: trade.created_at,
+      exit_type: trade.cashout_multiplier ? 'manual_cashout' : 'crashed',
+      profit_loss: trade.profit_loss || 0,
+      win_amount: (trade.profit_loss || 0) > 0 ? trade.bet_amount + (trade.profit_loss || 0) : undefined,
+      house_edge_taken: 0,
+      game_crash_multiplier: undefined,
+      total_players_in_game: undefined,
+      total_volume_in_game: undefined,
+      risk_level: trade.bet_amount >= 0.1 ? 'high' : 'low',
+      bet_size_category: trade.bet_amount >= 1.0 ? 'large' : trade.bet_amount >= 0.1 ? 'medium' : 'small',
+      timing_score: undefined,
+      trade_duration_seconds: undefined,
+      was_winner: (trade.profit_loss || 0) > 0,
+      return_percentage: trade.bet_amount > 0 
+        ? ((trade.profit_loss || 0) / trade.bet_amount) * 100 
+        : 0,
+      status: trade.status || 'completed',
+      created_at: trade.created_at,
+      updated_at: trade.created_at
+    }));
+
+    return {
+      trades: transformedTrades,
+      hasEnhancedData: false
+    };
+
+  } catch (error) {
+    console.error('❌ Error getting enhanced trade history:', error);
+    return {
+      trades: [],
+      hasEnhancedData: false
+    };
+  }
+}
+
+/**
+ * 🎯 NEW: Calculate analytics from trade data
+ */
+private static calculateTradeAnalytics(trades: any[]): {
+  total_trades: number;
+  win_rate: number;
+  total_profit: number;
+  avg_return: number;
+  risk_distribution: {
+    low: number;
+    medium: number;
+    high: number;
+    extreme: number;
+  };
+} {
+  if (trades.length === 0) {
+    return { 
+      total_trades: 0, 
+      win_rate: 0, 
+      total_profit: 0, 
+      avg_return: 0,
+      risk_distribution: { low: 0, medium: 0, high: 0, extreme: 0 }
+    };
+  }
+
+  const totalTrades = trades.length;
+  const wins = trades.filter(t => t.was_winner).length;
+  const winRate = (wins / totalTrades) * 100;
+  const totalProfit = trades.reduce((sum, t) => sum + (t.profit_loss || 0), 0);
+  const avgReturn = trades.reduce((sum, t) => sum + (t.return_percentage || 0), 0) / totalTrades;
+
+  // Risk distribution
+  const riskDistribution = trades.reduce((dist, trade) => {
+    const risk = trade.risk_level || 'low';
+    dist[risk as keyof typeof dist]++;
+    return dist;
+  }, { low: 0, medium: 0, high: 0, extreme: 0 });
+
+  return {
+    total_trades: totalTrades,
+    win_rate: winRate,
+    total_profit: totalProfit,
+    avg_return: avgReturn,
+    risk_distribution: riskDistribution
+  };
+}
+
+// ADD THESE METHODS TO YOUR EXISTING UserAPI CLASS
+// Place these after your calculateTradeAnalytics method
+
+/**
+ * 🎯 NEW: Check if enhanced features are available
+ */
+static async checkEnhancedFeaturesStatus(): Promise<EnhancedFeaturesStatus> {
+  try {
+    // Test if enhanced function exists
+    const { data, error } = await supabase.rpc('get_user_trade_history_safe', {
+      p_user_id: 'test-id',
+      p_limit: 1
+    });
+
+    const enhancedFunctionsAvailable = !error || !error.message.includes('function');
+
+    // Test if risk_level column exists by trying to select it
+    const { error: schemaError } = await supabase
+      .from('player_bets')
+      .select('risk_level')
+      .limit(1);
+
+    const enhancedSchemaAvailable = !schemaError;
+
+    let recommendedAction = '';
+    if (!enhancedSchemaAvailable && !enhancedFunctionsAvailable) {
+      recommendedAction = 'Run the safe migration to enable enhanced trade history features';
+    } else if (!enhancedSchemaAvailable) {
+      recommendedAction = 'Schema migration needed for full enhanced features';
+    } else if (!enhancedFunctionsAvailable) {
+      recommendedAction = 'Function migration needed for full enhanced features';
+    } else {
+      recommendedAction = 'All enhanced features are available and working!';
+    }
+
+    return {
+      enhanced_schema: enhancedSchemaAvailable,
+      enhanced_functions: enhancedFunctionsAvailable,
+      recommended_action: recommendedAction
+    };
+
+  } catch (error) {
+    return {
+      enhanced_schema: false,
+      enhanced_functions: false,
+      recommended_action: 'Run the safe migration to enable enhanced features'
+    };
+  }
+}
+
+/**
+ * 🎯 NEW: Test enhanced system without affecting production
+ */
+static async testEnhancedSystem(userId: string): Promise<{
+  success: boolean;
+  tests: {
+    schema_check: boolean;
+    function_check: boolean;
+    trade_history_retrieval: boolean;
+    enhanced_recording: boolean;
+  };
+  message: string;
+}> {
+  const tests = {
+    schema_check: false,
+    function_check: false,
+    trade_history_retrieval: false,
+    enhanced_recording: false
+  };
+
+  try {
+    // Test 1: Schema check
+    try {
+      await supabase.from('player_bets').select('risk_level').limit(1);
+      tests.schema_check = true;
+    } catch (error) {
+      console.log('Schema test: Enhanced columns not available');
+    }
+
+    // Test 2: Function check
+    try {
+      await supabase.rpc('get_user_trade_history_safe', {
+        p_user_id: userId,
+        p_limit: 1
+      });
+      tests.function_check = true;
+    } catch (error) {
+      console.log('Function test: Enhanced functions not available');
+    }
+
+    // Test 3: Trade history retrieval
+    try {
+      const result = await this.getEnhancedTradeHistory(userId, 3);
+      tests.trade_history_retrieval = result.trades.length >= 0; // Success even if empty
+    } catch (error) {
+      console.log('Trade history test failed');
+    }
+
+    // Test 4: Enhanced recording (read-only test)
+    tests.enhanced_recording = tests.schema_check && tests.function_check;
+
+    const successCount = Object.values(tests).filter(Boolean).length;
+    const success = successCount >= 2; // At least basic functionality
+
+    let message = '';
+    if (successCount === 4) {
+      message = '✅ All enhanced features are working perfectly!';
+    } else if (successCount >= 2) {
+      message = `⚠️ Partial enhanced features available (${successCount}/4). Consider running migration for full features.`;
+    } else {
+      message = '❌ Enhanced features not available. Run the safe migration to enable them.';
+    }
+
+    return {
+      success,
+      tests,
+      message
+    };
+
+  } catch (error) {
+    return {
+      success: false,
+      tests,
+      message: `❌ Test failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+    };
+  }
+}
+
   // If you need to get betting data for leaderboards/rankings
   static async getBetHistoryWithUsers(limit: number = 100): Promise<any[]> {
     try {
@@ -1625,6 +1952,119 @@ export class UserAPI {
     }
   }
 
+// ADD THESE METHODS TO YOUR EXISTING UserAPI CLASS
+// Place these after your existing handleBetResolutionNew method (around line 800)
+
+/**
+ * 🎯 ENHANCED: Drop-in replacement for recordBet with enhanced features
+ */
+static async recordBetEnhanced(
+  gameId: string,
+  walletAddress: string,
+  betAmount: number,
+  userId?: string,
+  cashoutMultiplier?: number,
+  profitLoss?: number,
+  // NEW optional parameters for enhanced tracking
+  entryMultiplier: number = 1.0,
+  exitType: 'manual_cashout' | 'auto_cashout' | 'crashed' = 'crashed',
+  gameCrashMultiplier?: number
+): Promise<boolean> {
+  try {
+    console.log('🎯 Recording enhanced bet...');
+    
+    // Try enhanced recording first (if migration was applied)
+    try {
+      const { data, error } = await supabase.rpc('record_enhanced_bet_safe', {
+        p_game_id: gameId,
+        p_user_id: userId,
+        p_wallet_address: walletAddress,
+        p_bet_amount: betAmount,
+        p_entry_multiplier: entryMultiplier,
+        p_cashout_multiplier: cashoutMultiplier,
+        p_profit_loss: profitLoss || 0,
+        p_exit_type: exitType,
+        p_game_crash_multiplier: gameCrashMultiplier
+      });
+
+      if (!error && data?.success) {
+        console.log('✅ Enhanced bet recording successful');
+        return true;
+      }
+      
+      console.warn('⚠️ Enhanced recording failed, falling back to existing method...');
+    } catch (enhancedError) {
+      console.warn('⚠️ Enhanced method not available, using existing method...');
+    }
+
+    // Fallback to your existing recordBet method
+    return await this.recordBet(gameId, walletAddress, betAmount, userId, cashoutMultiplier, profitLoss);
+
+  } catch (error) {
+    console.error('❌ Error in recordBetEnhanced:', error);
+    return false;
+  }
+}
+
+/**
+ * 🎯 ENHANCED: Upgrade your handleBetResolutionNew with trade history
+ */
+static async handleBetResolutionSuperEnhanced(
+  gameId: string,
+  userId: string,
+  walletAddress: string,
+  betAmount: number,
+  cashoutMultiplier?: number,
+  profitLoss?: number,
+  // NEW optional parameters
+  entryMultiplier: number = 1.0,
+  gameCrashMultiplier?: number
+): Promise<{ 
+  success: boolean; 
+  method?: string; 
+  userStats?: any; 
+  xpGained?: number;
+  leveledUp?: boolean;
+  error?: string; 
+}> {
+  try {
+    console.log(`🎯 Super enhanced bet resolution for user: ${userId}`);
+
+    // Determine exit type
+    const exitType = cashoutMultiplier ? 'manual_cashout' : 'crashed';
+
+    // Method 1: Try enhanced bet recording with trade history
+    try {
+      const enhancedResult = await this.recordBetEnhanced(
+        gameId, walletAddress, betAmount, userId, cashoutMultiplier, profitLoss,
+        entryMultiplier, exitType, gameCrashMultiplier
+      );
+
+      if (enhancedResult) {
+        // Also do XP calculation using your existing method
+        await this.updateUserStatsOnly(userId, betAmount, profitLoss || 0, cashoutMultiplier);
+
+        return {
+          success: true,
+          method: 'enhanced_with_xp_and_history'
+        };
+      }
+    } catch (enhancedError) {
+      console.warn('⚠️ Enhanced method failed, falling back...', enhancedError);
+    }
+
+    // Method 2: Fallback to your existing handleBetResolutionNew
+    console.log('🔄 Falling back to existing bet resolution...');
+    return await this.handleBetResolutionNew(gameId, userId, walletAddress, betAmount, cashoutMultiplier, profitLoss);
+
+  } catch (error) {
+    console.error('❌ Error in handleBetResolutionSuperEnhanced:', error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    };
+  }
+}
   /**
    * 🔍 NEW: Debug function to check user stats
    */

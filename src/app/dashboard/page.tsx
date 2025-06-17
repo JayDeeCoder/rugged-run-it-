@@ -1,4 +1,4 @@
-// src/app/dashboard/page.tsx - ENHANCED UI with compact mobile design
+// src/app/dashboard/page.tsx - ENHANCED UI with compact mobile design and recent activity
 'use client';
 
 import { FC, useState, useEffect, useContext, useCallback, useRef } from 'react';
@@ -9,7 +9,7 @@ import Layout from '../../components/layout/Layout';
 import Link from 'next/link';
 import { UserContext } from '../../context/UserContext';
 import { safeCreatePublicKey, isValidSolanaAddress } from '../../utils/walletUtils';
-import { Wallet, TrendingUp, GamepadIcon, RefreshCw, Star, Crown, Medal, Trophy, Zap, Target, Award, Users, AlertCircle } from 'lucide-react';
+import { Wallet, TrendingUp, GamepadIcon, RefreshCw, Star, Crown, Medal, Trophy, Zap, Target, Award, Users, AlertCircle, TrendingDown } from 'lucide-react';
 import { UserAPI } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import ReferralSection from '../../components/ReferralSection';
@@ -54,6 +54,22 @@ interface PlayerBet {
   cashout_multiplier?: number;
   status: string;
 }
+
+// Solana logo component
+const SolanaLogo = ({ size = 12, className = "" }: { size?: number; className?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 397.7 311.7" className={`inline-block ${className}`}>
+    <defs>
+      <linearGradient id="solanaGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#9945FF"/>
+        <stop offset="100%" stopColor="#14F195"/>
+      </linearGradient>
+    </defs>
+    <path 
+      fill="url(#solanaGradient)" 
+      d="M64.6,237.9c2.4-2.4,5.7-3.8,9.2-3.8h317.4c5.8,0,8.7,7,4.6,11.1l-62.7,62.7c-2.4,2.4-5.7,3.8-9.2,3.8H6.5c-5.8,0-8.7-7-4.6-11.1L64.6,237.9z M64.6,3.8C67.1,1.4,70.4,0,73.8,0h317.4c5.8,0,8.7,7,4.6,11.1L333.1,73.8c-2.4,2.4-5.7,3.8-9.2,3.8H6.5c-5.8,0-8.7-7-4.6-11.1L64.6,3.8z M333.1,120.1c2.4-2.4,5.7-3.8,9.2-3.8h56.4c5.8,0,8.7,7,4.6,11.1l-62.7,62.7c-2.4,2.4-5.7,3.8-9.2,3.8H6.5c-5.8,0-8.7-7-4.6-11.1L333.1,120.1z"
+    />
+  </svg>
+);
 
 // 🚀 OPTIMIZED: Custodial balance hook with controlled refresh timing
 const useCustodialBalance = (userId: string) => {
@@ -273,6 +289,11 @@ const Dashboard: FC = () => {
     profitLoss: 0
   });
 
+  // 🚀 NEW: Recent activity state
+  const [recentActivity, setRecentActivity] = useState<any[]>([]);
+  const [isLoadingActivity, setIsLoadingActivity] = useState<boolean>(false);
+  const [activityLastUpdated, setActivityLastUpdated] = useState<number>(0);
+
   const [levelData, setLevelData] = useState({
     level: 1,
     experience: 0,
@@ -311,6 +332,43 @@ const Dashboard: FC = () => {
     lastWallet: '',
     lastUserId: ''
   });
+
+  // 🚀 NEW: Fetch recent activity/trade history
+  const fetchRecentActivity = useCallback(async () => {
+    if (!userId) {
+      setRecentActivity([]);
+      return;
+    }
+
+    setIsLoadingActivity(true);
+    try {
+      console.log(`📊 Dashboard: Fetching recent activity for user ${userId}`);
+      
+      const activityData = await UserAPI.getEnhancedTradeHistory(userId, 5);
+      
+      if (activityData && activityData.trades.length > 0) {
+        console.log(`✅ Dashboard: Got ${activityData.trades.length} recent trades`);
+        setRecentActivity(activityData.trades);
+        setActivityLastUpdated(Date.now());
+      } else {
+        console.log(`ℹ️ Dashboard: No recent activity found for user ${userId}`);
+        setRecentActivity([]);
+      }
+      
+    } catch (error) {
+      console.error('❌ Dashboard: Failed to fetch recent activity:', error);
+      setRecentActivity([]);
+    } finally {
+      setTimeout(() => setIsLoadingActivity(false), 100);
+    }
+  }, [userId]);
+
+  // Fetch recent activity when userId changes
+  useEffect(() => {
+    if (userId) {
+      fetchRecentActivity();
+    }
+  }, [userId, fetchRecentActivity]);
 
   // 🚀 OPTIMIZED: User initialization effect
   useEffect(() => {
@@ -836,6 +894,11 @@ const Dashboard: FC = () => {
         console.log(`🎯 Dashboard LIVE: Bet placed for ${userId} - refreshing stats...`);
         refreshStatsDebounced();
         
+        // Also refresh recent activity
+        setTimeout(() => {
+          fetchRecentActivity();
+        }, 2000);
+        
         toast.success(`Bet placed: ${data.betAmount} SOL`, { 
           duration: 2000,
           id: 'bet-placed' 
@@ -847,6 +910,11 @@ const Dashboard: FC = () => {
       if (data.userId === userId) {
         console.log(`💸 Dashboard LIVE: Cashout processed for ${userId} - refreshing stats...`);
         refreshStatsDebounced();
+        
+        // Also refresh recent activity
+        setTimeout(() => {
+          fetchRecentActivity();
+        }, 2000);
         
         if (data.payout && data.multiplier) {
           toast.success(`Cashed out at ${data.multiplier.toFixed(2)}x: +${data.payout.toFixed(3)} SOL!`, { 
@@ -860,6 +928,11 @@ const Dashboard: FC = () => {
     const handleGameEnd = (data: any) => {
       console.log(`🎮 Dashboard LIVE: Game ended - refreshing stats for active players...`);
       refreshStatsDebounced();
+      
+      // Refresh recent activity for all game ends
+      setTimeout(() => {
+        fetchRecentActivity();
+      }, 3000);
     };
 
     const handleUserStatsUpdate = (data: any) => {
@@ -890,6 +963,11 @@ const Dashboard: FC = () => {
       if (data.userId === userId) {
         console.log(`🎲 Dashboard LIVE: Bet result received for ${userId}:`, data);
         refreshStatsDebounced();
+        
+        // Refresh recent activity after bet result
+        setTimeout(() => {
+          fetchRecentActivity();
+        }, 1500);
       }
     };
 
@@ -956,7 +1034,7 @@ const Dashboard: FC = () => {
         clearTimeout(statsRefreshTimeout);
       }
     };
-  }, [userId]);
+  }, [userId, fetchRecentActivity, fetchLevelData]);
 
   // ENHANCED: Updated refreshData function with better feedback
   const refreshData = useCallback(async () => {
@@ -983,6 +1061,14 @@ const Dashboard: FC = () => {
         console.log('🎯 Dashboard: Enhanced level data refreshed');
       } catch (error) {
         console.error('❌ Dashboard: Failed to refresh enhanced level data:', error);
+      }
+      
+      // 🚀 NEW: Refresh recent activity
+      try {
+        await fetchRecentActivity();
+        console.log('📊 Dashboard: Recent activity refreshed');
+      } catch (error) {
+        console.error('❌ Dashboard: Failed to refresh recent activity:', error);
       }
       
       try {
@@ -1041,7 +1127,7 @@ const Dashboard: FC = () => {
       clearTimeout(refreshTimeout);
       setIsManualRefreshing(false);
     }
-  }, [isValidWallet, userId, walletAddress, refreshCustodialBalance, fetchLevelData]);
+  }, [isValidWallet, userId, walletAddress, refreshCustodialBalance, fetchLevelData, fetchRecentActivity]);
 
   // OPTIMIZED: Real-time socket listeners WITHOUT automatic stats refresh
   useEffect(() => {
@@ -1615,7 +1701,7 @@ const Dashboard: FC = () => {
                 </div>
               )}
 
-              {/* 🚀 ENHANCED: Compact Quick Actions & Activity */}
+              {/* 🚀 ENHANCED: Compact Quick Actions & Recent Activity */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 mb-6">
                 <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 sm:p-6">
                   <h3 className="text-base sm:text-lg font-bold text-white mb-3 sm:mb-4 flex items-center">
@@ -1642,25 +1728,93 @@ const Dashboard: FC = () => {
                   </div>
                 </div>
                 
+                {/* 🚀 NEW: Enhanced Recent Activity with Trade History */}
                 <div className="bg-gray-900 rounded-lg border border-gray-800 p-4 sm:p-6">
                   <h3 className="text-base sm:text-lg font-bold text-white mb-3 sm:mb-4 flex items-center">
                     <Award size={16} className="mr-2" />
                     Recent Activity
-                  </h3>
-                  <div className="text-gray-400 text-center py-4 sm:py-6">
-                    {isValidWallet ? (
-                      <div className="space-y-2">
-                        <AlertCircle size={32} className="mx-auto text-gray-600" />
-                        <p className="text-sm">No recent activity</p>
-                        <p className="text-xs text-gray-500">Start playing to see your activity here</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <Users size={32} className="mx-auto text-gray-600" />
-                        <p className="text-sm">Login to view activity</p>
-                      </div>
+                    {isLoadingActivity && (
+                      <div className="ml-2 animate-spin h-3 w-3 border border-blue-400 border-t-transparent rounded-full"></div>
                     )}
-                  </div>
+                  </h3>
+                  
+                  {isLoadingActivity ? (
+                    <div className="space-y-2">
+                      {[1, 2, 3].map((i) => (
+                        <div key={i} className="animate-pulse flex items-center space-x-3 p-2">
+                          <div className="h-3 w-3 bg-gray-700 rounded-full"></div>
+                          <div className="flex-1 space-y-1">
+                            <div className="h-3 bg-gray-700 rounded w-3/4"></div>
+                            <div className="h-2 bg-gray-700 rounded w-1/2"></div>
+                          </div>
+                          <div className="h-3 w-12 bg-gray-700 rounded"></div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : recentActivity.length > 0 ? (
+                    <div className="space-y-3">
+                      {recentActivity.slice(0, 5).map((trade: any, index: number) => (
+                        <div 
+                          key={trade.id || index}
+                          className={`flex items-center justify-between p-3 rounded-lg border ${
+                            trade.was_winner
+                              ? 'border-green-600/30 bg-green-600/10'
+                              : 'border-red-600/30 bg-red-600/10'
+                          }`}
+                        >
+                          <div className="flex items-center space-x-3">
+                            {trade.was_winner ? (
+                              <TrendingUp className="text-green-400" size={16} />
+                            ) : (
+                              <TrendingDown className="text-red-400" size={16} />
+                            )}
+                            <div>
+                              <div className="text-white text-sm font-medium flex items-center">
+                                {trade.bet_amount.toFixed(3)}
+                                <SolanaLogo size={12} className="ml-1" />
+                                {trade.cashout_multiplier && (
+                                  <span className="text-gray-400 ml-2 text-xs">
+                                    @ {trade.cashout_multiplier.toFixed(2)}x
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-gray-400 text-xs">
+                                {new Date(trade.created_at).toLocaleDateString()}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className={`font-bold text-sm ${trade.was_winner ? 'text-green-400' : 'text-red-400'}`}>
+                              {trade.return_percentage > 0 ? '+' : ''}{trade.return_percentage.toFixed(1)}%
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      
+                      {activityLastUpdated > 0 && (
+                        <div className="text-center pt-2 border-t border-gray-700">
+                          <div className="text-xs text-gray-500">
+                            Updated: {new Date(activityLastUpdated).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-gray-400 text-center py-4 sm:py-6">
+                      {isValidWallet ? (
+                        <div className="space-y-2">
+                          <AlertCircle size={32} className="mx-auto text-gray-600" />
+                          <p className="text-sm">No recent activity</p>
+                          <p className="text-xs text-gray-500">Start playing to see your trades here</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <Users size={32} className="mx-auto text-gray-600" />
+                          <p className="text-sm">Login to view activity</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 

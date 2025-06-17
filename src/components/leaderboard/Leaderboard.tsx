@@ -1,14 +1,15 @@
 // Enhanced Leaderboard Component with NEW XP SYSTEM from users_unified
-import { FC, useState } from 'react';
+import { FC, useState, useEffect } from 'react';
 import { LeaderboardEntry, UserAPI } from '../../services/api';
-import { Crown, Star, Medal, Trophy, TrendingUp, Zap, Shield, Award } from 'lucide-react';
-
+import { Crown, Star, Medal, Trophy, TrendingUp, Zap, Shield, Award, Activity, BarChart3, TrendingDown } from 'lucide-react';
 interface LeaderboardProps {
   entries: LeaderboardEntry[];
 }
 
 const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
   const [expandedEntry, setExpandedEntry] = useState<string | null>(null);
+  const [userTradeHistory, setUserTradeHistory] = useState<{[key: string]: any}>({});
+const [loadingTradeHistory, setLoadingTradeHistory] = useState<{[key: string]: boolean}>({});
 
   // Enhanced badge system with colors and icons
   const getBadgeInfo = (badge?: string) => {
@@ -151,9 +152,178 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
     };
   };
 
+  const loadTradeHistoryForUser = async (userId: string) => {
+  if (userTradeHistory[userId] || loadingTradeHistory[userId]) {
+    return; // Already loaded or loading
+  }
+
+  setLoadingTradeHistory(prev => ({ ...prev, [userId]: true }));
+  
+  try {
+    console.log(`📊 Loading trade history for user: ${userId}`);
+    const tradeHistory = await UserAPI.getEnhancedTradeHistory(userId, 5);
+    
+    setUserTradeHistory(prev => ({
+      ...prev,
+      [userId]: tradeHistory
+    }));
+    
+    console.log(`✅ Trade history loaded for user ${userId}:`, tradeHistory);
+  } catch (error) {
+    console.error(`❌ Error loading trade history for user ${userId}:`, error);
+    setUserTradeHistory(prev => ({
+      ...prev,
+      [userId]: { trades: [], hasEnhancedData: false }
+    }));
+  } finally {
+    setLoadingTradeHistory(prev => ({ ...prev, [userId]: false }));
+  }
+};
+
   const toggleExpanded = (entryId: string) => {
-    setExpandedEntry(expandedEntry === entryId ? null : entryId);
+    const newExpandedEntry = expandedEntry === entryId ? null : entryId;
+    const [userTradeHistory, setUserTradeHistory] = useState<{[key: string]: any}>({});
+const [loadingTradeHistory, setLoadingTradeHistory] = useState<{[key: string]: boolean}>({});
+    setExpandedEntry(newExpandedEntry);
+    
+    // Load trade history when expanding
+    if (newExpandedEntry) {
+      loadTradeHistoryForUser(entryId);
+    }
   };
+
+  const TradeHistorySection = ({ userId }: { userId: string }) => {
+  const tradeData = userTradeHistory[userId];
+  const isLoading = loadingTradeHistory[userId];
+
+  if (isLoading) {
+    return (
+      <div className="mt-4 pt-3 border-t border-gray-700">
+        <h4 className="text-white font-medium mb-2 flex items-center">
+          <Activity className="mr-2 text-blue-400" size={16} />
+          Recent Trades
+        </h4>
+        <div className="flex items-center justify-center py-4">
+          <div className="animate-spin h-4 w-4 border-2 border-blue-400 border-t-transparent rounded-full mr-2"></div>
+          <span className="text-gray-400 text-sm">Loading trade history...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!tradeData || tradeData.trades.length === 0) {
+    return (
+      <div className="mt-4 pt-3 border-t border-gray-700">
+        <h4 className="text-white font-medium mb-2 flex items-center">
+          <Activity className="mr-2 text-blue-400" size={16} />
+          Recent Trades
+        </h4>
+        <div className="text-center py-3 text-gray-400 text-sm">
+          No recent trades available
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 pt-3 border-t border-gray-700">
+      <h4 className="text-white font-medium mb-2 flex items-center">
+        <Activity className="mr-2 text-blue-400" size={16} />
+        Recent Trades
+        {tradeData.hasEnhancedData && (
+          <span className="ml-2 text-xs text-green-400 bg-green-400/20 px-2 py-0.5 rounded">
+            ENHANCED
+          </span>
+        )}
+      </h4>
+
+      {/* Trade Analytics Summary */}
+      {tradeData.analytics && (
+        <div className="grid grid-cols-4 gap-3 mb-3">
+          <div className="text-center">
+            <div className="text-sm font-bold text-white">{tradeData.analytics.total_trades}</div>
+            <div className="text-xs text-gray-400">Trades</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-sm font-bold ${tradeData.analytics.win_rate >= 50 ? 'text-green-400' : 'text-red-400'}`}>
+              {tradeData.analytics.win_rate.toFixed(1)}%
+            </div>
+            <div className="text-xs text-gray-400">Win Rate</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-sm font-bold ${tradeData.analytics.total_profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {tradeData.analytics.total_profit >= 0 ? '+' : ''}{tradeData.analytics.total_profit.toFixed(3)}
+            </div>
+            <div className="text-xs text-gray-400">Total P&L</div>
+          </div>
+          <div className="text-center">
+            <div className={`text-sm font-bold ${tradeData.analytics.avg_return >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {tradeData.analytics.avg_return >= 0 ? '+' : ''}{tradeData.analytics.avg_return.toFixed(1)}%
+            </div>
+            <div className="text-xs text-gray-400">Avg Return</div>
+          </div>
+        </div>
+      )}
+
+      {/* Individual Trades */}
+      <div className="space-y-2">
+        {tradeData.trades.slice(0, 3).map((trade: any, index: number) => (
+          <div 
+            key={trade.id || index}
+            className={`p-2 rounded border text-xs ${
+              trade.was_winner
+                ? 'border-green-600/30 bg-green-600/10'
+                : 'border-red-600/30 bg-red-600/10'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {trade.was_winner ? (
+                  <TrendingUp className="text-green-400" size={12} />
+                ) : (
+                  <TrendingDown className="text-red-400" size={12} />
+                )}
+                <span className="text-white font-medium">
+                  {trade.bet_amount.toFixed(3)} SOL
+                </span>
+                {trade.cashout_multiplier && (
+                  <span className="text-gray-400">
+                    @ {trade.cashout_multiplier.toFixed(2)}x
+                  </span>
+                )}
+                {tradeData.hasEnhancedData && trade.risk_level && (
+                  <span className={`px-1 py-0.5 rounded text-xs ${
+                    trade.risk_level === 'high' ? 'bg-red-600/20 text-red-400' :
+                    trade.risk_level === 'medium' ? 'bg-yellow-600/20 text-yellow-400' :
+                    'bg-green-600/20 text-green-400'
+                  }`}>
+                    {trade.risk_level.toUpperCase()}
+                  </span>
+                )}
+              </div>
+              <div className="text-right">
+                <div className={`font-bold ${trade.was_winner ? 'text-green-400' : 'text-red-400'}`}>
+                  {trade.return_percentage > 0 ? '+' : ''}{trade.return_percentage.toFixed(1)}%
+                </div>
+                <div className="text-gray-400 text-xs">
+                  {new Date(trade.created_at).toLocaleDateString()}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+        
+        {tradeData.trades.length > 3 && (
+          <div className="text-center py-2">
+            <span className="text-xs text-gray-400">
+              +{tradeData.trades.length - 3} more trades
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
   if (entries.length === 0) {
     return (
@@ -412,6 +582,8 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
                     </div>
                   </div>
                 )}
+                {/* 👇 ADD THIS ONE LINE HERE 👇 */}
+<TradeHistorySection userId={entry.id} />
               </div>
             )}
           </div>

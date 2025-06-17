@@ -685,13 +685,13 @@ const BettingSection: FC<{
   embeddedWalletBalance,
   onQuickTransfer
 }) => {
+  
   // Quick transfer amounts
   const quickTransferAmounts = [0.05, 0.1, 0.5, 1.0];
   const [isTransferMode, setIsTransferMode] = useState(false);
   
-  // 🚀 ADD THIS MISSING VARIABLE:
   const showTransferOption = currentToken === TokenType.SOL && embeddedWalletBalance > 0.005;
-  // 🚀 UPDATED: Smart amount validation for both modes
+  
   const { amountValid, amountInRange, minBetAmount, maxBetAmount, relevantBalance } = useMemo(() => {
     const amountNum = parseFloat(amount);
     const minBet = currentToken === TokenType.SOL ? 0.005 : 1;
@@ -745,234 +745,87 @@ const BettingSection: FC<{
 
   // 🔧 UPDATED: Button states with transfer mode awareness
   const buttonStates = useMemo(() => {
-    const buyDisabled = isPlacingBet || !isWalletReady || !amountValid || !amountInRange || !canBet;
-    const rugDisabled = isCashingOut || !isConnected || gameStatus !== 'active' || !activeBet;
-    
-    return { buyDisabled, rugDisabled };
-  }, [isPlacingBet, isWalletReady, amountValid, amountInRange, canBet, isCashingOut, isConnected, gameStatus, activeBet]);
+  // ✅ FIXED: Allow cashout for pregame bets once game becomes active
+  const canCashoutPregameBet = activeBet && 
+    activeBet.entryMultiplier === 1.0 && // Was placed during pregame
+    gameStatus === 'active'; // Game is now active
+  
+  const buyDisabled = isPlacingBet || !isWalletReady || !amountValid || !amountInRange || !canBet;
+  
+  // ✅ FIXED: Enable RUG button for active bets OR pregame bets that are now in active game
+  const rugDisabled = isCashingOut || 
+    !isConnected || 
+    !activeBet || 
+    (gameStatus !== 'active' && !canCashoutPregameBet);
+  
+  return { buyDisabled, rugDisabled };
+}, [
+  isPlacingBet, 
+  isWalletReady, 
+  amountValid, 
+  amountInRange, 
+  canBet, 
+  isCashingOut, 
+  isConnected, 
+  gameStatus, 
+  activeBet
+]);
+ // 🚀 FIXED BettingSection Component - Replace your current BettingSection return statement
 
-  if (isMobile) {
-    return (
-      <div>
-        {!activeBet ? (
-          <>
-            <div className="mb-2">
-              {/* 🚀 NEW: Toggle Button (only when transfer option available) */}
-              {showTransferOption && (
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs text-gray-400">
-                    {isTransferMode 
-                      ? `💳 Transfer from Wallet (${embeddedWalletBalance.toFixed(3)} SOL)` 
-                      : `🎮 Trade with Game Balance (${activeBalance.toFixed(3)} ${currentToken})`
-                    }
-                  </div>
-                  <button
-                    onClick={() => setIsTransferMode(!isTransferMode)}
-                    className={`text-xs px-2 py-1 rounded transition-colors ${
-                      isTransferMode 
-                        ? 'bg-purple-600 hover:bg-purple-700 text-white' 
-                        : 'bg-green-600 hover:bg-green-700 text-white'
-                    }`}
-                  >
-                    {isTransferMode ? 'Trade' : 'Transfer'}
-                  </button>
-                </div>
-              )}
-
-              <div className="flex gap-1 mb-1">
-                <input
-                  type="text"
-                  value={amount}
-                  onChange={(e) => onAmountChange(e.target.value)}
-                  className="flex-1 bg-gray-700 text-white px-2 py-1.5 rounded text-sm focus:outline-none"
-                  placeholder={isTransferMode ? `Transfer SOL (Min: ${minBetAmount})` : `Bet ${currentToken} (Min: ${minBetAmount})`}
-                  disabled={isTransferMode ? false : !canBet}
-                />
-                <button
-                  onClick={handleHalfAmount}
-                  className={`px-2 text-xs rounded hover:bg-gray-500 ${
-                    isTransferMode 
-                      ? 'bg-purple-600 text-purple-100 hover:bg-purple-500' 
-                      : 'bg-gray-600 text-gray-300'
-                  }`}
-                  disabled={isTransferMode ? false : !canBet}
-                >
-                  ½
-                </button>
-                <button
-                  onClick={handleMaxAmount}
-                  className={`px-2 text-xs rounded hover:bg-gray-500 ${
-                    isTransferMode 
-                      ? 'bg-purple-600 text-purple-100 hover:bg-purple-500' 
-                      : 'bg-gray-600 text-gray-300'
-                  }`}
-                  disabled={isTransferMode ? false : !canBet}
-                >
-                  Max
-                </button>
-              </div>
-              
-              <div className="grid grid-cols-4 gap-1">
-                {currentQuickAmounts.map((amt) => (
-                  <button
-                    key={amt}
-                    onClick={() => handleSmartQuickAmount(amt)}
-                    className={`py-1 text-xs rounded transition-colors ${
-                      parseFloat(amount) === amt
-                        ? (isTransferMode ? 'bg-purple-600 text-white' : 'bg-green-600 text-white')
-                        : (isTransferMode ? 'bg-purple-700 text-purple-300 hover:bg-purple-600' : 'bg-gray-700 text-gray-300 hover:bg-gray-600')
-                    }`}
-                    disabled={isTransferMode 
-                      ? amt > embeddedWalletBalance 
-                      : !canBet || amt > activeBalance
-                    }
-                  >
-                    {amt}{isTransferMode ? '' : ''}
-                  </button>
-                ))}
-              </div>
-
-              {betValidationError && !isTransferMode && (
-                <div className="text-red-400 text-xs mt-1">{betValidationError}</div>
-              )}
-            </div>
-          </>
-        ) : null}
-        
-        <div className="grid grid-cols-2 gap-2">
-          {!activeBet ? (
-            <>
-              <button
-                onClick={onPlaceBet}
-                disabled={buttonStates.buyDisabled}
-                className={`py-2.5 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
-                  buttonStates.buyDisabled
-                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-green-600 hover:bg-green-700 text-white'
-                }`}
-              >
-                {isPlacingBet ? (
-                  <>
-                    <div className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full mr-1"></div>
-                    Placing
-                  </>
-                ) : (
-                  <>
-                    <Coins className="mr-1 h-4 w-4" />
-                    {isWaitingPeriod ? 'SNIPE' : 'BUY'}
-                  </>
-                )}
-              </button>
-              <button
-                disabled
-                className="py-2.5 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
-              >
-                <Sparkles className="mr-1 h-4 w-4" />
-                RUG
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                disabled
-                className="py-2.5 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
-              >
-                <Coins className="mr-1 h-4 w-4" />
-                Buy Active
-              </button>
-              <button
-                onClick={onCashout}
-                disabled={buttonStates.rugDisabled}
-                className={`py-2.5 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
-                  buttonStates.rugDisabled
-                    ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                    : 'bg-yellow-600 hover:bg-yellow-700 text-white'
-                }`}
-              >
-                {isCashingOut ? (
-                  <>
-                    <div className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full mr-1"></div>
-                    Cashing
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="mr-1 h-4 w-4" />
-                    RUG
-                  </>
-                )}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-
-  // Desktop layout
+if (isMobile) {
   return (
-    <div className="border-t border-gray-800 pt-3">
-      <h3 className="text-sm font-bold text-gray-400 mb-3">
-        {activeBet ? 'ACTIVE TRADE' : (isTransferMode ? 'QUICK TRANSFER' : 'PLACE BUY')}
-      </h3>
-      
-      {!activeBet && (
+    <div>
+      {!activeBet ? (
         <>
-          <div className="mb-3">
-            {/* 🚀 NEW: Toggle Button for Desktop (only when transfer option available) */}
+          <div className="mb-2">
+            {/* 🚀 NEW: Toggle Button (only when transfer option available) */}
             {showTransferOption && (
               <div className="flex items-center justify-between mb-2">
                 <div className="text-xs text-gray-400">
                   {isTransferMode 
-                    ? `💳 Transfer from Wallet - Available: ${embeddedWalletBalance.toFixed(3)} SOL` 
-                    : `🎮 Trade with Game Balance - Available: ${activeBalance.toFixed(3)} ${currentToken}`
+                    ? `💳 Transfer from Wallet (${embeddedWalletBalance.toFixed(3)} SOL)` 
+                    : `🎮 Trade with Game Balance (${activeBalance.toFixed(3)} ${currentToken})`
                   }
                 </div>
                 <button
                   onClick={() => setIsTransferMode(!isTransferMode)}
-                  className={`text-sm px-3 py-1 rounded transition-colors ${
+                  className={`text-xs px-2 py-1 rounded transition-colors ${
                     isTransferMode 
                       ? 'bg-purple-600 hover:bg-purple-700 text-white' 
                       : 'bg-green-600 hover:bg-green-700 text-white'
                   }`}
                 >
-                  {isTransferMode ? 'Switch to Betting' : 'Switch to Transfer'}
+                  {isTransferMode ? 'Trade' : 'Transfer'}
                 </button>
               </div>
             )}
 
-            <label className="block text-gray-400 text-xs mb-1">
-              {isTransferMode 
-                ? `Transfer Amount (SOL) - Min: ${minBetAmount}, Max: ${maxBetAmount.toFixed(3)}`
-                : `Trade Amount (${currentToken}) - Min: ${minBetAmount}, Max: ${maxBetAmount}`
-              }
-            </label>
-            <div className="flex">
+            <div className="flex gap-1 mb-1">
               <input
                 type="text"
                 value={amount}
                 onChange={(e) => onAmountChange(e.target.value)}
-                className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-l-md focus:outline-none"
-                placeholder={isTransferMode ? `Transfer SOL (Min: ${minBetAmount})` : `Trade ${currentToken} (Min: ${minBetAmount})`}
+                className="flex-1 bg-gray-700 text-white px-2 py-1.5 rounded text-sm focus:outline-none"
+                placeholder={isTransferMode ? `Transfer SOL (Min: ${minBetAmount})` : `Bet ${currentToken} (Min: ${minBetAmount})`}
                 disabled={isTransferMode ? false : !canBet}
               />
               <button
                 onClick={handleHalfAmount}
-                className={`px-2 text-xs border-l border-gray-900 transition-colors ${
+                className={`px-2 text-xs rounded hover:bg-gray-500 ${
                   isTransferMode 
                     ? 'bg-purple-600 text-purple-100 hover:bg-purple-500' 
-                    : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+                    : 'bg-gray-600 text-gray-300'
                 }`}
                 disabled={isTransferMode ? false : !canBet}
               >
-                Half
+                ½
               </button>
               <button
                 onClick={handleMaxAmount}
-                className={`px-2 text-xs rounded-r-md transition-colors ${
+                className={`px-2 text-xs rounded hover:bg-gray-500 ${
                   isTransferMode 
                     ? 'bg-purple-600 text-purple-100 hover:bg-purple-500' 
-                    : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+                    : 'bg-gray-600 text-gray-300'
                 }`}
                 disabled={isTransferMode ? false : !canBet}
               >
@@ -980,100 +833,288 @@ const BettingSection: FC<{
               </button>
             </div>
             
+            <div className="grid grid-cols-4 gap-1">
+              {currentQuickAmounts.map((amt) => (
+                <button
+                  key={amt}
+                  onClick={() => handleSmartQuickAmount(amt)}
+                  className={`py-1 text-xs rounded transition-colors ${
+                    parseFloat(amount) === amt
+                      ? (isTransferMode ? 'bg-purple-600 text-white' : 'bg-green-600 text-white')
+                      : (isTransferMode ? 'bg-purple-700 text-purple-300 hover:bg-purple-600' : 'bg-gray-700 text-gray-300 hover:bg-gray-600')
+                  }`}
+                  disabled={isTransferMode 
+                    ? amt > embeddedWalletBalance 
+                    : !canBet || amt > activeBalance
+                  }
+                >
+                  {amt}{isTransferMode ? '' : ''}
+                </button>
+              ))}
+            </div>
+
             {betValidationError && !isTransferMode && (
               <div className="text-red-400 text-xs mt-1">{betValidationError}</div>
             )}
           </div>
-          
-          <div className="grid grid-cols-4 gap-2 mb-3">
-            {currentQuickAmounts.map((amt) => (
-              <button
-                key={amt}
-                onClick={() => handleSmartQuickAmount(amt)}
-                className={`px-2 py-1 text-xs rounded transition-colors ${
-                  parseFloat(amount) === amt
-                    ? (isTransferMode ? 'bg-purple-600 text-white' : 'bg-green-600 text-white')
-                    : (isTransferMode ? 'bg-purple-700 text-purple-300 hover:bg-purple-600' : 'bg-gray-700 text-gray-300 hover:bg-gray-600')
-                }`}
-                disabled={isTransferMode 
-                  ? amt > embeddedWalletBalance 
-                  : !canBet || amt > activeBalance
-                }
-              >
-                {amt.toString()} {isTransferMode ? 'SOL' : currentToken}
-              </button>
-            ))}
-          </div>
         </>
-      )}
+      ) : null}
       
-      <div className="grid grid-cols-2 gap-3">
-        {!activeBet ? (
+      {/* 🚀 FIXED: Mobile button logic with pregame bet support */}
+      <div className="grid grid-cols-2 gap-2">
+  {!activeBet ? (
+    // No active bet - show buy button
+    <>
+      <button
+        onClick={onPlaceBet}
+        disabled={buttonStates.buyDisabled}
+        className={`py-2.5 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
+          buttonStates.buyDisabled
+            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+            : 'bg-green-600 hover:bg-green-700 text-white'
+        }`}
+      >
+        {isPlacingBet ? (
           <>
-            <button
-              onClick={onPlaceBet}
-              disabled={buttonStates.buyDisabled}
-              className={`py-3 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
-                buttonStates.buyDisabled
-                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                  : 'bg-green-600 hover:bg-green-700 text-white'
-              }`}
-            >
-              {isPlacingBet ? (
-                <>
-                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
-                  Placing...
-                </>
-              ) : (
-                <>
-                  <Coins className="mr-2 h-4 w-4" />
-                  {isWaitingPeriod ? 'SNIPE' : 'BUY'}
-                </>
-              )}
-            </button>
-            <button
-              disabled
-              className="py-3 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
-            >
-              <Sparkles className="mr-2 h-4 w-4" />
-              RUG
-            </button>
+            <div className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full mr-1"></div>
+            Placing
           </>
         ) : (
           <>
-            <button
-              disabled
-              className="py-3 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
-            >
-              <Coins className="mr-2 h-4 w-4" />
-              Buy Placed
-            </button>
-            <button
-              onClick={onCashout}
-              disabled={buttonStates.rugDisabled}
-              className={`py-3 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
-                buttonStates.rugDisabled
-                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                  : 'bg-yellow-600 hover:bg-yellow-700 text-white'
-              }`}
-            >
-              {isCashingOut ? (
-                <>
-                  <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
-                  Cashing...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  RUG ({currentMultiplier.toFixed(2)}x)
-                </>
-              )}
-            </button>
+            <Coins className="mr-1 h-4 w-4" />
+            {isWaitingPeriod ? 'SNIPE' : 'BUY'}
           </>
         )}
-      </div>
+      </button>
+      <button
+        disabled
+        className="py-2.5 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
+      >
+        <Sparkles className="mr-1 h-4 w-4" />
+        RUG
+      </button>
+    </>
+  ) : (
+    // ✅ FIXED: Has active bet - handle pregame vs active states
+    <>
+      <button
+        disabled
+        className="py-2.5 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
+      >
+        <Coins className="mr-1 h-4 w-4" />
+        {activeBet.entryMultiplier === 1.0 ? 'Sniped' : 'Buy Active'}
+      </button>
+      <button
+        onClick={onCashout}
+        disabled={buttonStates.rugDisabled}
+        className={`py-2.5 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
+          buttonStates.rugDisabled
+            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+            : activeBet.entryMultiplier === 1.0 && gameStatus === 'waiting'
+              ? 'bg-yellow-600 hover:bg-yellow-700 text-white' // Pregame bet waiting
+              : 'bg-yellow-600 hover:bg-yellow-700 text-white'   // Active bet or pregame bet in active game
+        }`}
+      >
+        {isCashingOut ? (
+          <>
+            <div className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full mr-1"></div>
+            Cashing
+          </>
+        ) : (
+          <>
+            <Sparkles className="mr-1 h-4 w-4" />
+            {activeBet.entryMultiplier === 1.0 && gameStatus === 'waiting' 
+              ? 'WAIT' 
+              : `RUG (${currentMultiplier.toFixed(2)}x)`
+            }
+          </>
+        )}
+      </button>
+    </>
+  )}
+</div>
     </div>
   );
+}
+
+
+// 🚀 FIXED: Desktop layout with pregame bet support
+return (
+  <div className="border-t border-gray-800 pt-3">
+    <h3 className="text-sm font-bold text-gray-400 mb-3">
+      {activeBet ? (
+        // Show different title based on bet type
+        activeBet.entryMultiplier === 1.0 && gameStatus === 'waiting' 
+          ? 'PREGAME BET' 
+          : 'ACTIVE TRADE'
+      ) : (
+        isTransferMode ? 'QUICK TRANSFER' : 'PLACE BUY'
+      )}
+    </h3>
+    
+    {!activeBet && (
+      <>
+        <div className="mb-3">
+          {/* 🚀 NEW: Toggle Button for Desktop (only when transfer option available) */}
+          {showTransferOption && (
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs text-gray-400">
+                {isTransferMode 
+                  ? `💳 Transfer from Wallet - Available: ${embeddedWalletBalance.toFixed(3)} SOL` 
+                  : `🎮 Trade with Game Balance - Available: ${activeBalance.toFixed(3)} ${currentToken}`
+                }
+              </div>
+              <button
+                onClick={() => setIsTransferMode(!isTransferMode)}
+                className={`text-sm px-3 py-1 rounded transition-colors ${
+                  isTransferMode 
+                    ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                    : 'bg-green-600 hover:bg-green-700 text-white'
+                }`}
+              >
+                {isTransferMode ? 'Switch to Betting' : 'Switch to Transfer'}
+              </button>
+            </div>
+          )}
+
+          <label className="block text-gray-400 text-xs mb-1">
+            {isTransferMode 
+              ? `Transfer Amount (SOL) - Min: ${minBetAmount}, Max: ${maxBetAmount.toFixed(3)}`
+              : `Trade Amount (${currentToken}) - Min: ${minBetAmount}, Max: ${maxBetAmount}`
+            }
+          </label>
+          <div className="flex">
+            <input
+              type="text"
+              value={amount}
+              onChange={(e) => onAmountChange(e.target.value)}
+              className="flex-1 bg-gray-700 text-white px-3 py-2 rounded-l-md focus:outline-none"
+              placeholder={isTransferMode ? `Transfer SOL (Min: ${minBetAmount})` : `Trade ${currentToken} (Min: ${minBetAmount})`}
+              disabled={isTransferMode ? false : !canBet}
+            />
+            <button
+              onClick={handleHalfAmount}
+              className={`px-2 text-xs border-l border-gray-900 transition-colors ${
+                isTransferMode 
+                  ? 'bg-purple-600 text-purple-100 hover:bg-purple-500' 
+                  : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+              }`}
+              disabled={isTransferMode ? false : !canBet}
+            >
+              Half
+            </button>
+            <button
+              onClick={handleMaxAmount}
+              className={`px-2 text-xs rounded-r-md transition-colors ${
+                isTransferMode 
+                  ? 'bg-purple-600 text-purple-100 hover:bg-purple-500' 
+                  : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+              }`}
+              disabled={isTransferMode ? false : !canBet}
+            >
+              Max
+            </button>
+          </div>
+          
+          {betValidationError && !isTransferMode && (
+            <div className="text-red-400 text-xs mt-1">{betValidationError}</div>
+          )}
+        </div>
+        
+        <div className="grid grid-cols-4 gap-2 mb-3">
+          {currentQuickAmounts.map((amt) => (
+            <button
+              key={amt}
+              onClick={() => handleSmartQuickAmount(amt)}
+              className={`px-2 py-1 text-xs rounded transition-colors ${
+                parseFloat(amount) === amt
+                  ? (isTransferMode ? 'bg-purple-600 text-white' : 'bg-green-600 text-white')
+                  : (isTransferMode ? 'bg-purple-700 text-purple-300 hover:bg-purple-600' : 'bg-gray-700 text-gray-300 hover:bg-gray-600')
+              }`}
+              disabled={isTransferMode 
+                ? amt > embeddedWalletBalance 
+                : !canBet || amt > activeBalance
+              }
+            >
+              {amt.toString()} {isTransferMode ? 'SOL' : currentToken}
+            </button>
+          ))}
+        </div>
+      </>
+    )}
+    
+    {/* 🚀 FIXED: Desktop button logic with pregame bet support */}
+    <div className="grid grid-cols-2 gap-3">
+  {!activeBet ? (
+    <>
+      <button
+        onClick={onPlaceBet}
+        disabled={buttonStates.buyDisabled}
+        className={`py-3 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
+          buttonStates.buyDisabled
+            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+            : 'bg-green-600 hover:bg-green-700 text-white'
+        }`}
+      >
+        {isPlacingBet ? (
+          <>
+            <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+            Placing...
+          </>
+        ) : (
+          <>
+            <Coins className="mr-2 h-4 w-4" />
+            {isWaitingPeriod ? 'SNIPE' : 'BUY'}
+          </>
+        )}
+      </button>
+      <button
+        disabled
+        className="py-3 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
+      >
+        <Sparkles className="mr-2 h-4 w-4" />
+        RUG
+      </button>
+    </>
+  ) : (
+    // ✅ FIXED: Has active bet - handle pregame vs active states
+    <>
+      <button
+        disabled
+        className="py-3 rounded-md font-bold text-sm bg-gray-700 text-gray-500 cursor-not-allowed flex items-center justify-center"
+      >
+        <Coins className="mr-2 h-4 w-4" />
+        {activeBet.entryMultiplier === 1.0 ? 'Sniped' : 'Buy Placed'}
+      </button>
+      <button
+        onClick={onCashout}
+        disabled={buttonStates.rugDisabled}
+        className={`py-3 rounded-md font-bold text-sm flex items-center justify-center transition-colors ${
+          buttonStates.rugDisabled
+            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+            : 'bg-yellow-600 hover:bg-yellow-700 text-white'
+        }`}
+      >
+        {isCashingOut ? (
+          <>
+            <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+            Cashing...
+          </>
+        ) : (
+          <>
+            <Sparkles className="mr-2 h-4 w-4" />
+            {activeBet.entryMultiplier === 1.0 && gameStatus === 'waiting' 
+              ? 'WAIT (Game Starting)' 
+              : `RUG (${currentMultiplier.toFixed(2)}x)`
+            }
+          </>
+        )}
+      </button>
+    </>
+  )}
+</div>
+  </div>
+);
 });
 
 // 🛡️ BALANCE PROTECTION HOOK - Add this right before TradingControls component
@@ -1259,6 +1300,17 @@ const updateRecentTransfers = () => {};
     if (amountNum > activeBalance) return 'Insufficient balance';
     return '';
   }, [amount, currentToken, activeBalance]);
+
+  const { amountValid, amountInRange } = useMemo(() => {
+  const amountNum = parseFloat(amount);
+  const minBetAmount = currentToken === TokenType.SOL ? 0.005 : 1;
+  const maxBetAmount = currentToken === TokenType.SOL ? 10.0 : 10000;
+  
+  return {
+    amountValid: !isNaN(amountNum) && amountNum > 0 && amountNum <= activeBalance,
+    amountInRange: amountNum >= minBetAmount && amountNum <= maxBetAmount
+  };
+}, [amount, currentToken, activeBalance]);
 
   const containerClasses = `
     bg-[#0d0d0f] text-white border border-gray-800 rounded-lg
@@ -1626,16 +1678,25 @@ const handleBuy = useCallback(async () => {
 
   // 🚀 UPDATED: Enhanced cashout with shared state
   const handleCashout = useCallback(async () => {
-    if (!authenticated || !walletAddress || !isConnected || !activeBet) {
-      console.log('❌ Cannot cashout: missing requirements');
-      return;
-    }
-  
-    if (!userId) {
-      setServerError('User not initialized');
-      toast.error('User not initialized');
-      return;
-    }
+  if (!authenticated || !walletAddress || !isConnected || !activeBet) {
+    console.log('❌ Cannot cashout: missing requirements');
+    return;
+  }
+
+  // ✅ ADD THIS PREGAME VALIDATION:
+  const isPregameBet = activeBet.entryMultiplier === 1.0;
+  if (isPregameBet && gameState.gameStatus !== 'active') {
+    setServerError('Wait for game to start before cashing out');
+    toast.error('Wait for game to start before cashing out');
+    return;
+  }
+
+  if (!userId) {
+    setServerError('User not initialized');
+    toast.error('User not initialized');
+    return;
+  }
+
   
     if (isCashingOut || operationTimeouts.has('cashout')) {
       console.log('❌ Cashout already in progress');
@@ -1780,22 +1841,23 @@ setTimeout(() => {
       });
     }
   }, [
-    authenticated, 
-    walletAddress, 
-    isConnected, 
-    activeBet, 
-    userId, 
-    isCashingOut, 
-    operationTimeouts, 
-    custodialCashOut, 
-    cashOut, 
-    gameState.activeCurrentMultiplier, 
-    onSell, 
-    updateCustodialBalance, 
-    updateRuggedBalance,
-    setIsCashingOut, // Add shared state setter
-    clearActiveBet   // Add shared state setter
-  ]);
+  authenticated, 
+  walletAddress, 
+  isConnected, 
+  activeBet, 
+  userId, 
+  isCashingOut, 
+  operationTimeouts, 
+  custodialCashOut, 
+  cashOut, 
+  gameState.activeCurrentMultiplier,
+  gameState.gameStatus, // ✅ ADD THIS DEPENDENCY
+  onSell, 
+  updateCustodialBalance, 
+  updateRuggedBalance,
+  setIsCashingOut,
+  clearActiveBet
+]);
 
   // Handle token switch
   const handleTokenChange = useCallback((token: TokenType) => {
@@ -1823,7 +1885,7 @@ setTimeout(() => {
   }, [setSavedAmount]);
 
   // In your TradingControls component, update the handleQuickTransfer functionconst handleQuickTransfer = useCallback(async (amount: number) => {
-    const handleQuickTransfer = useCallback(async (amount: number) => {
+     const handleQuickTransfer = useCallback(async (amount: number) => {
       if (!userId) {
         toast.error('User not available for transfer');
         return;
@@ -2258,12 +2320,88 @@ useEffect(() => {
   }, [gameState.activeCurrentMultiplier, autoCashoutEnabled, autoCashoutValue, activeBet, gameState.activeIsGameActive, gameState.gameStatus, handleCashout, isCashingOut]);
 
   // Clear active bet if game is not active
-  useEffect(() => {
-    if (activeBet && gameState.gameStatus !== 'active') {
-      console.log(`🔄 Game status changed to ${gameState.gameStatus}, clearing active bet`);
-      clearActiveBet(); // Use shared state setter
-    }
-  }, [gameState.gameStatus, activeBet, clearActiveBet]);
+useEffect(() => {
+  // Only clear bets when game crashes or ends, NOT during waiting period
+  if (activeBet && gameState.gameStatus === 'crashed') {
+    console.log(`💥 Game crashed, clearing active bet after resolving loss`);
+    // Note: handleAutomaticBetLoss will handle this
+  }
+  
+  // Clear bets that are stuck in invalid states (but preserve pregame bets)
+  if (activeBet && gameState.gameStatus === 'waiting' && activeBet.gameId !== gameState.activeCurrentGame?.id) {
+    console.log(`🔄 New game started, clearing old active bet`);
+    clearActiveBet();
+  }
+}, [gameState.gameStatus, activeBet, gameState.activeCurrentGame?.id, clearActiveBet]);
+// 🚀 ENHANCED: Better pregame bet handling in button states
+const buttonStates = useMemo(() => {
+  // Allow cashout for pregame bets once game becomes active
+  const canCashoutPregameBet = activeBet && 
+    activeBet.entryMultiplier === 1.0 && // Was placed during pregame
+    gameState.gameStatus === 'active'; // Game is now active
+  
+  const buyDisabled = isPlacingBet || !isWalletReady || !amountValid || !amountInRange || !effectiveCanBet;
+  
+  // Enable RUG button for active bets OR pregame bets that are now in active game
+  const rugDisabled = isCashingOut || 
+    !isConnected || 
+    !activeBet || 
+    (gameState.gameStatus !== 'active' && !canCashoutPregameBet);
+  
+  return { buyDisabled, rugDisabled };
+}, [
+  isPlacingBet, 
+  isWalletReady, 
+  amountValid, 
+  amountInRange, 
+  effectiveCanBet, 
+  isCashingOut, 
+  isConnected, 
+  gameState.gameStatus, 
+  activeBet
+]);
+
+// 🚀 ENHANCED: Better active bet display for pregame bets
+const getActiveBetDisplay = () => {
+  if (!activeBet) return null;
+  
+  const isPregameBet = activeBet.entryMultiplier === 1.0;
+  const gameIsActive = gameState.gameStatus === 'active';
+  
+  if (isPregameBet && !gameIsActive) {
+    // Pregame bet waiting for game to start
+    return {
+      title: "Pregame Buy",
+      subtitle: "Waiting for game to start...",
+      amount: `${activeBet.amount} ${activeBet.tokenType || 'SOL'}`,
+      multiplier: "1.00x (Entry)",
+      status: "waiting",
+      canCashout: false
+    };
+  }
+  
+  if (isPregameBet && gameIsActive) {
+    // Pregame bet now in active game
+    return {
+      title: "Active Buy (Pregame Entry)",
+      subtitle: "Ready to cashout",
+      amount: `${activeBet.amount} ${activeBet.tokenType || 'SOL'}`,
+      multiplier: `${gameState.activeCurrentMultiplier.toFixed(2)}x`,
+      status: "active",
+      canCashout: true
+    };
+  }
+  
+  // Regular active bet
+  return {
+    title: "Active Buy",
+    subtitle: "Ready to cashout", 
+    amount: `${activeBet.amount} ${activeBet.tokenType || 'SOL'}`,
+    multiplier: `${gameState.activeCurrentMultiplier.toFixed(2)}x`,
+    status: "active",
+    canCashout: true
+  };
+};
 
   // Clear stuck active bets after timeout
   useEffect(() => {
@@ -2313,18 +2451,32 @@ useEffect(() => {
 />
 
         {activeBet && (
-          <div className="bg-blue-900 bg-opacity-30 p-3 rounded-lg mb-3">
-            <div className="text-center">
-              <div className="text-sm text-blue-400 mb-1">Active Buy</div>
-              <div className="text-lg font-bold text-blue-300">
-                {activeBet.amount} {activeBet.tokenType || 'SOL'} @ {activeBet.entryMultiplier.toFixed(2)}x
-              </div>
-              <div className="text-sm mt-1 text-green-400">
-                Current: {gameState.activeCurrentMultiplier.toFixed(2)}x
-              </div>
-            </div>
-          </div>
-        )}
+  <div className={`p-3 rounded-lg mb-3 ${
+    getActiveBetDisplay()?.status === 'waiting' 
+      ? 'bg-yellow-900 bg-opacity-30 border border-yellow-600' 
+      : 'bg-blue-900 bg-opacity-30'
+  }`}>
+    <div className="text-center">
+      <div className="text-sm text-blue-400 mb-1">
+        {getActiveBetDisplay()?.title}
+      </div>
+      <div className="text-lg font-bold text-blue-300">
+        {getActiveBetDisplay()?.amount} @ {activeBet.entryMultiplier.toFixed(2)}x
+      </div>
+      <div className="text-sm mt-1">
+        <span className="text-gray-400">{getActiveBetDisplay()?.subtitle}</span>
+      </div>
+      <div className="text-sm mt-1 text-green-400">
+        Current: {getActiveBetDisplay()?.multiplier}
+      </div>
+      {getActiveBetDisplay()?.status === 'waiting' && (
+        <div className="text-xs text-yellow-400 mt-1">
+          🎯 Snipe placed! Wait for game start to cashout
+        </div>
+      )}
+    </div>
+  </div>
+)}
 
         <div className="bg-gray-900 bg-opacity-50 rounded-lg p-3 mb-3">
         <BettingSection
@@ -2470,7 +2622,33 @@ useEffect(() => {
   isConnected={isConnected}
   isMobile={isMobile}
 />
-
+{activeBet && (
+  <div className={`p-4 rounded-lg mb-3 ${
+    getActiveBetDisplay()?.status === 'waiting' 
+      ? 'bg-yellow-900 bg-opacity-30 border border-yellow-600' 
+      : 'bg-blue-900 bg-opacity-30'
+  }`}>
+    <div className="text-center">
+      <div className="text-sm text-blue-400 mb-2">
+        {getActiveBetDisplay()?.title}
+      </div>
+      <div className="text-xl font-bold text-blue-300 mb-2">
+        {getActiveBetDisplay()?.amount} @ {activeBet.entryMultiplier.toFixed(2)}x
+      </div>
+      <div className="text-sm mb-1">
+        <span className="text-gray-400">{getActiveBetDisplay()?.subtitle}</span>
+      </div>
+      <div className="text-lg text-green-400 font-semibold">
+        Current: {getActiveBetDisplay()?.multiplier}
+      </div>
+      {getActiveBetDisplay()?.status === 'waiting' && (
+        <div className="text-sm text-yellow-400 mt-2 bg-yellow-900 bg-opacity-30 rounded px-3 py-1">
+          🎯 Snipe placed! Wait for game start to cashout
+        </div>
+      )}
+    </div>
+  </div>
+)}
 
       <BalanceDisplay
         currentToken={currentToken}

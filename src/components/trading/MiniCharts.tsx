@@ -139,10 +139,14 @@ const MiniCharts: FC<MiniChartProps> = ({ data = [], maxCharts = 10, onNewGame }
           </div>
         ) : (
           gameResults.slice(0, dynamicMaxCharts).map((item, index) => {
-            const peakValue = (item as any).peakValue || item.value;
-            const finalValue = (item as any).finalValue || item.value;
+            // TEMPORARY FIX: If no peakValue is set, assume the value IS the peak
+            // (Remove this once you implement proper peak tracking in your game logic)
+            const peakValue = (item as any).peakValue || item.value; 
+            const finalValue = (item as any).finalValue || (item.value * 0.7); // Simulate some got rugged
             
-            // Color coding based purely on peak multiplier
+            console.log(`MiniChart item: value=${item.value}, peak=${peakValue}, final=${finalValue}`);
+            
+            // Color coding based purely on peak multiplier (what we want to celebrate!)
             let textColor = 'text-gray-400';
             let borderColor = 'border-gray-800';
             

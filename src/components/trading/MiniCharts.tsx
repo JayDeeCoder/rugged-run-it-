@@ -1,10 +1,16 @@
 import { FC, useEffect, useState, useRef } from 'react';
 import { GameResult, CandlestickData } from '../../types/trade';
 
+// Extended GameResult interface to include peak tracking
+interface ExtendedGameResult extends GameResult {
+  peakValue?: number;
+  finalValue?: number;
+}
+
 interface MiniChartProps {
-  data: GameResult[];
+  data: ExtendedGameResult[];
   maxCharts?: number;
-  onNewGame?: (result: GameResult) => void;
+  onNewGame?: (result: ExtendedGameResult) => void;
 }
 
 // Generate candlestick data showing the journey to peak and potentially down to final
@@ -67,7 +73,7 @@ const generateCandlestickData = (peakValue: number, finalValue: number): Candles
 
 const MiniCharts: FC<MiniChartProps> = ({ data = [], maxCharts = 10, onNewGame }) => {
   // Initialize with timestamps for backward compatibility
-  const [gameResults, setGameResults] = useState<GameResult[]>(() => {
+  const [gameResults, setGameResults] = useState<ExtendedGameResult[]>(() => {
     // Add timestamps to any data items missing them
     return data.map((item, index) => ({
       ...item,
@@ -86,8 +92,8 @@ const MiniCharts: FC<MiniChartProps> = ({ data = [], maxCharts = 10, onNewGame }
     if (data.length > 0) {
       // Make sure all items have timestamps and candleData
       const updatedResults = data.map(item => {
-        const peakValue = item.peakValue || item.value;
-        const finalValue = item.finalValue || item.value;
+        const peakValue = (item as any).peakValue || item.value;
+        const finalValue = (item as any).finalValue || item.value;
         
         return {
           ...item,
@@ -133,8 +139,8 @@ const MiniCharts: FC<MiniChartProps> = ({ data = [], maxCharts = 10, onNewGame }
           </div>
         ) : (
           gameResults.slice(0, dynamicMaxCharts).map((item, index) => {
-            const peakValue = item.peakValue || item.value;
-            const finalValue = item.finalValue || item.value;
+            const peakValue = (item as any).peakValue || item.value;
+            const finalValue = (item as any).finalValue || item.value;
             
             // Color coding based purely on peak multiplier
             let textColor = 'text-gray-400';

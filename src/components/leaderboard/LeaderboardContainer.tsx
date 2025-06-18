@@ -1,5 +1,5 @@
 // src/components/leaderboard/LeaderboardContainer.tsx
-// 🚀 ENHANCED: Container with NEW XP SYSTEM integration
+// 🚀 ENHANCED: Container with TOP 10 by WINNINGS and NEW XP SYSTEM integration
 
 import React, { FC, useState, useEffect, useRef } from 'react';
 import { LeaderboardAPI, LeaderboardEntry, UserAPI } from '../../services/api';
@@ -24,18 +24,28 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const mountedRef = useRef(true);
 
-  // 🚀 ENHANCED: Load leaderboard with new XP system ordering
+  // 🚀 ENHANCED: Load TOP 10 leaderboard by WINNINGS with new XP system ordering
   const loadLeaderboardData = async () => {
     try {
-      console.log(`📊 Loading ${period} leaderboard with NEW XP SYSTEM...`);
+      console.log(`📊 Loading ${period} TOP 10 RUGGERS by winnings with NEW XP SYSTEM...`);
       setLoading(true);
       setError(null);
       
       // Get leaderboard data from enhanced API
       const leaderboardData = await LeaderboardAPI.getLeaderboard(period);
       
-      // 🚀 NEW: Enhanced sorting that considers XP system
-      const enhancedEntries = leaderboardData.map((entry, index) => {
+      // 🚀 MODIFIED: Sort by total winnings (positive profits only) and take top 10
+      const sortedByWinnings = leaderboardData
+        .filter(entry => entry.total_profit > 0) // Only show players with winnings
+        .sort((a, b) => {
+          const aWinnings = Math.max(0, a.total_profit);
+          const bWinnings = Math.max(0, b.total_profit);
+          return bWinnings - aWinnings; // Sort by highest winnings first
+        })
+        .slice(0, 10); // 🚀 TOP 10 ONLY
+
+      // 🚀 ENHANCED: Add computed XP data and proper ranking
+      const enhancedEntries = sortedByWinnings.map((entry, index) => {
         // Calculate enhanced level progress using UserAPI
         const levelProgress = UserAPI.calculateLevelProgress({
           level: entry.level,
@@ -46,7 +56,7 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
 
         return {
           ...entry,
-          rank: index + 1, // Update rank based on new ordering
+          rank: index + 1, // Rank 1-10 based on winnings
           // Add computed XP data for display
           levelProgress,
           isEarlyLevel: entry.level <= 3,
@@ -56,7 +66,7 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
 
       if (mountedRef.current) {
         setEntries(enhancedEntries);
-        console.log(`✅ Loaded ${enhancedEntries.length} enhanced leaderboard entries`);
+        console.log(`✅ Loaded TOP ${enhancedEntries.length} ruggers by winnings (${enhancedEntries.length > 0 ? enhancedEntries[0].total_profit.toFixed(2) : '0'} - ${enhancedEntries.length > 0 ? enhancedEntries[enhancedEntries.length - 1].total_profit.toFixed(2) : '0'} SOL)`);
 
         // 🚀 NEW: Get current user's full data if available
         if (currentUserId) {
@@ -83,10 +93,10 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
         }
       }
     } catch (error) {
-      console.error('❌ Error loading enhanced leaderboard:', error);
+      console.error('❌ Error loading enhanced TOP 10 ruggerboard:', error);
       if (mountedRef.current) {
-        setError(error instanceof Error ? error.message : 'Failed to load leaderboard');
-        toast.error('Failed to load leaderboard data');
+        setError(error instanceof Error ? error.message : 'Failed to load ruggerboard');
+        toast.error('Failed to load ruggerboard data');
       }
     } finally {
       if (mountedRef.current) {
@@ -101,19 +111,19 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
       const socket = await sharedSocket.getSocket();
       
       if (!socket || !mountedRef.current) {
-        console.log('📊 Leaderboard: No socket connection, using polling updates');
+        console.log('📊 RuggerBoard: No socket connection, using polling updates');
         return;
       }
 
-      console.log('📊 Leaderboard: Setting up enhanced real-time updates...');
+      console.log('📊 RuggerBoard: Setting up enhanced real-time updates...');
       setSocketConnected(true);
 
       // 🚀 ENHANCED: Listen for XP and level-related events
       const handleLeaderboardUpdate = (data: any) => {
         if (!mountedRef.current) return;
         
-        console.log('📊 Leaderboard: Real-time update received:', data?.type || 'unknown');
-        loadLeaderboardData(); // Refresh with new XP calculations
+        console.log('📊 RuggerBoard: Real-time update received:', data?.type || 'unknown');
+        loadLeaderboardData(); // Refresh with new XP calculations and winnings sorting
       };
 
       const handleXPUpdate = (data: any) => {
@@ -172,7 +182,7 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
       };
 
     } catch (error) {
-      console.warn('⚠️ Leaderboard: Could not set up enhanced real-time updates:', error);
+      console.warn('⚠️ RuggerBoard: Could not set up enhanced real-time updates:', error);
       setSocketConnected(false);
     }
   };
@@ -190,13 +200,13 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
       cleanup = cleanupFn;
     });
 
-    // 🚀 ENHANCED: More frequent updates for XP system (20 seconds)
+    // 🚀 ENHANCED: More frequent updates for XP system (15 seconds for top 10)
     updateIntervalRef.current = setInterval(() => {
       if (mountedRef.current) {
-        console.log('📊 Leaderboard: Periodic XP refresh...');
+        console.log('📊 RuggerBoard: Periodic TOP 10 XP refresh...');
         loadLeaderboardData();
       }
-    }, 20000);
+    }, 15000);
 
     return () => {
       mountedRef.current = false;
@@ -227,13 +237,13 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
 
   // 🚀 ENHANCED: Manual refresh with XP recalculation
   const handleRefresh = async () => {
-    toast.loading('Refreshing leaderboard & XP...', { id: 'leaderboard-refresh' });
+    toast.loading('Refreshing TOP 10 ruggers & XP...', { id: 'ruggerboard-refresh' });
     
     try {
       await loadLeaderboardData();
-      toast.success('Leaderboard updated with latest XP!', { id: 'leaderboard-refresh' });
+      toast.success('RuggerBoard updated with latest winnings & XP!', { id: 'ruggerboard-refresh' });
     } catch (error) {
-      toast.error('Refresh failed', { id: 'leaderboard-refresh' });
+      toast.error('Refresh failed', { id: 'ruggerboard-refresh' });
     }
   };
 
@@ -271,7 +281,7 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
     return (
       <div className="flex items-center justify-center py-8">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-        <span className="ml-3 text-gray-400">Loading leaderboard with XP data...</span>
+        <span className="ml-3 text-gray-400">Loading TOP 10 ruggers with XP data...</span>
       </div>
     );
   }
@@ -296,7 +306,7 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-2">
           <h2 className="text-xl font-bold text-white">
-            {period.charAt(0).toUpperCase() + period.slice(1)} Leaderboard
+            {period.charAt(0).toUpperCase() + period.slice(1)} Top Ruggers
           </h2>
           
           {/* Enhanced connection status with XP indicator */}
@@ -305,6 +315,7 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
               socketConnected ? 'bg-green-500' : 'bg-yellow-500'
             }`} title={socketConnected ? 'Real-time XP updates' : 'Polling updates'} />
             <span className="text-xs text-blue-400">XP</span>
+            <span className="text-xs text-gray-400">TOP 10</span>
           </div>
         </div>
         
@@ -317,19 +328,19 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
         </button>
       </div>
 
-      {/* 🚀 ENHANCED: Current user position with XP details */}
+      {/* 🚀 ENHANCED: Current user position with winnings context */}
       {currentUserId && currentUserPosition && currentUserEntry && (
         <div className="mb-4 p-3 bg-blue-600/20 border border-blue-600/30 rounded-lg">
           <div className="text-sm text-blue-400 space-y-2">
             <div className="flex items-center justify-between">
               <span>
-                Your current position: <span className="font-bold text-white">
+                You're in the TOP 10! Position: <span className="font-bold text-white">
                   #{currentUserPosition}
                 </span>
               </span>
               <div className="flex items-center space-x-2 text-xs">
+                <span className="text-green-400">+{Math.max(0, currentUserEntry.total_profit).toFixed(2)} SOL</span>
                 <span className="text-purple-400">Level {currentUserEntry.level}</span>
-                <span className="text-blue-400">{currentUserEntry.experience_points} XP</span>
               </div>
             </div>
             
@@ -370,14 +381,16 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
         </div>
       )}
 
-      {/* 🚀 ENHANCED: Show if user is not on leaderboard with XP encouragement */}
-      {currentUserId && !currentUserPosition && entries.length > 0 && (
+      {/* 🚀 ENHANCED: Show if user has winnings but not in top 10 */}
+      {currentUserId && !currentUserPosition && currentUserEntry && Math.max(0, currentUserEntry.total_profit) > 0 && (
         <div className="mb-4 p-3 bg-amber-600/20 border border-amber-600/30 rounded-lg">
           <div className="text-sm text-amber-400">
-            <div className="font-medium mb-1">You're not currently on the {period} leaderboard</div>
+            <div className="font-medium mb-1">
+              You have +{Math.max(0, currentUserEntry.total_profit).toFixed(2)} SOL winnings but aren't in the TOP 10 yet
+            </div>
             <div className="text-xs text-gray-300">
-              Keep playing to earn XP and climb the ranks! 🎮
-              {currentUserEntry && currentUserEntry.level <= 3 && (
+              Keep playing to climb the ruggerboard! 🎮
+              {currentUserEntry.level <= 3 && (
                 <span className="text-yellow-400 ml-2">Early level boost active!</span>
               )}
             </div>
@@ -385,13 +398,28 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
         </div>
       )}
 
-      {/* 🚀 ENHANCED: Render leaderboard with XP system */}
+      {/* 🚀 ENHANCED: Show if user has no winnings */}
+      {currentUserId && !currentUserPosition && (!currentUserEntry || Math.max(0, currentUserEntry.total_profit) === 0) && (
+        <div className="mb-4 p-3 bg-gray-600/20 border border-gray-600/30 rounded-lg">
+          <div className="text-sm text-gray-400">
+            <div className="font-medium mb-1">Start winning to appear on the TOP 10 RuggerBoard!</div>
+            <div className="text-xs text-gray-300">
+              Win games to earn SOL and climb the rankings 🚀
+              {currentUserEntry && currentUserEntry.level <= 3 && (
+                <span className="text-yellow-400 ml-2">3x XP boost for new players!</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🚀 ENHANCED: Render TOP 10 leaderboard with XP system */}
       <Leaderboard entries={entries} />
       
-      {/* 🚀 ENHANCED: Status footer with XP system info */}
+      {/* 🚀 ENHANCED: Status footer with TOP 10 and XP system info */}
       <div className="mt-4 text-center text-xs text-gray-500 space-y-1">
         <div>
-          {entries.length} entries • {socketConnected ? 'Real-time XP' : 'Polling'} updates
+          TOP {entries.length} ruggers by winnings • {socketConnected ? 'Real-time XP' : 'Polling'} updates
           {!socketConnected && (
             <span className="ml-2 text-yellow-400" title="WebSocket unavailable, using periodic updates">
               ⚠️ Limited connectivity
@@ -400,12 +428,17 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
         </div>
         
         <div className="text-xs text-gray-600">
-          Enhanced with NEW XP System • Last updated: {new Date().toLocaleTimeString()}
+          Enhanced with NEW XP System • Sorted by SOL winnings • Last updated: {new Date().toLocaleTimeString()}
         </div>
         
         {/* XP System status */}
         <div className="text-xs text-blue-400">
           XP calculations include: base play, win bonuses, risk multipliers, streaks & early level boosts
+        </div>
+        
+        {/* TOP 10 explanation */}
+        <div className="text-xs text-gray-600 mt-2">
+          Only ruggers with positive SOL winnings appear • Minimum 0.01 SOL to qualify for TOP 10
         </div>
       </div>
     </div>

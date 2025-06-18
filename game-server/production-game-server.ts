@@ -335,6 +335,20 @@ interface SystemAnalytics {
     };
 }
 
+interface BalanceAuditEntry {
+    userId: string;
+    timestamp: number;
+    operation: string;
+    balanceBefore: number;
+    balanceAfter: number;
+    amount: number;
+    gameId?: string;
+    details: string;
+}
+
+const balanceAuditLog = new Map<string, BalanceAuditEntry[]>();
+const userBalanceLocks = new Map<string, boolean>();
+const pendingOperations = new Map<string, any[]>();
 // Global analytics storage
 const userAnalyticsCache = new Map<string, UserAnalytics>();
 const gameAnalyticsHistory: GameAnalytics[] = [];
@@ -3308,6 +3322,158 @@ async function updateUserBalance(
         gameId: currentGame?.id
     });
 }
+
+function logBalanceChange(entry: BalanceAuditEntry): void {
+    const userId = entry.userId;
+    if (!balanceAuditLog.has(userId)) {
+        balanceAuditLog.set(userId, []);
+    }
+    
+    const userLog = balanceAuditLog.get(userId)!;
+    userLog.push(entry);
+    
+    // Keep only last 50 entries per user
+    if (userLog.length > 50) {
+        userLog.shift();
+    }
+    
+    // Log significant changes
+    if (Math.abs(entry.amount) > 0.1) {
+        console.log(`💰 AUDIT: ${entry.operation} for ${userId}: ${entry.balanceBefore.toFixed(6)} → ${entry.balanceAfter.toFixed(6)} SOL (${entry.amount >= 0 ? '+' : ''}${entry.amount.toFixed(6)})`);
+    }
+}
+
+async function processBalanceUpdateWithAudit(
+    userId: string, 
+    amount: number, 
+    transactionType: string
+): Promise<number | null> {
+    try {
+        // Get balance before update
+        const { data: beforeData } = await supabaseService
+            .from('users_unified')
+            .select('custodial_balance')
+            .eq('id', userId)
+            .single();
+        
+        const balanceBefore = parseFloat(beforeData?.custodial_balance || '0');
+        
+        console.log(`💰 AUDIT: Starting ${transactionType} for ${userId}: ${balanceBefore.toFixed(6)} SOL ${amount >= 0 ? '+' : ''}${amount.toFixed(6)} SOL`);
+        
+        const { data: balanceResult, error: balanceError } = await supabaseService
+            .rpc('update_unified_user_balance', {
+                p_user_id: userId,
+                p_custodial_change: amount,
+                p_privy_change: 0,
+                p_embedded_change: 0,
+                p_transaction_type: transactionType,
+                p_transaction_id: `${transactionType}_${Date.now()}_${userId}`,
+                p_game_id: currentGame?.id || null,
+                p_is_deposit: amount > 0,
+                p_deposit_amount: amount > 0 ? amount : 0
+            });
+
+        if (balanceError) {
+            console.error(`❌ AUDIT: Balance update error for ${userId}:`, balanceError);
+            return null;
+        }
+
+        if (!balanceResult || balanceResult.length === 0) {
+            console.error(`❌ AUDIT: No balance result returned for ${userId}`);
+            return null;
+        }
+
+        const balanceAfter = parseFloat(balanceResult[0].new_custodial_balance || '0');
+        
+        // Log the change
+        logBalanceChange({
+            userId,
+            timestamp: Date.now(),
+            operation: transactionType,
+            balanceBefore,
+            balanceAfter,
+            amount,
+            gameId: currentGame?.id,
+            details: `RPC update: ${transactionType}`
+        });
+        
+        console.log(`✅ AUDIT: ${transactionType} completed for ${userId}: ${balanceBefore.toFixed(6)} → ${balanceAfter.toFixed(6)} SOL`);
+        
+        return balanceAfter;
+        
+    } catch (error) {
+        console.error(`❌ AUDIT: Balance update exception for ${userId}:`, error);
+        return null;
+    }
+}
+
+async function performBalanceConsistencyCheck(): Promise<void> {
+    try {
+        console.log('🔍 MONITOR: Performing balance consistency check...');
+        
+        const { data: users } = await supabaseService
+            .from('users_unified')
+            .select('id, username, custodial_balance')
+            .not('custodial_balance', 'is', null)
+            .limit(100);
+
+        let inconsistencies = 0;
+        
+        for (const user of users || []) {
+            const userId = user.id;
+            const currentBalance = parseFloat(user.custodial_balance);
+            
+            // Calculate balance from transaction history
+            const { data: transactions } = await supabaseService
+                .from('balance_transactions')
+                .select('amount')
+                .eq('user_id', userId);
+            
+            const calculatedBalance = (transactions || []).reduce((sum, tx) => sum + parseFloat(tx.amount), 0);
+            const difference = Math.abs(currentBalance - calculatedBalance);
+            
+            if (difference > 0.001) {
+                inconsistencies++;
+                console.warn(`⚠️ MONITOR: Balance inconsistency for ${user.username} (${userId}): DB=${currentBalance.toFixed(6)}, Calculated=${calculatedBalance.toFixed(6)}, Diff=${difference.toFixed(6)}`);
+                
+                // Emit alert to admin clients
+                io.to('admin_monitoring').emit('balanceInconsistency', {
+                    userId,
+                    username: user.username,
+                    databaseBalance: currentBalance,
+                    calculatedBalance,
+                    difference,
+                    timestamp: Date.now()
+                });
+            }
+        }
+        
+        console.log(`✅ MONITOR: Balance consistency check complete. ${inconsistencies} inconsistencies found.`);
+        
+    } catch (error) {
+        console.error('❌ MONITOR: Balance consistency check failed:', error);
+    }
+}
+
+function broadcastBalanceUpdate(userId: string, newBalance: number, reason: string): void {
+    io.emit('custodialBalanceUpdate', {
+        userId,
+        custodialBalance: newBalance,
+        updateType: reason,
+        timestamp: Date.now(),
+        source: 'balance_monitoring'
+    });
+    
+    // Also send user-specific update
+    io.emit('userBalanceUpdate', {
+        userId,
+        balanceType: 'custodial',
+        newBalance,
+        transactionType: reason,
+        timestamp: Date.now(),
+        source: 'balance_monitoring'
+    });
+}
 // New function to get user stats for leaderboards/dashboard
 async function getUserStats(userId: string): Promise<any | null> {
     try {
@@ -6077,91 +6243,6 @@ io.on('connection', (socket: Socket) => {
     });
 
 // 🔧 FIXED: Complete socket handlers with proper error handling
-
-// Custodial Bet Handler
-socket.on('custodialBet', async (data) => {
-    const { userId, betAmount } = data;
-    
-    try {
-        console.log(`🎯 Processing custodial bet from ${userId}: ${betAmount} SOL`);
-        
-        // 🔧 CRITICAL: Input validation
-        if (!userId || typeof userId !== 'string') {
-            socket.emit('custodialBetResult', {
-                success: false,
-                reason: 'Invalid user ID provided',
-                userId,
-                betAmount,
-                timestamp: Date.now()
-            });
-            return;
-        }
-        
-        if (!betAmount || typeof betAmount !== 'number' || betAmount <= 0) {
-            socket.emit('custodialBetResult', {
-                success: false,
-                reason: 'Invalid bet amount provided',
-                userId,
-                betAmount,
-                timestamp: Date.now()
-            });
-            return;
-        }
-        
-        // Call the custodial bet function
-        const result = await placeBetFromCustodialBalance(userId, betAmount);
-        
-        console.log(`📊 Custodial bet result for ${userId}:`, result);
-        
-        // 🔧 CRITICAL: Always emit complete response
-        socket.emit('custodialBetResult', {
-            success: result.success,
-            reason: result.reason,
-            entryMultiplier: result.entryMultiplier,
-            custodialBalance: result.custodialBalance,
-            userId,
-            betAmount,
-            timestamp: Date.now(),
-            gameState: currentGame ? {
-                gameId: currentGame.id,
-                gameNumber: currentGame.gameNumber,
-                status: currentGame.status,
-                multiplier: currentGame.currentMultiplier,
-                totalBets: currentGame.totalBets,
-                totalPlayers: currentGame.totalPlayers,
-                countdown: currentGame.status === 'waiting' ? countdownTimeRemaining * 1000 : undefined
-            } : null
-        });
-        
-        // Broadcast bet placement to all clients if successful
-        if (result.success && currentGame) {
-            io.emit('custodialBetPlaced', {
-                gameId: currentGame.id,
-                userId,
-                betAmount,
-                entryMultiplier: result.entryMultiplier,
-                totalBets: currentGame.totalBets,
-                totalPlayers: currentGame.totalPlayers,
-                gameStatus: currentGame.status,
-                betType: 'custodial',
-                timestamp: Date.now()
-            });
-        }
-        
-    } catch (error) {
-        console.error('❌ Socket custodial bet processing error:', error);
-        
-        // 🔧 CRITICAL: Always emit response, even on error
-        socket.emit('custodialBetResult', {
-            success: false,
-            reason: error instanceof Error ? error.message : 'Server error processing bet request',
-            userId,
-            betAmount,
-            timestamp: Date.now()
-        });
-    }
-});
-
 // 🔧 FIXED: Custodial Cashout Handler (your current code was missing catch block)
 socket.on('custodialCashOut', async (data) => {
     const { userId, walletAddress } = data;
@@ -6478,6 +6559,39 @@ setInterval(async () => {
     }
 }, 30000);
 
+// Real-time balance monitoring
+setInterval(() => {
+    // Check for stuck balance locks
+    const stuckLocks = [];
+    for (const [userId, isLocked] of userBalanceLocks) {
+        if (isLocked) {
+            stuckLocks.push(userId);
+        }
+    }
+    
+    if (stuckLocks.length > 0) {
+        console.warn(`⚠️ MONITOR: ${stuckLocks.length} stuck balance locks detected:`, stuckLocks);
+        
+        // Auto-release locks older than 30 seconds
+        stuckLocks.forEach(userId => {
+            setTimeout(() => {
+                userBalanceLocks.delete(userId);
+                console.log(`🔓 MONITOR: Auto-released stuck lock for ${userId}`);
+            }, 30000);
+        });
+    }
+    
+    // Check for pending operations
+    const pendingCount = Array.from(pendingOperations.values()).reduce((sum, ops) => sum + ops.length, 0);
+    if (pendingCount > 0) {
+        console.log(`⏳ MONITOR: ${pendingCount} pending balance operations`);
+    }
+    
+}, 60000); // Check every minute
+
+// Run consistency check every 30 minutes
+setInterval(performBalanceConsistencyCheck, 30 * 60 * 1000);
+
 // Enhanced Privy wallet monitoring (every 2 minutes)
 setInterval(async () => {
     try {
@@ -6724,6 +6838,137 @@ app.get('/api/debug/rpc-test', async (req, res): Promise<void> => {
     }
 });
 
+// Get user's balance audit log
+app.get('/api/debug/balance-audit/:userId', async (req, res): Promise<void> => {
+    try {
+        const adminKey = req.headers['x-admin-key'] || req.query.adminKey;
+        
+        if (adminKey !== process.env.ADMIN_SECRET_KEY) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        const { userId } = req.params;
+        const auditLog = balanceAuditLog.get(userId) || [];
+        
+        // Get recent transactions from database
+        const { data: dbTransactions } = await supabaseService
+            .from('balance_transactions')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+        // Get current balance
+        const { data: currentUser } = await supabaseService
+            .from('users_unified')
+            .select('custodial_balance, username')
+            .eq('id', userId)
+            .single();
+
+        res.json({
+            success: true,
+            userId,
+            username: currentUser?.username,
+            currentBalance: parseFloat(currentUser?.custodial_balance || '0'),
+            auditLog: auditLog.slice(-20), // Last 20 audit entries
+            recentTransactions: dbTransactions || [],
+            lockStatus: {
+                isLocked: userBalanceLocks.has(userId),
+                pendingOperations: pendingOperations.get(userId)?.length || 0
+            },
+            timestamp: Date.now()
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            error: 'Audit retrieval failed',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+
+// Force unlock a user's balance
+app.post('/api/debug/unlock-balance/:userId', async (req, res): Promise<void> => {
+    try {
+        const adminKey = req.headers['x-admin-key'] || req.query.adminKey;
+        
+        if (adminKey !== process.env.ADMIN_SECRET_KEY) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        const { userId } = req.params;
+        
+        const wasLocked = userBalanceLocks.has(userId);
+        userBalanceLocks.delete(userId);
+        
+        const pendingOps = pendingOperations.get(userId)?.length || 0;
+        pendingOperations.delete(userId);
+        
+        console.log(`🔓 ADMIN: Force unlocked balance for ${userId} (was locked: ${wasLocked}, pending ops: ${pendingOps})`);
+        
+        res.json({
+            success: true,
+            userId,
+            wasLocked,
+            pendingOperations: pendingOps,
+            message: 'Balance unlocked successfully',
+            timestamp: Date.now()
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            error: 'Unlock failed',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
+
+// Get system balance status
+app.get('/api/debug/balance-system-status', async (req, res): Promise<void> => {
+    try {
+        const adminKey = req.headers['x-admin-key'] || req.query.adminKey;
+        
+        if (adminKey !== process.env.ADMIN_SECRET_KEY) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+
+        const lockedUsers = Array.from(userBalanceLocks.keys());
+        const pendingUsers = Array.from(pendingOperations.keys());
+        const totalPendingOps = Array.from(pendingOperations.values()).reduce((sum, ops) => sum + ops.length, 0);
+        
+        res.json({
+            success: true,
+            systemStatus: {
+                lockedUsers: lockedUsers.length,
+                usersWithPendingOps: pendingUsers.length,
+                totalPendingOperations: totalPendingOps,
+                lockedUsersList: lockedUsers,
+                pendingUsersList: pendingUsers
+            },
+            auditSystem: {
+                usersWithAuditLogs: balanceAuditLog.size,
+                totalAuditEntries: Array.from(balanceAuditLog.values()).reduce((sum, log) => sum + log.length, 0)
+            },
+            gameStatus: currentGame ? {
+                gameId: currentGame.id,
+                gameNumber: currentGame.gameNumber,
+                status: currentGame.status,
+                totalPlayers: currentGame.totalPlayers,
+                activeBets: currentGame.activeBets.size
+            } : null,
+            timestamp: Date.now()
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            error: 'Status check failed',
+            details: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+});
 // Also fix the check-pending debug endpoint
 app.get('/api/debug/check-pending', async (req, res): Promise<void> => {
     try {

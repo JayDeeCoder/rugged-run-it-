@@ -1,4 +1,5 @@
-// Enhanced Leaderboard Component with NEW XP SYSTEM from users_unified
+// src/components/leaderboard/Leaderboard.tsx
+// Enhanced Leaderboard Component with TOP 10 and CORRECT VALUES
 import { FC, useState, useEffect } from 'react';
 import { LeaderboardEntry, UserAPI } from '../../services/api';
 import { Crown, Star, Medal, Trophy, TrendingUp, Zap, Shield, Award, Activity, BarChart3, TrendingDown } from 'lucide-react';
@@ -78,36 +79,34 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
     }
   };
 
-  // Format SOL amount with proper styling
-  const formatSolWins = (profit: number) => {
-    const isPositive = profit >= 0;
-    const absProfit = Math.abs(profit);
+  // 🚀 FIXED: Format SOL winnings (total won, not profit)
+  const formatSolWinnings = (totalProfit: number) => {
+    // Show only positive winnings (total won)
+    const winnings = Math.max(0, totalProfit);
     
-    if (absProfit >= 1000) {
+    if (winnings >= 1000) {
       return {
-        text: `${isPositive ? '+' : '-'}${(absProfit / 1000).toFixed(1)}k`,
-        color: isPositive ? 'text-green-400' : 'text-red-400'
+        text: `+${(winnings / 1000).toFixed(1)}k`,
+        color: 'text-green-400'
       };
     }
     
     return {
-      text: `${isPositive ? '+' : '-'}${absProfit.toFixed(2)}`,
-      color: isPositive ? 'text-green-400' : 'text-red-400'
+      text: `+${winnings.toFixed(2)}`,
+      color: 'text-green-400'
     };
   };
 
-  // Format percentage
-  const formatPercentage = (percentage: number) => {
-    const isPositive = percentage >= 0;
+  // 🚀 FIXED: Format win rate correctly
+  const formatWinRate = (winRate: number) => {
     return {
-      text: `${isPositive ? '+' : ''}${percentage.toFixed(1)}%`,
-      color: isPositive ? 'text-green-400' : 'text-red-400'
+      text: `${winRate.toFixed(1)}%`,
+      color: winRate >= 50 ? 'text-green-400' : winRate >= 30 ? 'text-yellow-400' : 'text-red-400'
     };
   };
 
   // 🚀 NEW: Use the enhanced XP system from UserAPI
   const calculateLevelProgress = (user: LeaderboardEntry) => {
-    // Use the new UserAPI method for accurate level progress calculation
     return UserAPI.calculateLevelProgress({
       level: user.level,
       experience_points: user.experience_points,
@@ -166,7 +165,7 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
 
   const loadTradeHistoryForUser = async (userId: string) => {
     if (userTradeHistory[userId] || loadingTradeHistory[userId]) {
-      return; // Already loaded or loading
+      return;
     }
 
     setLoadingTradeHistory(prev => ({ ...prev, [userId]: true }));
@@ -196,7 +195,6 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
     const newExpandedEntry = expandedEntry === entryId ? null : entryId;
     setExpandedEntry(newExpandedEntry);
     
-    // Load trade history when expanding
     if (newExpandedEntry) {
       loadTradeHistoryForUser(entryId);
     }
@@ -247,7 +245,6 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
           )}
         </h4>
 
-        {/* Individual Trades */}
         <div className="space-y-2">
           {tradeData.trades.slice(0, 3).map((trade: any, index: number) => (
             <div 
@@ -299,25 +296,27 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
     );
   };
 
-  if (entries.length === 0) {
+  // 🚀 TOP 10 CHECK: Ensure we only show top 10
+  const displayEntries = entries.slice(0, 10);
+
+  if (displayEntries.length === 0) {
     return (
       <div className="text-center py-8 text-gray-400">
         <Trophy size={48} className="mx-auto mb-4 text-gray-600" />
-        <p>No ruggerboard entries found</p>
+        <p>No top ruggers found</p>
       </div>
     );
   }
 
   return (
     <div className="divide-y divide-gray-800">
-      {entries.map((entry) => {
+      {displayEntries.map((entry, index) => {
         const badgeInfo = getBadgeInfo(entry.badge);
-        const solWinsFormatted = formatSolWins(entry.total_profit);
-        const percentageFormatted = formatPercentage(entry.profit_percentage);
-        const rankStyling = getRankStyling(entry.rank);
+        const solWinningsFormatted = formatSolWinnings(entry.total_profit);
+        const winRateFormatted = formatWinRate(entry.win_rate);
+        const rankStyling = getRankStyling(index + 1); // Use index + 1 for rank
         const isExpanded = expandedEntry === entry.id;
         
-        // 🚀 NEW: Use enhanced XP system calculations
         const levelProgress = calculateLevelProgress(entry);
         const levelInfo = getLevelInfo(entry.level);
 
@@ -328,15 +327,15 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
               className={`
                 flex items-center py-4 px-4 sm:px-6 cursor-pointer
                 transition-all duration-150
-                ${entry.rank <= 3 ? 'bg-gradient-to-r from-yellow-900/10 to-transparent' : 'hover:bg-gray-800/30'}
+                ${(index + 1) <= 3 ? 'bg-gradient-to-r from-yellow-900/10 to-transparent' : 'hover:bg-gray-800/30'}
                 ${isExpanded ? 'bg-gray-800/50' : ''}
               `}
               onClick={() => toggleExpanded(entry.id)}
             >
               {/* Rank with special styling for top 3 */}
               <div className={`w-12 sm:w-16 text-center ${rankStyling} relative flex items-center justify-center`}>
-                <span className="relative z-10">#{entry.rank}</span>
-                {getRankIcon(entry.rank)}
+                <span className="relative z-10">#{index + 1}</span>
+                {getRankIcon(index + 1)}
               </div>
               
               {/* User Info */}
@@ -344,7 +343,7 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
                 {/* Avatar */}
                 <div className="mr-3 text-lg sm:text-xl flex-shrink-0 relative">
                   <span className="relative z-10">{entry.avatar || '👤'}</span>
-                  {entry.rank <= 3 && (
+                  {(index + 1) <= 3 && (
                     <div className="absolute -top-1 -right-1 w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
                   )}
                 </div>
@@ -373,9 +372,9 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
                     )}
                   </div>
                   
-                  {/* Essential Stats - Cleaned up */}
+                  {/* Essential Stats */}
                   <div className="flex items-center gap-3 text-xs text-gray-400">
-                    <span className="text-green-400">{entry.win_rate.toFixed(1)}% win</span>
+                    <span className={winRateFormatted.color}>{winRateFormatted.text} win</span>
                     <span>•</span>
                     <span>{entry.games_played} games</span>
                     <span>•</span>
@@ -398,16 +397,16 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
                 </div>
               </div>
               
-              {/* Performance Stats - Focused on SOL wins */}
+              {/* 🚀 FIXED: Performance Stats - Win rate and total winnings */}
               <div className="text-right flex-shrink-0 w-24 sm:w-28">
-                {/* Win percentage */}
-                <div className={`font-semibold text-sm sm:text-base ${percentageFormatted.color} mb-1`}>
-                  {percentageFormatted.text}
+                {/* 🚀 FIXED: Show actual win rate */}
+                <div className={`font-semibold text-sm sm:text-base ${winRateFormatted.color} mb-1`}>
+                  {winRateFormatted.text}
                 </div>
                 
-                {/* Accumulative SOL Wins with Solana logo */}
-                <div className={`text-sm font-medium ${solWinsFormatted.color} flex items-center justify-end`}>
-                  <span className="mr-1">{solWinsFormatted.text}</span>
+                {/* 🚀 FIXED: Show total winnings with Solana logo */}
+                <div className={`text-sm font-medium ${solWinningsFormatted.color} flex items-center justify-end`}>
+                  <span className="mr-1">{solWinningsFormatted.text}</span>
                   <SolanaLogo size={14} />
                 </div>
               </div>
@@ -477,6 +476,13 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
           </div>
         );
       })}
+      
+      {/* 🚀 NEW: Top 10 indicator */}
+      {displayEntries.length === 10 && (
+        <div className="text-center py-4 text-gray-500 text-sm border-t border-gray-800">
+          Showing Top 10 Ruggers • More ruggers playing below
+        </div>
+      )}
     </div>
   );
 };

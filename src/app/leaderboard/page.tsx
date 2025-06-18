@@ -369,11 +369,16 @@ const LeaderboardPage: FC = () => {
       console.log('🔄 RuggerBoard REAL-TIME: Refreshing top 10 data...');
       
       try {
-        // 🚀 MODIFIED: Get top 10 only, ordered by total winnings
+        // 🚀 MODIFIED: Sort by total winnings (total_won, same as dashboard) and take top 10
         const data = await LeaderboardAPI.getLeaderboard(period);
         const sortedByWinnings = data
-          .sort((a, b) => Math.max(0, b.total_profit) - Math.max(0, a.total_profit))
-          .slice(0, 10); // 🚀 TOP 10 ONLY
+          .filter(entry => (entry.total_won || entry.total_profit) > 0) // Only show players with winnings
+          .sort((a, b) => {
+            const aWinnings = a.total_won || Math.max(0, a.total_profit);
+            const bWinnings = b.total_won || Math.max(0, b.total_profit);
+            return bWinnings - aWinnings; // Sort by highest winnings first
+          })
+          .slice(0, 10);
         
         setLeaderboardData(prevData => {
           if (JSON.stringify(prevData) !== JSON.stringify(sortedByWinnings)) {

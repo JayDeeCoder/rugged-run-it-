@@ -34,12 +34,12 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
       // Get leaderboard data from enhanced API
       const leaderboardData = await LeaderboardAPI.getLeaderboard(period);
       
-      // 🚀 MODIFIED: Sort by total winnings (positive profits only) and take top 10
+      // 🚀 MODIFIED: Sort by total winnings (total_won, same as dashboard) and take top 10
       const sortedByWinnings = leaderboardData
-        .filter(entry => entry.total_profit > 0) // Only show players with winnings
+        .filter(entry => (entry.total_won || entry.total_profit) > 0) // Only show players with winnings
         .sort((a, b) => {
-          const aWinnings = Math.max(0, a.total_profit);
-          const bWinnings = Math.max(0, b.total_profit);
+          const aWinnings = a.total_won || Math.max(0, a.total_profit);
+          const bWinnings = b.total_won || Math.max(0, b.total_profit);
           return bWinnings - aWinnings; // Sort by highest winnings first
         })
         .slice(0, 10); // 🚀 TOP 10 ONLY
@@ -66,7 +66,7 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
 
       if (mountedRef.current) {
         setEntries(enhancedEntries);
-        console.log(`✅ Loaded TOP ${enhancedEntries.length} ruggers by winnings (${enhancedEntries.length > 0 ? enhancedEntries[0].total_profit.toFixed(2) : '0'} - ${enhancedEntries.length > 0 ? enhancedEntries[enhancedEntries.length - 1].total_profit.toFixed(2) : '0'} SOL)`);
+                console.log(`✅ Loaded TOP ${enhancedEntries.length} ruggers by total winnings (${enhancedEntries.length > 0 ? (enhancedEntries[0].total_won || enhancedEntries[0].total_profit).toFixed(2) : '0'} - ${enhancedEntries.length > 0 ? (enhancedEntries[enhancedEntries.length - 1].total_won || enhancedEntries[enhancedEntries.length - 1].total_profit).toFixed(2) : '0'} SOL)`);  
 
         // 🚀 NEW: Get current user's full data if available
         if (currentUserId) {
@@ -339,7 +339,7 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
                 </span>
               </span>
               <div className="flex items-center space-x-2 text-xs">
-                <span className="text-green-400">+{Math.max(0, currentUserEntry.total_profit).toFixed(2)} SOL</span>
+                <span className="text-green-400">+{(currentUserEntry.total_won || Math.max(0, currentUserEntry.total_profit)).toFixed(2)} SOL</span>
                 <span className="text-purple-400">Level {currentUserEntry.level}</span>
               </div>
             </div>
@@ -382,11 +382,11 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
       )}
 
       {/* 🚀 ENHANCED: Show if user has winnings but not in top 10 */}
-      {currentUserId && !currentUserPosition && currentUserEntry && Math.max(0, currentUserEntry.total_profit) > 0 && (
+      {currentUserId && !currentUserPosition && currentUserEntry && (currentUserEntry.total_won || Math.max(0, currentUserEntry.total_profit)) > 0 && (
         <div className="mb-4 p-3 bg-amber-600/20 border border-amber-600/30 rounded-lg">
           <div className="text-sm text-amber-400">
             <div className="font-medium mb-1">
-              You have +{Math.max(0, currentUserEntry.total_profit).toFixed(2)} SOL winnings but aren't in the TOP 10 yet
+              You have +{(currentUserEntry.total_won || Math.max(0, currentUserEntry.total_profit)).toFixed(2)} SOL winnings but aren't in the TOP 10 yet
             </div>
             <div className="text-xs text-gray-300">
               Keep playing to climb the ruggerboard! 🎮
@@ -399,7 +399,7 @@ const LeaderboardContainer: FC<LeaderboardContainerProps> = ({
       )}
 
       {/* 🚀 ENHANCED: Show if user has no winnings */}
-      {currentUserId && !currentUserPosition && (!currentUserEntry || Math.max(0, currentUserEntry.total_profit) === 0) && (
+      {currentUserId && !currentUserPosition && (!currentUserEntry || (currentUserEntry.total_won || Math.max(0, currentUserEntry.total_profit)) === 0) && (
         <div className="mb-4 p-3 bg-gray-600/20 border border-gray-600/30 rounded-lg">
           <div className="text-sm text-gray-400">
             <div className="font-medium mb-1">Start winning to appear on the TOP 10 RuggerBoard!</div>

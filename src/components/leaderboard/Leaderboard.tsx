@@ -79,10 +79,10 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
     }
   };
 
-  // 🚀 FIXED: Format SOL winnings (total won, not profit)
-  const formatSolWinnings = (totalProfit: number) => {
-    // Show only positive winnings (total won)
-    const winnings = Math.max(0, totalProfit);
+  // 🚀 FIXED: Format SOL winnings (total won, same as dashboard)
+  const formatSolWinnings = (entry: LeaderboardEntry) => {
+    // Use total_won field (same as dashboard "Won" SOL) instead of profit
+    const winnings = entry.total_won || Math.max(0, entry.total_profit);
     
     if (winnings >= 1000) {
       return {
@@ -312,7 +312,7 @@ const Leaderboard: FC<LeaderboardProps> = ({ entries }) => {
     <div className="divide-y divide-gray-800">
       {displayEntries.map((entry, index) => {
         const badgeInfo = getBadgeInfo(entry.badge);
-        const solWinningsFormatted = formatSolWinnings(entry.total_profit);
+        const solWinningsFormatted = formatSolWinnings(entry);
         const winRateFormatted = formatWinRate(entry.win_rate);
         const rankStyling = getRankStyling(index + 1); // Use index + 1 for rank
         const isExpanded = expandedEntry === entry.id;

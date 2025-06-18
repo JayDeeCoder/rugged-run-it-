@@ -405,7 +405,7 @@ const ChartContainer: FC<ChartContainerProps> = ({
     if (useMobileHeight && isMobile) {
       return 240;
     }
-    return isMobile ? 260 : 716;
+    return isMobile ? 260 : 705;
   };
 
   // 🚀 ENHANCED: Real game data from server and shared state with correct calculations

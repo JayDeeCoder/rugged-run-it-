@@ -61,6 +61,8 @@ export interface GameResult {
   label: string;
   timestamp: number;
   candleData?: CandlestickData[];
+  peakValue?: number;     // Highest multiplier reached during the game
+  finalValue?: number;  
 }
 
 export interface CandlestickData {
